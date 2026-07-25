@@ -8,7 +8,7 @@ import HotStreakCard from '@/components/trends/HotStreakCard';
 import { cn } from '@/lib/utils';
 import TeamLogo from '@/components/common/TeamLogo';
 
-import { NBA_API } from '@/lib/config';
+import { NFL_API } from '@/lib/config';
 
 const labelMap = { points: 'PPG', rebounds: 'RPG', assists: 'APG', '3PM': '3PM', steals: 'SPG', blocks: 'BPG', PRA: 'PRA', 'P+R': 'P+R', 'P+A': 'P+A', 'A+R': 'A+R' };
 const iconMap  = { points: TrendingUp, rebounds: Activity, assists: Target, '3PM': Zap, steals: Clock, blocks: Clock, PRA: TrendingUp };
@@ -27,7 +27,7 @@ function getHotStreakPlayers(players) {
 
 /** Fetch real game logs for a player from the backend (all prop types at once) */
 async function fetchPlayerGameLogs(playerName) {
-  const res = await fetch(`${NBA_API}/api/player-gamelogs`, {
+  const res = await fetch(`${NFL_API}/api/player-gamelogs`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ playerName }),

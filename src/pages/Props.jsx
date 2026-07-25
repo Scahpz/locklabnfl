@@ -8,7 +8,7 @@ import { RefreshCw, Wifi, WifiOff, Zap, SlidersHorizontal, Search, X } from 'luc
 import PlayerRow from '@/components/props/PlayerRow';
 import { cn } from '@/lib/utils';
 import { rankScore, gradeProp } from '@/lib/grading';
-import { NBA_API } from '@/lib/config';
+import { NFL_API } from '@/lib/config';
 import { TEAM_STATS } from '@/lib/teamStats';
 import PropDetailModal from '@/components/props/PropDetailModal';
 
@@ -38,7 +38,7 @@ async function fetchBulkGameLogs(names) {
   // 50s per chunk — Railway cold-starts + ESPN scoreboard pre-warm can take 30-40s
   const timer = setTimeout(() => ctrl.abort(), 50000);
   try {
-    const res = await fetch(`${NBA_API}/api/player-gamelogs-bulk`, {
+    const res = await fetch(`${NFL_API}/api/player-gamelogs-bulk`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ playerNames: names }),
@@ -51,11 +51,14 @@ async function fetchBulkGameLogs(names) {
 }
 
 const propTypeLabels = {
-  points: 'PTS', rebounds: 'REB', assists: 'AST', PRA: 'PRA',
-  '3PM': '3PM', steals: 'STL', blocks: 'BLK', 'P+R': 'P+R', 'P+A': 'P+A', 'A+R': 'A+R',
+  passing_yards: 'Pass Yds', passing_tds: 'Pass TDs', rushing_yards: 'Rush Yds',
+  rushing_tds: 'Rush TDs', receiving_yards: 'Rec Yds', receptions: 'Rec',
+  receiving_tds: 'Rec TDs', targets: 'Targets', completions: 'Completions',
+  interceptions: 'INTs', fantasy_points: 'Fantasy Pts', sacks: 'Sacks',
+  tackles: 'Tackles', kicking_points: 'Kicking Pts',
 };
 
-const PROP_TYPES = ['all', 'points', 'rebounds', 'assists', 'P+R', 'P+A', 'A+R', 'PRA', '3PM', 'steals', 'blocks'];
+const PROP_TYPES = ['all', 'passing_yards', 'rushing_yards', 'receiving_yards', 'receptions', 'passing_tds', 'rushing_tds', 'receiving_tds', 'fantasy_points'];
 const SORT_OPTIONS = [
   { value: 'ai_rank', label: 'AI Rank' },
   { value: 'confidence', label: 'Confidence' },
@@ -199,7 +202,7 @@ export default function Props() {
     if (!rawProps.length || isDemoMode()) return;
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 10000);
-    fetch(`${NBA_API}/api/team-context`, { signal: ctrl.signal })
+    fetch(`${NFL_API}/api/team-context`, { signal: ctrl.signal })
       .then(r => r.ok ? r.json() : null)
       .then(ctx => {
         if (!ctx) return;
@@ -713,7 +716,7 @@ export default function Props() {
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-foreground flex items-center gap-2">
             <Zap className="w-7 h-7 text-primary" />
-            Props
+            NFL Props
           </h1>
           <p className="text-sm text-muted-foreground mt-1 flex items-center gap-1.5">
             {isLive ? (

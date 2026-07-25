@@ -4,7 +4,7 @@ import { RefreshCw, Activity, Clock, WifiOff, Key, Check, Zap } from 'lucide-rea
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
-import { NBA_API } from '@/lib/config';
+import { NFL_API } from '@/lib/config';
 const REFRESH_MS = 5 * 60 * 1000;
 
 const ALL_BOOKS = [
@@ -36,7 +36,7 @@ export default function LiveOdds() {
 
   // Load settings on mount
   useEffect(() => {
-    fetch(`${NBA_API}/api/settings`)
+    fetch(`${NFL_API}/api/settings`)
       .then(r => r.json())
       .then(s => {
         setSettings(s);
@@ -50,7 +50,7 @@ export default function LiveOdds() {
     setSavingSettings(true);
     try {
       const newSettings = { odds_api_key: apiKeyInput.trim(), bookmakers: selectedBooks.join(',') };
-      await fetch(`${NBA_API}/api/settings`, {
+      await fetch(`${NFL_API}/api/settings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newSettings),
@@ -76,11 +76,11 @@ export default function LiveOdds() {
     setError(null);
     setCountdown(REFRESH_MS / 1000);
     try {
-      const s = await fetch(`${NBA_API}/api/settings`).then(r => r.json()).catch(() => ({}));
+      const s = await fetch(`${NFL_API}/api/settings`).then(r => r.json()).catch(() => ({}));
       const books = s.bookmakers || selectedBooks.join(',');
       const hasKey = !!s.odds_api_key;
 
-      const res = await fetch(`${NBA_API}/api/odds/games?bookmakers=${encodeURIComponent(books)}`);
+      const res = await fetch(`${NFL_API}/api/odds/games?bookmakers=${encodeURIComponent(books)}`);
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || 'Failed to fetch');

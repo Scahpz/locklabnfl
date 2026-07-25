@@ -1,4 +1,4 @@
-import { NBA_API as NBA_API_BASE } from './config';
+import { NFL_API as NFL_API_BASE } from './config';
 
 /**
  * Get real analytics for a player prop using local nba_api backend.
@@ -7,7 +7,7 @@ import { NBA_API as NBA_API_BASE } from './config';
  */
 export async function getRealPlayerAnalytics(playerName, propType, line) {
   try {
-    const res = await fetch(`${NBA_API_BASE}/api/player-stats`, {
+    const res = await fetch(`${NFL_API_BASE}/api/player-stats`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ playerName, propType, line }),

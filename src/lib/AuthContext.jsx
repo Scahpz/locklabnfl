@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { NBA_API } from './config';
+import { NFL_API } from './config';
 
 const AUTH_TOKEN_KEY = 'locklab_auth_token';
 const AuthContext = createContext();
@@ -13,7 +13,7 @@ export const AuthProvider = ({ children }) => {
     // Auth check disabled while Railway is down — restore below to re-enable
     // const storedToken = localStorage.getItem(AUTH_TOKEN_KEY);
     // if (!storedToken) { setIsLoadingAuth(false); return; }
-    // fetch(`${NBA_API}/api/auth/me`, { headers: { Authorization: `Bearer ${storedToken}` } })
+    // fetch(`${NFL_API}/api/auth/me`, { headers: { Authorization: `Bearer ${storedToken}` } })
     //   .then(res => { if (!res.ok) { localStorage.removeItem(AUTH_TOKEN_KEY); return null; } return res.json(); })
     //   .then(data => { if (data) setUser(data); })
     //   .catch(() => {})
@@ -56,14 +56,14 @@ export const AuthProvider = ({ children }) => {
   };
 
   const login = async (email, password) => {
-    const data = await doAuthFetch(`${NBA_API}/api/auth/login`, { email, password });
+    const data = await doAuthFetch(`${NFL_API}/api/auth/login`, { email, password });
     localStorage.setItem(AUTH_TOKEN_KEY, data.token);
     setUser(data.user);
     return data.user;
   };
 
   const register = async (email, password, full_name) => {
-    const data = await doAuthFetch(`${NBA_API}/api/auth/register`, { email, password, full_name });
+    const data = await doAuthFetch(`${NFL_API}/api/auth/register`, { email, password, full_name });
     localStorage.setItem(AUTH_TOKEN_KEY, data.token);
     setUser(data.user);
     return data.user;

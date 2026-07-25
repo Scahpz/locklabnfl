@@ -1,4 +1,4 @@
-import { NBA_API } from '../lib/config';
+import { NFL_API } from '../lib/config';
 
 const AUTH_TOKEN_KEY = 'locklab_auth_token';
 
@@ -13,7 +13,7 @@ async function apiRequest(path, options = {}) {
     ...(options.headers || {}),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
-  const res = await fetch(`${NBA_API}${path}`, { ...options, headers });
+  const res = await fetch(`${NFL_API}${path}`, { ...options, headers });
   if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`);
   return res.json();
 }
@@ -24,7 +24,7 @@ export const base44 = {
       const token = getToken();
       if (!token) return null;
       try {
-        const res = await fetch(`${NBA_API}/api/auth/me`, {
+        const res = await fetch(`${NFL_API}/api/auth/me`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) return null;
@@ -37,7 +37,7 @@ export const base44 = {
     updateMe: async (data) => {
       const token = getToken();
       if (!token) return null;
-      const res = await fetch(`${NBA_API}/api/auth/me`, {
+      const res = await fetch(`${NFL_API}/api/auth/me`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(data),

@@ -14,8 +14,11 @@ const RESULT_CFG = {
 };
 
 const propTypeLabels = {
-  points: 'PTS', rebounds: 'REB', assists: 'AST', PRA: 'PRA',
-  '3PM': '3PM', steals: 'STL', blocks: 'BLK', 'P+R': 'P+R', 'P+A': 'P+A', 'A+R': 'A+R',
+  passing_yards: 'Pass Yds', passing_tds: 'Pass TDs', rushing_yards: 'Rush Yds',
+  rushing_tds: 'Rush TDs', receiving_yards: 'Rec Yds', receptions: 'Rec',
+  receiving_tds: 'Rec TDs', targets: 'Targets', completions: 'Completions',
+  interceptions: 'INTs', fantasy_points: 'Fantasy Pts', sacks: 'Sacks',
+  tackles: 'Tackles', kicking_points: 'Kicking Pts',
 };
 
 function PropHistoryCard({ entry, onSettle, onDelete }) {

@@ -10,7 +10,7 @@ const FRESH_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
   }
 })();
 
-import { NBA_API } from './config';
+import { NFL_API } from './config';
 import { isDemoMode, getMockPayload } from './mockData';
 
 export function isCacheValid() {
@@ -216,10 +216,10 @@ async function _doFetch() {
   // Railway holds incoming requests while the container boots, so the same request
   // that triggered the wake-up gets served once the server is ready.
   const [settingsResult, ppResult, udResult, dkResult] = await Promise.allSettled([
-    fetchWithTimeout(`${NBA_API}/api/settings`, {}, 55000).then(r => r.json()).catch(() => ({})),
-    fetchWithTimeout(`${NBA_API}/api/prizepicks/props`, {}, 55000).then(r => r.ok ? r.json() : null).catch(() => null),
-    fetchWithTimeout(`${NBA_API}/api/underdog/props`, {}, 55000).then(r => r.ok ? r.json() : null).catch(() => null),
-    fetchWithTimeout(`${NBA_API}/api/draftkings/props`, {}, 55000).then(r => r.ok ? r.json() : null).catch(() => null),
+    fetchWithTimeout(`${NFL_API}/api/settings`, {}, 55000).then(r => r.json()).catch(() => ({})),
+    fetchWithTimeout(`${NFL_API}/api/prizepicks/props`, {}, 55000).then(r => r.ok ? r.json() : null).catch(() => null),
+    fetchWithTimeout(`${NFL_API}/api/underdog/props`, {}, 55000).then(r => r.ok ? r.json() : null).catch(() => null),
+    fetchWithTimeout(`${NFL_API}/api/draftkings/props`, {}, 55000).then(r => r.ok ? r.json() : null).catch(() => null),
   ]);
 
   const settings    = settingsResult.status === 'fulfilled' ? settingsResult.value : {};
@@ -232,7 +232,7 @@ async function _doFetch() {
   let oddsData = null;
   if (hasOddsKey) {
     oddsData = await fetchWithTimeout(
-      `${NBA_API}/api/odds/props?bookmakers=${encodeURIComponent(bookmakers)}`, {}, 10000
+      `${NFL_API}/api/odds/props?bookmakers=${encodeURIComponent(bookmakers)}`, {}, 10000
     ).then(r => r.ok ? r.json() : null).catch(() => null);
   }
 
@@ -241,7 +241,7 @@ async function _doFetch() {
 
   // Last-resort fallback
   if (!rawProps.length) {
-    const fallback = await fetchWithTimeout(`${NBA_API}/api/live-props`, {}, 55000)
+    const fallback = await fetchWithTimeout(`${NFL_API}/api/live-props`, {}, 55000)
       .then(r => r.ok ? r.json() : null).catch(() => null);
     if (fallback?.rawProps?.length) {
       rawProps = fallback.rawProps.map(p => ({ ...p, sources: [], all_books: [] }));
