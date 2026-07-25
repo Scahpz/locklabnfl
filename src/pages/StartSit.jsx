@@ -1,8 +1,12 @@
-import React, { useState, useMemo } from 'react';
-import { Trophy, Users, TrendingUp, ChevronDown, X, Search, Star, Plus } from 'lucide-react';
-import { fantasyScore, compareStartSit, rankPlayers } from '@/lib/fantasyScoring';
-import { mockPlayers, getAllProps, isDemoMode } from '@/lib/mockData';
-import { getTeamLogoUrl } from '@/lib/teamLogos';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import {
+  Trophy, Users, TrendingUp, ChevronDown, X, Search, Plus,
+  Settings, Shield, Zap, AlertTriangle, Link2, Loader2, RefreshCw, Wifi,
+} from 'lucide-react';
+import { fantasyScore, compareStartSit, rankPlayers, rankWaiverWire } from '@/lib/fantasyScoring';
+import { mockPlayers, isDemoMode, waiverPlayers } from '@/lib/mockData';
+import { getLeagueSettings, saveLeagueSettings, SCORING_FORMATS } from '@/lib/leagueSettings';
+import { fetchLivePlayers, clearLiveCache } from '@/lib/nflLiveData';
 import { cn } from '@/lib/utils';
 import TeamLogo from '@/components/common/TeamLogo';
 
@@ -21,7 +25,7 @@ const PROP_LABELS = {
 
 const POSITIONS = ['all', 'QB', 'RB', 'WR', 'TE'];
 
-// ─── Sub-components ──────────────────────────────────────────────────────────
+// ─── Shared UI primitives ─────────────────────────────────────────────────────
 
 function VerdictChip({ verdict }) {
   return (
@@ -65,12 +69,165 @@ function ScoreBar({ total }) {
   );
 }
 
+// ─── Settings Modal ───────────────────────────────────────────────────────────
+
+function SettingsModal({ settings, onSave, onClose }) {
+  const [local, setLocal] = useState({ ...settings });
+
+  function set(key, val) {
+    setLocal(prev => {
+      const next = { ...prev, [key]: val };
+      if (key === 'scoring') {
+        const fmt = SCORING_FORMATS.find(f => f.value === val);
+        if (fmt) next.recPts = fmt.recPts;
+      }
+      return next;
+    });
+  }
+
+  function ToggleGroup({ label, options, value, onChange }) {
+    return (
+      <div className="space-y-1.5">
+        <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">{label}</div>
+        <div className="flex gap-1 bg-white/4 rounded-xl p-1">
+          {options.map(opt => (
+            <button
+              key={opt.value}
+              onClick={() => onChange(opt.value)}
+              className={cn(
+                'flex-1 py-1.5 text-[11px] font-semibold rounded-lg transition-all',
+                value === opt.value
+                  ? 'bg-primary/25 text-primary border border-primary/30'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  function BoolToggle({ label, description, value, onChange }) {
+    return (
+      <div className="flex items-center justify-between py-2">
+        <div>
+          <div className="text-sm font-medium text-foreground">{label}</div>
+          {description && <div className="text-[11px] text-muted-foreground">{description}</div>}
+        </div>
+        <button
+          onClick={() => onChange(!value)}
+          className={cn(
+            'relative w-11 h-6 rounded-full transition-colors flex-shrink-0',
+            value ? 'bg-primary' : 'bg-white/15',
+          )}
+        >
+          <span className={cn(
+            'absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-all',
+            value ? 'left-6' : 'left-1',
+          )} />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-sm rounded-2xl border border-white/10 bg-[hsl(218,58%,6%)] shadow-2xl flex flex-col max-h-[90vh]">
+        <div className="flex items-center justify-between p-4 border-b border-white/6 flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <Settings className="w-4 h-4 text-primary" />
+            <h3 className="font-semibold text-foreground">League Settings</h3>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-5">
+          <ToggleGroup
+            label="Scoring Format"
+            options={SCORING_FORMATS.map(f => ({ value: f.value, label: f.label }))}
+            value={local.scoring}
+            onChange={v => set('scoring', v)}
+          />
+
+          <ToggleGroup
+            label="QB Pass TD Points"
+            options={[{ value: 4, label: '4 pts' }, { value: 6, label: '6 pts' }]}
+            value={local.passTDPts}
+            onChange={v => set('passTDPts', v)}
+          />
+
+          <ToggleGroup
+            label="League Size"
+            options={[8, 10, 12, 14].map(n => ({ value: n, label: String(n) }))}
+            value={local.leagueSize}
+            onChange={v => set('leagueSize', v)}
+          />
+
+          <ToggleGroup
+            label="Flex Slot"
+            options={[
+              { value: 'RB/WR',       label: 'RB/WR' },
+              { value: 'RB/WR/TE',    label: 'RB/WR/TE' },
+              { value: 'RB/WR/TE/QB', label: '+QB' },
+            ]}
+            value={local.flexType}
+            onChange={v => set('flexType', v)}
+          />
+
+          <div className="space-y-0 pt-1 border-t border-white/6">
+            <BoolToggle
+              label="TE Premium"
+              description="+0.5 PPR for tight ends"
+              value={local.tePremium}
+              onChange={v => set('tePremium', v)}
+            />
+            <BoolToggle
+              label="Superflex"
+              description="QB eligible in flex spot"
+              value={local.superflex}
+              onChange={v => set('superflex', v)}
+            />
+          </div>
+
+          <div className="rounded-xl bg-primary/8 border border-primary/15 p-3 text-[11px] text-muted-foreground space-y-0.5">
+            <div><span className="text-primary font-medium">Scoring:</span> {SCORING_FORMATS.find(f => f.value === local.scoring)?.description}</div>
+            <div><span className="text-primary font-medium">Pass TD:</span> {local.passTDPts} pts · <span className="text-primary font-medium">League:</span> {local.leagueSize} teams</div>
+            {local.tePremium && <div className="text-amber-400">TE Premium active (+0.5 rec pts for TEs)</div>}
+            {local.superflex && <div className="text-amber-400">Superflex active — QB value elevated</div>}
+          </div>
+        </div>
+
+        <div className="p-4 border-t border-white/6 flex gap-2 flex-shrink-0">
+          <button
+            onClick={onClose}
+            className="flex-1 py-2 rounded-xl border border-white/10 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => { onSave(local); onClose(); }}
+            className="flex-1 py-2 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-semibold transition-colors"
+          >
+            Save Settings
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Player Rank Card ─────────────────────────────────────────────────────────
+
 function PlayerRankCard({ rank, player, prop, score, onCompare }) {
   const propLabel = PROP_LABELS[prop.prop_type] ?? prop.prop_type;
 
   return (
     <div className="rounded-2xl border border-white/6 bg-[hsl(222,47%,9%)] p-4 flex items-center gap-4 hover:border-white/12 transition-colors">
-      {/* Rank */}
       <div className="w-8 text-center flex-shrink-0">
         <span className={cn(
           'text-sm font-bold',
@@ -80,10 +237,8 @@ function PlayerRankCard({ rank, player, prop, score, onCompare }) {
         </span>
       </div>
 
-      {/* Logo */}
       <TeamLogo team={player.team} className="w-9 h-9" />
 
-      {/* Player info */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm font-semibold text-foreground truncate">{player.player_name}</span>
@@ -94,11 +249,7 @@ function PlayerRankCard({ rank, player, prop, score, onCompare }) {
         <div className="text-[11px] text-muted-foreground mt-0.5">
           {player.team} vs {player.opponent} · {propLabel} {prop.line}
         </div>
-        {/* Score bar */}
-        <div className="mt-2">
-          <ScoreBar total={score.total} />
-        </div>
-        {/* Ceiling / floor */}
+        <div className="mt-2"><ScoreBar total={score.total} /></div>
         <div className="flex items-center gap-3 mt-1.5">
           <span className="text-[10px] text-muted-foreground">
             Floor <span className="text-foreground font-medium">{score.floor}</span>
@@ -109,17 +260,20 @@ function PlayerRankCard({ rank, player, prop, score, onCompare }) {
           <span className="text-[10px] text-muted-foreground">
             Proj <span className="text-primary font-medium">{score.projection}</span>
           </span>
+          {score.projFPts > 0 && (
+            <span className="text-[10px] text-muted-foreground">
+              ~<span className="text-amber-400 font-medium">{score.projFPts}</span> FP
+            </span>
+          )}
         </div>
       </div>
 
-      {/* Score + grade + verdict */}
       <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
         <div className="text-lg font-bold text-foreground">{score.total}</div>
         <GradeBadge grade={score.grade} />
         <VerdictChip verdict={score.verdict} />
       </div>
 
-      {/* Compare button */}
       <button
         onClick={() => onCompare(player, prop)}
         className="flex-shrink-0 text-[11px] text-muted-foreground hover:text-primary border border-white/10 hover:border-primary/40 rounded-xl px-2.5 py-1.5 transition-colors"
@@ -130,7 +284,104 @@ function PlayerRankCard({ rank, player, prop, score, onCompare }) {
   );
 }
 
-// ─── Comparison slot ─────────────────────────────────────────────────────────
+// ─── Waiver Wire Card ─────────────────────────────────────────────────────────
+
+function WaiverCard({ rank, player, prop, score, waiverReason, injuryUpside, isHandcuff, waiverPriority }) {
+  const propLabel = PROP_LABELS[prop?.prop_type] ?? prop?.prop_type ?? '';
+
+  const priorityStyle = {
+    high:   'bg-primary/20 border-primary/40 text-primary',
+    medium: 'bg-amber-500/20 border-amber-500/40 text-amber-400',
+    low:    'bg-white/8 border-white/15 text-muted-foreground',
+  }[waiverPriority] ?? 'bg-white/8 border-white/15 text-muted-foreground';
+
+  return (
+    <div className="rounded-2xl border border-white/6 bg-[hsl(222,47%,9%)] p-4 space-y-3 hover:border-white/12 transition-colors">
+      <div className="flex items-center gap-3">
+        <div className="w-7 text-center flex-shrink-0">
+          <span className={cn(
+            'text-sm font-bold',
+            rank === 1 ? 'text-yellow-400' : rank <= 3 ? 'text-primary' : 'text-muted-foreground',
+          )}>
+            #{rank}
+          </span>
+        </div>
+
+        <TeamLogo team={player.team} className="w-9 h-9" />
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-semibold text-foreground truncate">{player.player_name}</span>
+            <span className="text-[10px] bg-white/8 text-muted-foreground px-1.5 py-0.5 rounded font-medium">
+              {player.position}
+            </span>
+            {isHandcuff && (
+              <span className="text-[10px] bg-blue-500/15 border border-blue-500/30 text-blue-400 px-1.5 py-0.5 rounded-full font-semibold flex items-center gap-0.5">
+                <Link2 className="w-2.5 h-2.5" />
+                Handcuff
+              </span>
+            )}
+          </div>
+          <div className="text-[11px] text-muted-foreground mt-0.5">
+            {player.team} vs {player.opponent}{prop ? ` · ${propLabel} ${prop.line}` : ''}
+          </div>
+        </div>
+
+        <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+          <span className={cn('text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border', priorityStyle)}>
+            {waiverPriority === 'high' ? 'HIGH' : waiverPriority === 'medium' ? 'MED' : 'LOW'}
+          </span>
+          {score && (
+            <>
+              <div className="text-base font-bold text-foreground">{score.total}</div>
+              <GradeBadge grade={score.grade} />
+            </>
+          )}
+        </div>
+      </div>
+
+      {score && <ScoreBar total={score.total} />}
+
+      {score && (
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="text-[10px] text-muted-foreground">
+            Floor <span className="text-foreground font-medium">{score.floor}</span>
+          </span>
+          <span className="text-[10px] text-muted-foreground">
+            Ceiling <span className="text-foreground font-medium">{score.ceiling}</span>
+          </span>
+          {score.projFPts > 0 && (
+            <span className="text-[10px] text-muted-foreground">
+              ~<span className="text-amber-400 font-medium">{score.projFPts}</span> FP
+            </span>
+          )}
+          {score.waiverBoost > 0 && (
+            <span className="text-[10px] text-muted-foreground">
+              Boost <span className="text-primary font-medium">+{score.waiverBoost}</span>
+            </span>
+          )}
+          <VerdictChip verdict={score.verdict} />
+        </div>
+      )}
+
+      {waiverReason && (
+        <div className="flex items-start gap-2 text-[11px] text-muted-foreground">
+          <Zap className="w-3 h-3 text-primary mt-0.5 flex-shrink-0" />
+          <span>{waiverReason}</span>
+        </div>
+      )}
+
+      {injuryUpside && (
+        <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 px-3 py-2 flex items-start gap-2">
+          <AlertTriangle className="w-3 h-3 text-amber-400 mt-0.5 flex-shrink-0" />
+          <span className="text-[11px] text-amber-300">{injuryUpside}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Comparison slot ──────────────────────────────────────────────────────────
 
 function PlayerSlot({ label, player, prop, score, availableProps, onChangeProp, onClear, onPick }) {
   if (!player) {
@@ -148,7 +399,6 @@ function PlayerSlot({ label, player, prop, score, availableProps, onChangeProp, 
 
   return (
     <div className="flex-1 rounded-2xl border border-white/6 bg-[hsl(222,47%,9%)] p-4 space-y-3">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <span className="text-[10px] text-muted-foreground uppercase tracking-widest font-medium">{label}</span>
         <button onClick={onClear} className="text-muted-foreground hover:text-foreground transition-colors">
@@ -156,7 +406,6 @@ function PlayerSlot({ label, player, prop, score, availableProps, onChangeProp, 
         </button>
       </div>
 
-      {/* Player */}
       <div className="flex items-center gap-3">
         <TeamLogo team={player.team} className="w-10 h-10" />
         <div>
@@ -165,7 +414,6 @@ function PlayerSlot({ label, player, prop, score, availableProps, onChangeProp, 
         </div>
       </div>
 
-      {/* Prop selector */}
       {availableProps?.length > 1 && (
         <div className="relative">
           <select
@@ -186,7 +434,6 @@ function PlayerSlot({ label, player, prop, score, availableProps, onChangeProp, 
         </div>
       )}
 
-      {/* Score + verdict */}
       {score && (
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -197,23 +444,20 @@ function PlayerSlot({ label, player, prop, score, availableProps, onChangeProp, 
         </div>
       )}
 
-      {/* Mini score bar */}
       {score && <ScoreBar total={score.total} />}
     </div>
   );
 }
 
-// ─── Comparison result ───────────────────────────────────────────────────────
+// ─── Comparison result ────────────────────────────────────────────────────────
 
 function ComparisonResult({ result, playerA, playerB }) {
   if (!result) return null;
-
-  const { winner, dimensions, reasoning, confidence, scoreA, scoreB } = result;
+  const { winner, dimensions, reasoning, confidence } = result;
   const winnerName = winner === 'A' ? playerA?.player_name : winner === 'B' ? playerB?.player_name : null;
 
   return (
     <div className="rounded-2xl border border-white/6 bg-[hsl(222,47%,9%)] p-4 space-y-4">
-      {/* Winner banner */}
       <div className={cn(
         'rounded-xl p-3 flex items-center justify-between',
         winner === 'toss-up' ? 'bg-white/5' : 'bg-primary/10 border border-primary/20',
@@ -228,40 +472,31 @@ function ComparisonResult({ result, playerA, playerB }) {
             <div className="font-bold text-muted-foreground">Toss-Up Decision</div>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <span className={cn(
-            'text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border',
-            confidence === 'High'   && 'bg-primary/20 border-primary/40 text-primary',
-            confidence === 'Medium' && 'bg-amber-500/20 border-amber-500/40 text-amber-400',
-            confidence === 'Low'    && 'bg-red-500/20 border-red-500/40 text-red-400',
-          )}>
-            {confidence} Confidence
-          </span>
-        </div>
+        <span className={cn(
+          'text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border',
+          confidence === 'High'   && 'bg-primary/20 border-primary/40 text-primary',
+          confidence === 'Medium' && 'bg-amber-500/20 border-amber-500/40 text-amber-400',
+          confidence === 'Low'    && 'bg-red-500/20 border-red-500/40 text-red-400',
+        )}>
+          {confidence} Confidence
+        </span>
       </div>
 
-      {/* Dimension table */}
       <div className="space-y-1">
         <div className="flex items-center text-[10px] text-muted-foreground uppercase tracking-wider mb-2 px-1">
           <div className="w-1/4 text-left">{playerA?.player_name?.split(' ')[1]}</div>
           <div className="flex-1 text-center">Category</div>
           <div className="w-1/4 text-right">{playerB?.player_name?.split(' ')[1]}</div>
         </div>
-
         {dimensions.map((dim) => (
           <div key={dim.label} className="flex items-center py-1.5 px-1 rounded-lg hover:bg-white/3 transition-colors">
-            {/* Value A */}
             <div className={cn(
               'w-1/4 text-left text-xs font-medium truncate',
               dim.winner === 'A' ? 'text-primary' : dim.winner === 'tie' ? 'text-muted-foreground' : 'text-red-400',
             )}>
               {typeof dim.valueA === 'number' ? dim.valueA : String(dim.valueA ?? '—')}
             </div>
-
-            {/* Label */}
             <div className="flex-1 text-center text-[11px] text-muted-foreground">{dim.label}</div>
-
-            {/* Value B */}
             <div className={cn(
               'w-1/4 text-right text-xs font-medium truncate',
               dim.winner === 'B' ? 'text-primary' : dim.winner === 'tie' ? 'text-muted-foreground' : 'text-red-400',
@@ -272,7 +507,6 @@ function ComparisonResult({ result, playerA, playerB }) {
         ))}
       </div>
 
-      {/* Reasoning */}
       <div className="border-t border-white/6 pt-3 space-y-1.5">
         {reasoning.map((line, i) => (
           <div key={i} className="flex items-start gap-2 text-xs text-muted-foreground">
@@ -285,14 +519,14 @@ function ComparisonResult({ result, playerA, playerB }) {
   );
 }
 
-// ─── Player Picker Modal ─────────────────────────────────────────────────────
+// ─── Player Picker Modal ──────────────────────────────────────────────────────
 
-function PlayerPickerModal({ onSelect, onClose, excludePlayerId }) {
+function PlayerPickerModal({ players: allPlayers, onSelect, onClose, excludePlayerId, settings }) {
   const [search, setSearch]       = useState('');
   const [posFilter, setPosFilter] = useState('all');
 
   const players = useMemo(() => {
-    return mockPlayers
+    return (allPlayers ?? mockPlayers)
       .filter(p => p.id !== excludePlayerId)
       .filter(p => posFilter === 'all' || p.position === posFilter)
       .filter(p =>
@@ -304,12 +538,8 @@ function PlayerPickerModal({ onSelect, onClose, excludePlayerId }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* Backdrop */}
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-
-      {/* Modal */}
       <div className="relative w-full max-w-md rounded-2xl border border-white/10 bg-[hsl(222,47%,7%)] shadow-2xl flex flex-col max-h-[80vh]">
-        {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-white/6 flex-shrink-0">
           <h3 className="font-semibold text-foreground">Pick a Player</h3>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
@@ -317,7 +547,6 @@ function PlayerPickerModal({ onSelect, onClose, excludePlayerId }) {
           </button>
         </div>
 
-        {/* Search */}
         <div className="p-3 border-b border-white/6 flex-shrink-0">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
@@ -332,7 +561,6 @@ function PlayerPickerModal({ onSelect, onClose, excludePlayerId }) {
           </div>
         </div>
 
-        {/* Position tabs */}
         <div className="flex gap-1 p-3 border-b border-white/6 flex-shrink-0">
           {POSITIONS.map(pos => (
             <button
@@ -350,7 +578,6 @@ function PlayerPickerModal({ onSelect, onClose, excludePlayerId }) {
           ))}
         </div>
 
-        {/* Player list */}
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
           {players.length === 0 && (
             <div className="text-center text-muted-foreground text-sm py-8">No players found</div>
@@ -359,7 +586,7 @@ function PlayerPickerModal({ onSelect, onClose, excludePlayerId }) {
             const topProp = [...(player.props ?? [])].sort(
               (a, b) => (b.confidence_score ?? 0) - (a.confidence_score ?? 0)
             )[0];
-            const sc = topProp ? fantasyScore(player, topProp) : null;
+            const sc = topProp ? fantasyScore(player, topProp, settings) : null;
 
             return (
               <button
@@ -394,21 +621,54 @@ function PlayerPickerModal({ onSelect, onClose, excludePlayerId }) {
   );
 }
 
-// ─── Main Page ───────────────────────────────────────────────────────────────
+// ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function StartSit() {
-  const [position, setPosition]               = useState('all');
-  const [compareA, setCompareA]               = useState(null);
-  const [compareB, setCompareB]               = useState(null);
-  const [propA, setPropA]                     = useState(null);
-  const [propB, setPropB]                     = useState(null);
-  const [showComparePicker, setShowComparePicker] = useState(null); // 'A' | 'B' | null
-  const [searchQuery, setSearchQuery]         = useState('');
+  const [settings, setSettings]                   = useState(() => getLeagueSettings());
+  const [showSettings, setShowSettings]           = useState(false);
+  const [rankTab, setRankTab]                     = useState('rankings');
+  const [position, setPosition]                   = useState('all');
+  const [waiverPosition, setWaiverPosition]       = useState('all');
+  const [compareA, setCompareA]                   = useState(null);
+  const [compareB, setCompareB]                   = useState(null);
+  const [propA, setPropA]                         = useState(null);
+  const [propB, setPropB]                         = useState(null);
+  const [showComparePicker, setShowComparePicker] = useState(null);
+  const [searchQuery, setSearchQuery]             = useState('');
 
-  // Rankings
-  const rankings = useMemo(() => rankPlayers(mockPlayers, position), [position]);
+  // Live data state
+  const [liveStatus, setLiveStatus] = useState({ loading: true, players: null, hasSchedule: false, week: null, error: false });
 
-  // Filtered rankings by search
+  const loadLivePlayers = useCallback(async (forceRefresh = false) => {
+    if (isDemoMode()) {
+      setLiveStatus({ loading: false, players: mockPlayers, hasSchedule: false, week: null, error: false });
+      return;
+    }
+    setLiveStatus(prev => ({ ...prev, loading: true, error: false }));
+    try {
+      if (forceRefresh) clearLiveCache();
+      const result = await fetchLivePlayers();
+      setLiveStatus({ loading: false, players: result.players, hasSchedule: result.hasSchedule, week: result.week, error: false });
+    } catch {
+      setLiveStatus({ loading: false, players: mockPlayers, hasSchedule: false, week: null, error: true });
+    }
+  }, []);
+
+  useEffect(() => { loadLivePlayers(); }, [loadLivePlayers]);
+
+  const activePlayers = liveStatus.players ?? mockPlayers;
+  const isLive = !isDemoMode() && !liveStatus.error && liveStatus.players !== mockPlayers && !liveStatus.loading;
+
+  function handleSaveSettings(newSettings) {
+    saveLeagueSettings(newSettings);
+    setSettings(newSettings);
+  }
+
+  const rankings = useMemo(
+    () => liveStatus.loading ? [] : rankPlayers(activePlayers, position, settings),
+    [activePlayers, position, settings, liveStatus.loading],
+  );
+
   const filteredRankings = useMemo(() => {
     if (!searchQuery.trim()) return rankings;
     const q = searchQuery.toLowerCase();
@@ -418,68 +678,117 @@ export default function StartSit() {
     );
   }, [rankings, searchQuery]);
 
-  // Scores for comparison players
-  const scoreA = useMemo(() => (compareA && propA ? fantasyScore(compareA, propA) : null), [compareA, propA]);
-  const scoreB = useMemo(() => (compareB && propB ? fantasyScore(compareB, propB) : null), [compareB, propB]);
+  const waiverRankings = useMemo(
+    () => rankWaiverWire(waiverPlayers, waiverPosition, settings),
+    [waiverPosition, settings],
+  );
 
-  // Comparison result
+  const scoreA = useMemo(
+    () => (compareA && propA ? fantasyScore(compareA, propA, settings) : null),
+    [compareA, propA, settings],
+  );
+  const scoreB = useMemo(
+    () => (compareB && propB ? fantasyScore(compareB, propB, settings) : null),
+    [compareB, propB, settings],
+  );
+
   const compResult = useMemo(() => {
     if (!compareA || !propA || !compareB || !propB) return null;
-    return compareStartSit(compareA, propA, compareB, propB);
-  }, [compareA, propA, compareB, propB]);
+    return compareStartSit(compareA, propA, compareB, propB, settings);
+  }, [compareA, propA, compareB, propB, settings]);
 
-  // Handlers
   function handlePickerSelect(player) {
     const topProp = [...(player.props ?? [])].sort(
       (a, b) => (b.confidence_score ?? 0) - (a.confidence_score ?? 0)
     )[0];
-
-    if (showComparePicker === 'A') {
-      setCompareA(player);
-      setPropA(topProp ?? null);
-    } else {
-      setCompareB(player);
-      setPropB(topProp ?? null);
-    }
+    if (showComparePicker === 'A') { setCompareA(player); setPropA(topProp ?? null); }
+    else                           { setCompareB(player); setPropB(topProp ?? null); }
     setShowComparePicker(null);
   }
 
   function handleCompareFromRanking(player, prop) {
-    if (!compareA) {
-      setCompareA(player);
-      setPropA(prop);
-    } else if (!compareB) {
-      setCompareB(player);
-      setPropB(prop);
-    } else {
-      // Replace A
-      setCompareA(player);
-      setPropA(prop);
-    }
+    if (!compareA)      { setCompareA(player); setPropA(prop); }
+    else if (!compareB) { setCompareB(player); setPropB(prop); }
+    else                { setCompareA(player); setPropA(prop); }
   }
+
+  const scoringLabel = { standard: 'STD', half_ppr: '½PPR', ppr: 'PPR' }[settings.scoring] ?? settings.scoring;
+  const activePosition = rankTab === 'waiver' ? waiverPosition : position;
+  const setActivePosition = rankTab === 'waiver' ? setWaiverPosition : setPosition;
+  const weekLabel = liveStatus.week ? `Week ${liveStatus.week}` : null;
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto pb-8">
 
       {/* ── Header ── */}
-      <div className="flex items-center gap-3">
-        <div className="w-9 h-9 rounded-xl bg-primary/15 flex items-center justify-center flex-shrink-0">
-          <Trophy className="w-5 h-5 text-primary" />
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-primary/15 flex items-center justify-center flex-shrink-0">
+            <Trophy className="w-5 h-5 text-primary" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-bold text-foreground">Fantasy Start/Sit</h1>
+              {liveStatus.loading ? (
+                <span className="flex items-center gap-1 text-[10px] text-muted-foreground bg-white/5 border border-white/10 px-2 py-0.5 rounded-full">
+                  <Loader2 className="w-2.5 h-2.5 animate-spin" /> Loading
+                </span>
+              ) : isLive ? (
+                <span className="flex items-center gap-1 text-[10px] font-bold text-primary bg-primary/15 border border-primary/30 px-2 py-0.5 rounded-full">
+                  <Wifi className="w-2.5 h-2.5" /> LIVE{weekLabel ? ` · ${weekLabel}` : ''}
+                </span>
+              ) : (
+                <span className="text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full font-semibold">
+                  DEMO
+                </span>
+              )}
+            </div>
+            <p className="text-sm text-muted-foreground">
+              {isLive
+                ? `${activePlayers.length} players · live roster + schedule`
+                : 'AI-powered start/sit decisions for your lineup'
+              }
+            </p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-xl font-bold text-foreground">Fantasy Start/Sit</h1>
-          <p className="text-sm text-muted-foreground">AI-powered start/sit decisions for your lineup</p>
+
+        <div className="flex items-center gap-2">
+          {!isDemoMode() && !liveStatus.loading && (
+            <button
+              onClick={() => loadLivePlayers(true)}
+              title="Refresh live roster"
+              className="w-8 h-8 flex items-center justify-center rounded-xl border border-white/10 hover:border-primary/40 hover:bg-primary/5 text-muted-foreground hover:text-primary transition-all"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+            </button>
+          )}
+          <button
+            onClick={() => setShowSettings(true)}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl border border-white/10 hover:border-primary/40 hover:bg-primary/5 transition-all text-sm text-muted-foreground hover:text-primary"
+          >
+            <Settings className="w-4 h-4" />
+            <span className="font-semibold">{scoringLabel}</span>
+            {settings.tePremium && <span className="text-[10px] text-amber-400 font-bold">TE+</span>}
+            {settings.superflex && <span className="text-[10px] text-amber-400 font-bold">SF</span>}
+          </button>
         </div>
       </div>
 
-      {/* ── Head-to-Head Panel ── */}
+      {/* Error / fallback notice */}
+      {liveStatus.error && (
+        <div className="rounded-xl bg-amber-500/8 border border-amber-500/20 px-3 py-2 text-[11px] text-amber-300 flex items-center gap-2">
+          <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+          Could not reach roster API — showing demo data. Check your connection and refresh.
+        </div>
+      )}
+
+      {/* ── Head-to-Head Comparison ── */}
       <section className="space-y-3">
         <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
           <Users className="w-4 h-4 text-primary" />
           Head-to-Head Comparison
         </h2>
 
-        {/* Two slots + VS */}
         <div className="flex gap-3 items-stretch">
           <PlayerSlot
             label="Player A"
@@ -491,13 +800,11 @@ export default function StartSit() {
             onClear={() => { setCompareA(null); setPropA(null); }}
             onPick={() => setShowComparePicker('A')}
           />
-
           <div className="flex items-center justify-center w-10 flex-shrink-0">
             <span className="text-xs font-bold text-muted-foreground bg-white/5 rounded-full w-8 h-8 flex items-center justify-center border border-white/8">
               VS
             </span>
           </div>
-
           <PlayerSlot
             label="Player B"
             player={compareB}
@@ -510,16 +817,8 @@ export default function StartSit() {
           />
         </div>
 
-        {/* Comparison result */}
-        {compResult && (
-          <ComparisonResult
-            result={compResult}
-            playerA={compareA}
-            playerB={compareB}
-          />
-        )}
+        {compResult && <ComparisonResult result={compResult} playerA={compareA} playerB={compareB} />}
 
-        {/* Prompt when one slot is empty */}
         {(compareA || compareB) && (!compareA || !compareB) && (
           <div className="text-center text-xs text-muted-foreground py-2">
             Pick a second player to see the full comparison
@@ -527,23 +826,46 @@ export default function StartSit() {
         )}
       </section>
 
-      {/* ── Rankings Section ── */}
+      {/* ── Rankings / Waiver Wire ── */}
       <section className="space-y-3">
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
-            <TrendingUp className="w-4 h-4 text-primary" />
-            Fantasy Rankings
-          </h2>
 
-          {/* Position filter tabs */}
+        {/* Tab + position filter row */}
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-1 bg-white/4 rounded-xl p-1">
+            <button
+              onClick={() => setRankTab('rankings')}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold rounded-lg transition-all',
+                rankTab === 'rankings'
+                  ? 'bg-primary/20 text-primary border border-primary/30'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <TrendingUp className="w-3.5 h-3.5" />
+              Rankings
+            </button>
+            <button
+              onClick={() => setRankTab('waiver')}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold rounded-lg transition-all',
+                rankTab === 'waiver'
+                  ? 'bg-primary/20 text-primary border border-primary/30'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <Shield className="w-3.5 h-3.5" />
+              Waiver Wire
+            </button>
+          </div>
+
           <div className="flex gap-1">
             {POSITIONS.map(pos => (
               <button
                 key={pos}
-                onClick={() => setPosition(pos)}
+                onClick={() => setActivePosition(pos)}
                 className={cn(
                   'px-3 py-1 text-[11px] font-semibold rounded-lg transition-colors capitalize',
-                  position === pos
+                  activePosition === pos
                     ? 'bg-primary/20 text-primary border border-primary/30'
                     : 'text-muted-foreground hover:text-foreground hover:bg-white/5 border border-transparent',
                 )}
@@ -554,65 +876,134 @@ export default function StartSit() {
           </div>
         </div>
 
-        {/* Search within rankings */}
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Filter rankings by player or team..."
-            className="w-full bg-white/5 border border-white/10 rounded-xl pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
-          />
-        </div>
-
-        {/* Stats bar */}
-        <div className="flex gap-4 text-xs text-muted-foreground">
-          <span>
-            <span className="text-primary font-medium">
-              {filteredRankings.filter(r => r.score?.verdict === 'START').length}
-            </span> Starts
-          </span>
-          <span>
-            <span className="text-amber-400 font-medium">
-              {filteredRankings.filter(r => r.score?.verdict === 'FLEX').length}
-            </span> Flex
-          </span>
-          <span>
-            <span className="text-red-400 font-medium">
-              {filteredRankings.filter(r => r.score?.verdict === 'SIT').length}
-            </span> Sits
-          </span>
-          <span className="text-muted-foreground/50">· {filteredRankings.length} players</span>
-        </div>
-
-        {/* Ranked list */}
-        <div className="space-y-2">
-          {filteredRankings.map(({ player, prop, score }, idx) => (
-            <PlayerRankCard
-              key={player.id}
-              rank={idx + 1}
-              player={player}
-              prop={prop}
-              score={score}
-              onCompare={handleCompareFromRanking}
-            />
-          ))}
-
-          {filteredRankings.length === 0 && (
-            <div className="text-center text-muted-foreground text-sm py-12">
-              No players found for this position
+        {/* ── Rankings ── */}
+        {rankTab === 'rankings' && (
+          <>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Filter rankings by player or team..."
+                className="w-full bg-white/5 border border-white/10 rounded-xl pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
+              />
             </div>
-          )}
-        </div>
+
+            <div className="flex gap-4 text-xs text-muted-foreground">
+              <span>
+                <span className="text-primary font-medium">
+                  {filteredRankings.filter(r => r.score?.verdict === 'START').length}
+                </span> Starts
+              </span>
+              <span>
+                <span className="text-amber-400 font-medium">
+                  {filteredRankings.filter(r => r.score?.verdict === 'FLEX').length}
+                </span> Flex
+              </span>
+              <span>
+                <span className="text-red-400 font-medium">
+                  {filteredRankings.filter(r => r.score?.verdict === 'SIT').length}
+                </span> Sits
+              </span>
+              <span className="text-muted-foreground/50">· {filteredRankings.length} players · {scoringLabel}</span>
+            </div>
+
+            {liveStatus.loading ? (
+              <div className="space-y-2">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="rounded-2xl border border-white/6 bg-[hsl(222,47%,9%)] p-4 h-20 animate-pulse" />
+                ))}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {filteredRankings.map(({ player, prop, score }, idx) => (
+                  <PlayerRankCard
+                    key={player.id}
+                    rank={idx + 1}
+                    player={player}
+                    prop={prop}
+                    score={score}
+                    onCompare={handleCompareFromRanking}
+                  />
+                ))}
+                {filteredRankings.length === 0 && (
+                  <div className="text-center text-muted-foreground text-sm py-12">
+                    No players found for this position
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ── Waiver Wire ── */}
+        {rankTab === 'waiver' && (
+          <>
+            <div className="flex gap-4 text-xs text-muted-foreground items-center">
+              <span>
+                <span className="text-primary font-medium">
+                  {waiverRankings.filter(r => r.waiverPriority === 'high').length}
+                </span> High
+              </span>
+              <span>
+                <span className="text-amber-400 font-medium">
+                  {waiverRankings.filter(r => r.waiverPriority === 'medium').length}
+                </span> Medium
+              </span>
+              <span>
+                <span className="text-muted-foreground font-medium">
+                  {waiverRankings.filter(r => r.waiverPriority === 'low').length}
+                </span> Low
+              </span>
+              <span className="text-muted-foreground/50">· {waiverRankings.length} available · {scoringLabel}</span>
+            </div>
+
+            <div className="rounded-xl bg-blue-500/8 border border-blue-500/15 px-3 py-2 text-[11px] text-blue-300 flex items-center gap-2">
+              <Shield className="w-3.5 h-3.5 flex-shrink-0" />
+              Waiver scores include opportunity boosts for priority and injury upside on top of base fantasy rating.
+            </div>
+
+            <div className="space-y-2">
+              {waiverRankings.map(({ player, prop, score, waiverReason, injuryUpside, isHandcuff, waiverPriority }, idx) => (
+                <WaiverCard
+                  key={player.id}
+                  rank={idx + 1}
+                  player={player}
+                  prop={prop}
+                  score={score}
+                  waiverReason={waiverReason}
+                  injuryUpside={injuryUpside}
+                  isHandcuff={isHandcuff}
+                  waiverPriority={waiverPriority}
+                />
+              ))}
+              {waiverRankings.length === 0 && (
+                <div className="text-center text-muted-foreground text-sm py-12">
+                  No waiver players for this position
+                </div>
+              )}
+            </div>
+          </>
+        )}
       </section>
 
-      {/* ── Player Picker Modal ── */}
+      {/* ── Modals ── */}
       {showComparePicker && (
         <PlayerPickerModal
+          players={activePlayers}
           onSelect={handlePickerSelect}
           onClose={() => setShowComparePicker(null)}
           excludePlayerId={showComparePicker === 'A' ? compareB?.id : compareA?.id}
+          settings={settings}
+        />
+      )}
+
+      {showSettings && (
+        <SettingsModal
+          settings={settings}
+          onSave={handleSaveSettings}
+          onClose={() => setShowSettings(false)}
         />
       )}
     </div>

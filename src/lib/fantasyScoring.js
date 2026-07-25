@@ -1,4 +1,5 @@
 import { TEAM_STATS, NFL_LEAGUE_AVGS } from '@/lib/teamStats';
+import { getLeagueSettings, projectedFantasyPts, pprMultiplier } from '@/lib/leagueSettings';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -44,9 +45,11 @@ function matchupRatingLabel(tier2Score) {
 
 /**
  * Returns a score 0-100 and breakdown for a single player + prop.
+ * Accepts optional league settings; falls back to localStorage settings.
  */
-export function fantasyScore(player, prop) {
+export function fantasyScore(player, prop, settings) {
   if (!player || !prop) return null;
+  const s = settings || getLeagueSettings();
 
   const line = prop.line ?? 0;
   const l6   = prop.avg_last_10 ?? line;   // 6-game average stored as avg_last_10
@@ -172,20 +175,22 @@ export function fantasyScore(player, prop) {
     tip: isShortWeek ? 'Short week — fatigue risk' : 'Full rest',
   });
 
-  // 10. Target share / usage (5 pts)
-  let usageScore = 0.5 * 5; // neutral default
+  // 10. Target share / usage (5 pts) — PPR-adjusted: target share worth more in PPR
+  const pprMult = pprMultiplier(position, s);
+  const usageMax = 5 * pprMult;
+  let usageScore = 0.5 * usageMax;
   let usageTip = 'Usage data unavailable';
   if (position === 'RB' && snapPct != null) {
-    usageScore = clamp(snapPct / 0.70, 0, 1) * 5;
-    usageTip = `Snap pct ${Math.round(snapPct * 100)}%`;
+    usageScore = clamp(snapPct / 0.70, 0, 1) * usageMax;
+    usageTip = `Snap pct ${Math.round(snapPct * 100)}% (${s.scoring === 'ppr' ? 'PPR boost' : s.scoring === 'half_ppr' ? 'Half PPR' : 'Standard'})`;
   } else if (targetShare != null) {
-    usageScore = clamp(targetShare / 0.25, 0, 1) * 5;
-    usageTip = `Target share ${Math.round(targetShare * 100)}%`;
+    usageScore = clamp(targetShare / 0.25, 0, 1) * usageMax;
+    usageTip = `Target share ${Math.round(targetShare * 100)}% (${s.scoring === 'ppr' ? 'PPR boost applied' : s.scoring === 'half_ppr' ? 'Half PPR' : 'Standard'})`;
   }
   criteria.push({
-    label: 'Target Share / Usage',
-    score: parseFloat(usageScore.toFixed(2)),
-    maxScore: 5,
+    label: `Target Share / Usage${s.recPts > 0 && position !== 'QB' ? ` (${s.scoring === 'ppr' ? 'PPR' : 'Half PPR'})` : ''}`,
+    score: parseFloat(Math.min(usageScore, 7).toFixed(2)), // cap at 7 so PPR boost stays bounded
+    maxScore: Math.min(parseFloat(usageMax.toFixed(1)), 7),
     tip: usageTip,
   });
 
@@ -266,6 +271,9 @@ export function fantasyScore(player, prop) {
 
   const tier4 = injBoostScore + blowoutScore + injScore + roleScore + trapScore;
 
+  // Projected fantasy points (informational, shown on card but doesn't change total)
+  const projFPts = projectedFantasyPts(prop, position, s);
+
   const total  = parseFloat((tier1 + tier2 + tier3 + tier4).toFixed(1));
   const grade  = letterGrade(total);
   const verdict = total >= 72 ? 'START' : total >= 52 ? 'FLEX' : 'SIT';
@@ -286,7 +294,9 @@ export function fantasyScore(player, prop) {
     projection,
     ceiling,
     floor,
+    projFPts: parseFloat(projFPts.toFixed(1)),
     matchupRating: matchupRatingLabel(tier2),
+    scoringFormat: s.scoring,
   };
 }
 
@@ -295,11 +305,12 @@ export function fantasyScore(player, prop) {
 /**
  * Returns a head-to-head comparison of 12 dimensions.
  */
-export function compareStartSit(playerA, propA, playerB, propB) {
+export function compareStartSit(playerA, propA, playerB, propB, settings) {
   if (!playerA || !propA || !playerB || !propB) return null;
+  const s = settings || getLeagueSettings();
 
-  const scoreA = fantasyScore(playerA, propA);
-  const scoreB = fantasyScore(playerB, propB);
+  const scoreA = fantasyScore(playerA, propA, s);
+  const scoreB = fantasyScore(playerB, propB, s);
 
   if (!scoreA || !scoreB) return null;
 
@@ -446,22 +457,61 @@ export function compareStartSit(playerA, propA, playerB, propB) {
 /**
  * Returns sorted rankings of all players for a given position.
  */
-export function rankPlayers(players, position = 'all') {
+export function rankPlayers(players, position = 'all', settings) {
+  const s = settings || getLeagueSettings();
   const filtered = position === 'all'
     ? players
     : players.filter(p => p.position === position);
 
   return filtered
     .map(player => {
-      // Pick the best prop (highest confidence_score)
       const sorted = [...(player.props ?? [])].sort(
         (a, b) => (b.confidence_score ?? 0) - (a.confidence_score ?? 0)
       );
       const prop = sorted[0];
       if (!prop) return null;
 
-      const score = fantasyScore(player, prop);
+      const score = fantasyScore(player, prop, s);
       return { player, prop, score };
+    })
+    .filter(Boolean)
+    .sort((a, b) => (b.score?.total ?? 0) - (a.score?.total ?? 0));
+}
+
+// Waiver wire ranking — focuses on opportunity, upside, and handcuff value
+export function rankWaiverWire(players, position = 'all', settings) {
+  const s = settings || getLeagueSettings();
+  const filtered = position === 'all'
+    ? players
+    : players.filter(p => p.position === position);
+
+  return filtered
+    .map(player => {
+      const sorted = [...(player.props ?? [])].sort(
+        (a, b) => (b.confidence_score ?? 0) - (a.confidence_score ?? 0)
+      );
+      const prop = sorted[0];
+      if (!prop) return null;
+
+      const base = fantasyScore(player, prop, s);
+
+      // Waiver score boosts: opportunity tier, injury upside, handcuff value
+      const opportunityBoost = player.waiver_priority === 'high' ? 15
+        : player.waiver_priority === 'medium' ? 8
+        : player.is_handcuff ? 5
+        : 0;
+      const injuryUpside = player.injury_upside ? 10 : 0;
+      const waiverTotal = Math.min(100, (base?.total ?? 0) + opportunityBoost + injuryUpside);
+
+      return {
+        player,
+        prop,
+        score: { ...base, total: parseFloat(waiverTotal.toFixed(1)), waiverBoost: opportunityBoost + injuryUpside },
+        waiverReason: player.waiver_reason ?? null,
+        injuryUpside: player.injury_upside ?? null,
+        isHandcuff: player.is_handcuff ?? false,
+        waiverPriority: player.waiver_priority ?? 'low',
+      };
     })
     .filter(Boolean)
     .sort((a, b) => (b.score?.total ?? 0) - (a.score?.total ?? 0));

@@ -399,3 +399,160 @@ export function getMockPayload() {
 
 export const isDemoMode = () =>
   typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('demo');
+
+// ─── Waiver Wire Players ──────────────────────────────────────────────────────
+// Backup RBs, emerging WRs, streaming options — players typically available in
+// most leagues. Each has waiver_priority, waiver_reason, is_handcuff, injury_upside.
+
+export const waiverPlayers = [
+  // ── Handcuff RBs ──
+  {
+    ...mkPlayer('kc_rb2','Clyde Edwards-Helaire','KC','BUF','RB',false,'healthy','',[
+      mkProp('rushing_yards',42.5,{var:28,bias:4}),
+      mkProp('receptions',2.5,{var:1.5,bias:0.2}),
+    ]),
+    waiver_priority: 'high',
+    waiver_reason: 'Handcuff to Isiah Pacheco — immediately startable if Pacheco misses time',
+    is_handcuff: true,
+    injury_upside: 'Pacheco (ribs) is week-to-week',
+    is_waiver: true,
+  },
+  {
+    ...mkPlayer('sf_rb2','Jordan Mason','SF','DAL','RB',false,'healthy','',[
+      mkProp('rushing_yards',52.5,{var:32,bias:5}),
+      mkProp('receptions',1.5,{var:1,bias:0.1}),
+    ]),
+    waiver_priority: 'high',
+    waiver_reason: 'Direct handcuff to CMC — elite upside if McCaffrey sits',
+    is_handcuff: true,
+    injury_upside: null,
+    is_waiver: true,
+  },
+  {
+    ...mkPlayer('bal_rb2','Justice Hill','BAL','PIT','RB',false,'healthy','',[
+      mkProp('rushing_yards',38.5,{var:22,bias:3}),
+      mkProp('receptions',3.5,{var:2,bias:0.5,targets:0.10}),
+    ]),
+    waiver_priority: 'medium',
+    waiver_reason: 'Pass-catching back with PPR upside behind Derrick Henry',
+    is_handcuff: true,
+    injury_upside: null,
+    is_waiver: true,
+  },
+  {
+    ...mkPlayer('det_rb2','Craig Reynolds','DET','MIN','RB',false,'healthy','',[
+      mkProp('rushing_yards',35.5,{var:22,bias:2}),
+    ]),
+    waiver_priority: 'medium',
+    waiver_reason: 'Handcuff to Montgomery — Lions high-powered offense',
+    is_handcuff: true,
+    injury_upside: null,
+    is_waiver: true,
+  },
+
+  // ── Emerging WRs ──
+  {
+    ...mkPlayer('phi_wr3','Britain Covey','PHI','NYG','WR',false,'healthy','',[
+      mkProp('receiving_yards',38.5,{var:22,bias:3,targets:0.12}),
+      mkProp('receptions',3.5,{var:1.5,bias:0.4,targets:0.12}),
+    ]),
+    waiver_priority: 'medium',
+    waiver_reason: 'Slot receiver seeing increased targets with Goedert questionable — PPR upside',
+    is_handcuff: false,
+    injury_upside: 'Target share surging with Goedert limited',
+    is_waiver: true,
+  },
+  {
+    ...mkPlayer('gb_wr3','Romeo Doubs','GB','CHI','WR',false,'healthy','',[
+      mkProp('receiving_yards',48.5,{var:26,bias:4,targets:0.16}),
+      mkProp('receptions',4.5,{var:2,bias:0.4,targets:0.16}),
+    ]),
+    waiver_priority: 'medium',
+    waiver_reason: 'Emerging as WR2 in Green Bay — Jordan Love connection growing',
+    is_handcuff: false,
+    injury_upside: null,
+    is_waiver: true,
+  },
+  {
+    ...mkPlayer('cin_wr3','Charlie Jones','CIN','CLE','WR',false,'healthy','',[
+      mkProp('receiving_yards',42.5,{var:24,bias:3,targets:0.13}),
+      mkProp('receptions',4.5,{var:2,bias:0.5,targets:0.13}),
+    ]),
+    waiver_priority: 'medium',
+    waiver_reason: 'Slot receiver in Burrow\'s offense — high PPR upside, 13% target share',
+    is_handcuff: false,
+    injury_upside: null,
+    is_waiver: true,
+  },
+  {
+    ...mkPlayer('mia_wr3','Braxton Berrios','MIA','NE','WR',false,'healthy','',[
+      mkProp('receiving_yards',32.5,{var:20,bias:2,targets:0.10}),
+      mkProp('receptions',3.5,{var:1.5,bias:0.3,targets:0.10}),
+    ]),
+    waiver_priority: 'low',
+    waiver_reason: 'PPR streamer in Miami\'s fast-paced offense vs weak NE secondary',
+    is_handcuff: false,
+    injury_upside: null,
+    is_waiver: true,
+  },
+
+  // ── Streaming QBs ──
+  {
+    ...mkPlayer('chi_qb','Caleb Williams','CHI','GB','QB',true,'healthy','',[
+      mkProp('passing_yards',235.5,{var:55,bias:3}),
+      mkProp('passing_tds',1.5,{var:1,bias:0.1}),
+      mkProp('rushing_yards',25.5,{var:15,bias:2}),
+    ]),
+    waiver_priority: 'high',
+    waiver_reason: 'Rookie with dual-threat upside — streaming option in weak matchup vs CHI',
+    is_handcuff: false,
+    injury_upside: null,
+    is_waiver: true,
+  },
+  {
+    ...mkPlayer('ten_qb','Will Levis','TEN','JAX','QB',true,'healthy','',[
+      mkProp('passing_yards',218.5,{var:55,bias:2}),
+      mkProp('passing_tds',1.5,{var:1,bias:0.1}),
+    ]),
+    waiver_priority: 'medium',
+    waiver_reason: 'Streamer vs JAX — one of the worst pass defenses in the league',
+    is_handcuff: false,
+    injury_upside: null,
+    is_waiver: true,
+  },
+
+  // ── Streaming TEs ──
+  {
+    ...mkPlayer('gb_te2','Tucker Kraft','GB','CHI','TE',false,'healthy','',[
+      mkProp('receiving_yards',38.5,{var:22,bias:3,targets:0.13}),
+      mkProp('receptions',3.5,{var:1.5,bias:0.3,targets:0.13}),
+    ]),
+    waiver_priority: 'medium',
+    waiver_reason: 'Backup TE seeing seam routes in Jordan Love\'s scheme — TE premium leagues',
+    is_handcuff: false,
+    injury_upside: null,
+    is_waiver: true,
+  },
+  {
+    ...mkPlayer('det_te2','Brock Wright','DET','MIN','TE',false,'healthy','',[
+      mkProp('receiving_yards',32.5,{var:20,bias:2,targets:0.10}),
+      mkProp('receptions',2.5,{var:1.5,bias:0.2,targets:0.10}),
+    ]),
+    waiver_priority: 'low',
+    waiver_reason: 'Sneaky TE2 in Detroit\'s run-heavy offense — better in TE premium formats',
+    is_handcuff: false,
+    injury_upside: null,
+    is_waiver: true,
+  },
+  {
+    ...mkPlayer('min_te2','Josh Oliver','MIN','DET','TE',false,'healthy','',[
+      mkProp('receiving_yards',28.5,{var:18,bias:2,targets:0.09}),
+      mkProp('receptions',2.5,{var:1.5,bias:0.2,targets:0.09}),
+    ]),
+    waiver_priority: 'low',
+    waiver_reason: 'Deep TE streamer in high-total DET vs MIN matchup',
+    is_handcuff: false,
+    injury_upside: null,
+    is_waiver: true,
+  },
+];
