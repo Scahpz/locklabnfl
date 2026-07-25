@@ -74,10 +74,10 @@ export default function Login() {
       {/* Logo */}
       <div className="mb-8 text-center relative">
         <div className="mb-5">
-          <img src={logo} alt="LockLab NBA" className="w-20 h-20 object-contain mx-auto" />
+          <img src={logo} alt="LockLab NFL" className="w-20 h-20 object-contain mx-auto" />
         </div>
-        <h1 className="text-3xl font-bold text-foreground tracking-tight">LockLab<span className="text-primary">NBA</span></h1>
-        <p className="text-sm text-muted-foreground mt-2">AI-powered props intelligence</p>
+        <h1 className="text-3xl font-bold text-foreground tracking-tight">LockLab<span className="text-primary">NFL</span></h1>
+        <p className="text-sm text-muted-foreground mt-2">AI-powered NFL props intelligence</p>
       </div>
 
       {/* Card */}

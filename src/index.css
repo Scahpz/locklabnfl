@@ -7,74 +7,75 @@
 @layer base {
   :root {
     --font-inter: 'Inter', sans-serif;
-    --background: 222 47% 6%;
+    /* Colorado / Broncos — deep navy background, orange primary */
+    --background: 218 55% 5%;
     --foreground: 210 40% 98%;
-    --card: 222 47% 9%;
+    --card: 218 50% 8%;
     --card-foreground: 210 40% 98%;
-    --popover: 222 47% 9%;
+    --popover: 218 50% 8%;
     --popover-foreground: 210 40% 98%;
-    --primary: 142 71% 45%;
-    --primary-foreground: 222 47% 6%;
-    --secondary: 217 33% 17%;
+    --primary: 22 96% 52%;          /* Broncos orange #FB5607 */
+    --primary-foreground: 218 55% 5%;
+    --secondary: 218 40% 14%;
     --secondary-foreground: 210 40% 98%;
-    --muted: 217 33% 17%;
-    --muted-foreground: 215 20% 55%;
-    --accent: 263 70% 58%;
-    --accent-foreground: 210 40% 98%;
+    --muted: 218 40% 14%;
+    --muted-foreground: 215 20% 52%;
+    --accent: 40 90% 55%;           /* Gold accent */
+    --accent-foreground: 218 55% 5%;
     --destructive: 0 84% 60%;
     --destructive-foreground: 210 40% 98%;
-    --border: 217 33% 20%;
-    --input: 217 33% 20%;
-    --ring: 142 71% 45%;
-    --chart-1: 142 71% 45%;
-    --chart-2: 263 70% 58%;
-    --chart-3: 199 89% 48%;
-    --chart-4: 43 74% 66%;
-    --chart-5: 0 84% 60%;
+    --border: 218 35% 18%;
+    --input: 218 35% 18%;
+    --ring: 22 96% 52%;
+    --chart-1: 22 96% 52%;          /* orange */
+    --chart-2: 40 90% 55%;          /* gold */
+    --chart-3: 199 89% 48%;         /* sky blue */
+    --chart-4: 142 71% 45%;         /* green (hits) */
+    --chart-5: 0 84% 60%;           /* red (misses) */
     --radius: 0.75rem;
-    --sidebar-background: 222 47% 8%;
+    --sidebar-background: 218 58% 4%;
     --sidebar-foreground: 210 40% 98%;
-    --sidebar-primary: 142 71% 45%;
-    --sidebar-primary-foreground: 222 47% 6%;
-    --sidebar-accent: 217 33% 17%;
+    --sidebar-primary: 22 96% 52%;
+    --sidebar-primary-foreground: 218 55% 5%;
+    --sidebar-accent: 218 40% 14%;
     --sidebar-accent-foreground: 210 40% 98%;
-    --sidebar-border: 217 33% 20%;
-    --sidebar-ring: 142 71% 45%;
+    --sidebar-border: 218 35% 18%;
+    --sidebar-ring: 22 96% 52%;
   }
 
   .dark {
-    --background: 222 47% 6%;
+    --background: 218 55% 5%;
     --foreground: 210 40% 98%;
-    --card: 222 47% 9%;
+    --card: 218 50% 8%;
     --card-foreground: 210 40% 98%;
-    --popover: 222 47% 9%;
+    --popover: 218 50% 8%;
     --popover-foreground: 210 40% 98%;
-    --primary: 142 71% 45%;
-    --primary-foreground: 222 47% 6%;
-    --secondary: 217 33% 17%;
+    --primary: 22 96% 52%;
+    --primary-foreground: 218 55% 5%;
+    --secondary: 218 40% 14%;
     --secondary-foreground: 210 40% 98%;
-    --muted: 217 33% 17%;
-    --muted-foreground: 215 20% 55%;
-    --accent: 263 70% 58%;
-    --accent-foreground: 210 40% 98%;
+    --muted: 218 40% 14%;
+    --muted-foreground: 215 20% 52%;
+    --accent: 40 90% 55%;
+    --accent-foreground: 218 55% 5%;
     --destructive: 0 84% 60%;
     --destructive-foreground: 210 40% 98%;
-    --border: 217 33% 20%;
-    --input: 217 33% 20%;
-    --ring: 142 71% 45%;
-    --chart-1: 142 71% 45%;
-    --chart-2: 263 70% 58%;
+    --border: 218 35% 18%;
+    --input: 218 35% 18%;
+    --ring: 22 96% 52%;
+    --chart-1: 22 96% 52%;
+    --chart-2: 40 90% 55%;
     --chart-3: 199 89% 48%;
-    --chart-4: 43 74% 66%;
+    --chart-4: 142 71% 45%;
     --chart-5: 0 84% 60%;
-    --sidebar-background: 222 47% 8%;
+    --sidebar-background: 218 58% 4%;
     --sidebar-foreground: 210 40% 98%;
-    --sidebar-primary: 142 71% 45%;
-    --sidebar-primary-foreground: 222 47% 6%;
-    --sidebar-accent: 217 33% 17%;
+    --sidebar-primary: 22 96% 52%;
+    --sidebar-primary-foreground: 218 55% 5%;
+    --sidebar-accent: 218 40% 14%;
     --sidebar-accent-foreground: 210 40% 98%;
-    --sidebar-border: 217 33% 20%;
-    --sidebar-ring: 142 71% 45%;
+    --sidebar-border: 218 35% 18%;
+    --sidebar-ring: 22 96% 52%;
   }
 }
 
@@ -151,5 +152,13 @@ html {
   box-shadow: 0 0 20px hsl(0 84% 60% / 0.15), 0 0 40px hsl(0 84% 60% / 0.05);
 }
 .glow-orange {
-  box-shadow: 0 0 20px hsl(25 100% 50% / 0.15), 0 0 40px hsl(25 100% 50% / 0.05);
+  box-shadow: 0 0 20px hsl(22 96% 52% / 0.20), 0 0 40px hsl(22 96% 52% / 0.08);
+}
+
+/* Colorado NFL scrollbar — orange tint */
+::-webkit-scrollbar-thumb {
+  background: hsl(218 35% 26%);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(22 96% 52% / 0.5);
 }

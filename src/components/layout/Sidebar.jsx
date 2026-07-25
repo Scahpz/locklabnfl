@@ -41,10 +41,10 @@ export default function Sidebar({ collapsed, setCollapsed }) {
         "flex items-center gap-3 border-b border-white/5 flex-shrink-0",
         collapsed ? "justify-center p-4" : "px-5 py-4"
       )}>
-        <img src={logo} alt="LockLab NBA" className="w-8 h-8 object-contain flex-shrink-0" />
+        <img src={logo} alt="LockLab NFL" className="w-8 h-8 object-contain flex-shrink-0" />
         {!collapsed && (
           <div>
-            <p className="text-sm font-bold text-foreground tracking-tight leading-none">LockLab<span className="text-primary">NBA</span></p>
+            <p className="text-sm font-bold text-foreground tracking-tight leading-none">LockLab<span className="text-primary">NFL</span></p>
             <p className="text-[10px] text-muted-foreground mt-0.5 tracking-widest uppercase">Analytics</p>
           </div>
         )}
