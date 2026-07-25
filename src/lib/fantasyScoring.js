@@ -7,6 +7,22 @@ function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
 }
 
+// Convert a raw stat value → fantasy points under the given settings
+function rawToFP(raw, propType, position, s) {
+  if (propType === 'passing_yards')   return raw * s.passYdPts;
+  if (propType === 'passing_tds')     return raw * s.passTDPts;
+  if (propType === 'rushing_yards')   return raw * s.rushYdPts;
+  if (propType === 'rushing_tds')     return raw * s.rushTDPts;
+  if (propType === 'receiving_yards') return raw * s.recYdPts;
+  if (propType === 'receiving_tds')   return raw * s.recTDPts;
+  if (propType === 'receptions') {
+    const pts = position === 'TE' && s.tePremium ? s.recPts + 0.5 : s.recPts;
+    return raw * pts;
+  }
+  if (propType === 'fantasy_points') return raw;
+  return 0;
+}
+
 function getDefStatKey(propType, position) {
   if (propType === 'passing_yards' || propType === 'passing_tds') return 'pass_yds_allowed';
   if (propType === 'rushing_yards' || propType === 'rushing_tds') return 'rush_yds_allowed';
@@ -331,16 +347,20 @@ export function fantasyScore(player, prop, settings) {
     });
   }
 
-  // Projected fantasy points (informational)
-  const projFPts = projectedFantasyPts(prop, position, s);
-
   const total   = parseFloat((tier1 + tier2 + tier3 + tier4 + fmtBonus).toFixed(1));
   const grade   = letterGrade(total);
   const verdict = total >= 72 ? 'START' : total >= 52 ? 'FLEX' : 'SIT';
 
-  const ceiling    = games.length ? Math.max(...games) : prop.projection ?? l6;
-  const floor      = games.length ? Math.min(...games) : Math.max(0, l6 - (prop.projection ?? l6) * 0.5);
-  const projection = prop.projection ?? l6;
+  // Raw stat floor/ceiling/projection — all capped so floor ≤ proj ≤ ceiling
+  const rawCeiling = games.length ? Math.max(...games) : l6 * 1.2;
+  const rawFloor   = games.length ? Math.min(...games) : Math.max(0, l6 * 0.6);
+  const rawProj    = Math.min(prop.projection ?? l6, rawCeiling); // projection never exceeds ceiling
+
+  // Convert everything to fantasy points using current league settings
+  const fp = (v) => parseFloat(rawToFP(v, prop.prop_type, position, s).toFixed(1));
+  const ceiling   = fp(rawCeiling);
+  const floor     = fp(rawFloor);
+  const projection = fp(rawProj);  // same unit as ceiling/floor — no separate ~FP needed
 
   return {
     total,
@@ -354,7 +374,7 @@ export function fantasyScore(player, prop, settings) {
     projection,
     ceiling,
     floor,
-    projFPts: parseFloat(projFPts.toFixed(1)),
+    projFPts: projection,           // kept for any existing references; same value
     matchupRating: matchupRatingLabel(tier2),
     scoringFormat: s.scoring,
   };

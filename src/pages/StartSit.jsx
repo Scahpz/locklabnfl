@@ -252,19 +252,14 @@ function PlayerRankCard({ rank, player, prop, score, onCompare }) {
         <div className="mt-2"><ScoreBar total={score.total} /></div>
         <div className="flex items-center gap-3 mt-1.5">
           <span className="text-[10px] text-muted-foreground">
-            Floor <span className="text-foreground font-medium">{score.floor}</span>
+            Floor <span className="text-foreground font-medium">{score.floor} FP</span>
           </span>
           <span className="text-[10px] text-muted-foreground">
-            Ceiling <span className="text-foreground font-medium">{score.ceiling}</span>
+            Proj <span className="text-primary font-medium">{score.projection} FP</span>
           </span>
           <span className="text-[10px] text-muted-foreground">
-            Proj <span className="text-primary font-medium">{score.projection}</span>
+            Ceil <span className="text-foreground font-medium">{score.ceiling} FP</span>
           </span>
-          {score.projFPts > 0 && (
-            <span className="text-[10px] text-muted-foreground">
-              ~<span className="text-amber-400 font-medium">{score.projFPts}</span> FP
-            </span>
-          )}
         </div>
       </div>
 
@@ -345,16 +340,14 @@ function WaiverCard({ rank, player, prop, score, waiverReason, injuryUpside, isH
       {score && (
         <div className="flex items-center gap-3 flex-wrap">
           <span className="text-[10px] text-muted-foreground">
-            Floor <span className="text-foreground font-medium">{score.floor}</span>
+            Floor <span className="text-foreground font-medium">{score.floor} FP</span>
           </span>
           <span className="text-[10px] text-muted-foreground">
-            Ceiling <span className="text-foreground font-medium">{score.ceiling}</span>
+            Proj <span className="text-primary font-medium">{score.projection} FP</span>
           </span>
-          {score.projFPts > 0 && (
-            <span className="text-[10px] text-muted-foreground">
-              ~<span className="text-amber-400 font-medium">{score.projFPts}</span> FP
-            </span>
-          )}
+          <span className="text-[10px] text-muted-foreground">
+            Ceil <span className="text-foreground font-medium">{score.ceiling} FP</span>
+          </span>
           {score.waiverBoost > 0 && (
             <span className="text-[10px] text-muted-foreground">
               Boost <span className="text-primary font-medium">+{score.waiverBoost}</span>
