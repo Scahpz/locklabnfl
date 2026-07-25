@@ -32,13 +32,53 @@ function letterGrade(total) {
 }
 
 function matchupRatingLabel(tier2Score) {
-  // tier2 max = 25
   const pct = tier2Score / 25;
   if (pct >= 0.85) return 'Elite';
   if (pct >= 0.68) return 'Good';
   if (pct >= 0.48) return 'Neutral';
   if (pct >= 0.30) return 'Tough';
   return 'Avoid';
+}
+
+// ─── Format bonus ────────────────────────────────────────────────────────────
+// Extra points that shift rankings when league settings change.
+// Applied on top of the base 0-100 score — grades and verdicts naturally follow.
+
+function formatBonus(position, propType, s) {
+  let bonus = 0;
+  const isRecProp  = ['receptions', 'receiving_yards', 'receiving_tds'].includes(propType);
+  const isPassProp = ['passing_yards', 'passing_tds'].includes(propType);
+
+  // PPR / receiving format: rewards WR/TE/RB receiving props
+  if (isRecProp) {
+    const table = {
+      ppr:      { WR: 6, TE: 5, RB: 4, QB: 0 },
+      half_ppr: { WR: 3, TE: 2.5, RB: 2, QB: 0 },
+      standard: { WR: 0, TE: 0, RB: 0, QB: 0 },
+    };
+    bonus += (table[s.scoring] ?? table.standard)[position] ?? 0;
+  }
+
+  // TE Premium: additional TE bonus on top of PPR
+  if (position === 'TE' && s.tePremium && isRecProp) bonus += 5;
+
+  // 6-point QB TDs: boosts QBs with strong TD rate
+  if (position === 'QB' && s.passTDPts === 6 && isPassProp) bonus += 4;
+
+  // Superflex: QBs gain major positional scarcity value
+  if (position === 'QB' && s.superflex) {
+    bonus += 8;
+  } else if (position === 'QB' && s.flexType === 'RB/WR/TE/QB') {
+    // QB-eligible flex without true superflex: moderate boost
+    bonus += 4;
+  }
+
+  // TE-eligible flex slot
+  if (position === 'TE' && isRecProp && ['RB/WR/TE', 'RB/WR/TE/QB'].includes(s.flexType)) {
+    bonus += 2;
+  }
+
+  return bonus;
 }
 
 // ─── Main scoring engine ─────────────────────────────────────────────────────
@@ -209,7 +249,8 @@ export function fantasyScore(player, prop, settings) {
     tip: prop.streak_info ?? `Hit ${Math.round(streakMultiplier * 3)} of last 3`,
   });
 
-  const tier3 = splitScore + shortWeekScore + usageScore + streakScore;
+  const cappedUsage = Math.min(usageScore, 7);
+  const tier3 = splitScore + shortWeekScore + cappedUsage + streakScore;
 
   // ── TIER 4 – Context (15 pts) ────────────────────────────────────────────
 
@@ -271,11 +312,30 @@ export function fantasyScore(player, prop, settings) {
 
   const tier4 = injBoostScore + blowoutScore + injScore + roleScore + trapScore;
 
-  // Projected fantasy points (informational, shown on card but doesn't change total)
+  // ── Format Bonus – league settings shift rankings ────────────────────────
+  const fmtBonus = formatBonus(position, prop.prop_type, s);
+  if (fmtBonus > 0) {
+    const tags = [
+      s.scoring !== 'standard' ? (s.scoring === 'ppr' ? 'PPR' : '½PPR') : null,
+      position === 'TE' && s.tePremium ? 'TE+' : null,
+      position === 'QB' && s.superflex ? 'SF' : null,
+      position === 'QB' && s.passTDPts === 6 ? '6PT TD' : null,
+      position === 'QB' && !s.superflex && s.flexType === 'RB/WR/TE/QB' ? 'QB Flex' : null,
+      position === 'TE' && ['RB/WR/TE','RB/WR/TE/QB'].includes(s.flexType) ? 'TE Flex' : null,
+    ].filter(Boolean).join(' · ');
+    criteria.push({
+      label: `Format Bonus (${tags})`,
+      score: parseFloat(fmtBonus.toFixed(2)),
+      maxScore: fmtBonus,
+      tip: `+${fmtBonus.toFixed(1)} pts from your league settings`,
+    });
+  }
+
+  // Projected fantasy points (informational)
   const projFPts = projectedFantasyPts(prop, position, s);
 
-  const total  = parseFloat((tier1 + tier2 + tier3 + tier4).toFixed(1));
-  const grade  = letterGrade(total);
+  const total   = parseFloat((tier1 + tier2 + tier3 + tier4 + fmtBonus).toFixed(1));
+  const grade   = letterGrade(total);
   const verdict = total >= 72 ? 'START' : total >= 52 ? 'FLEX' : 'SIT';
 
   const ceiling    = games.length ? Math.max(...games) : prop.projection ?? l6;
