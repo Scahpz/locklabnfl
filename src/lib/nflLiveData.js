@@ -74,6 +74,19 @@ function buildPropsFromProjections(position, proj, gameTotal, isHome) {
   const props = [];
   const { pass_yd, rush_yd, rec_yd, rec } = proj ?? {};
 
+  // Estimate per-player usage metrics from Sleeper volume projections.
+  // These feed the Usage/Target Share component of fantasyScore() so the
+  // score varies by player instead of defaulting to a neutral 0.5 placeholder.
+  // Target share: estimated targets / ~33 team targets per game.
+  const catchRate = position === 'TE' ? 0.75 : position === 'RB' ? 0.82 : 0.68;
+  const estTargetShare = (position !== 'QB' && rec)
+    ? parseFloat(Math.min(rec / (catchRate * 33), 0.45).toFixed(3))
+    : null;
+  // RB snap pct: correlated with rush volume; a 100-yd back is ~75% snaps.
+  const estSnapPct = (position === 'RB' && rush_yd)
+    ? parseFloat(Math.min(rush_yd / 130, 0.75).toFixed(3))
+    : null;
+
   if (position === 'QB') {
     if (pass_yd && pass_yd > 10) {
       props.push(makeProp('passing_yards', pass_yd * 0.88, pass_yd * 0.28, gameTotal, isHome));
@@ -83,24 +96,24 @@ function buildPropsFromProjections(position, proj, gameTotal, isHome) {
     }
   } else if (position === 'RB') {
     if (rush_yd && rush_yd > 0) {
-      props.push(makeProp('rushing_yards', rush_yd * 0.85, rush_yd * 0.45, gameTotal, isHome));
+      props.push({ ...makeProp('rushing_yards', rush_yd * 0.85, rush_yd * 0.45, gameTotal, isHome), snap_pct: estSnapPct, target_share: estTargetShare });
     }
     if (rec && rec > 0) {
-      props.push(makeProp('receptions', rec * 0.85, rec * 0.55, gameTotal, isHome));
+      props.push({ ...makeProp('receptions', rec * 0.85, rec * 0.55, gameTotal, isHome), snap_pct: estSnapPct, target_share: estTargetShare });
     }
   } else if (position === 'WR') {
     if (rec_yd && rec_yd > 0) {
-      props.push(makeProp('receiving_yards', rec_yd * 0.85, rec_yd * 0.45, gameTotal, isHome));
+      props.push({ ...makeProp('receiving_yards', rec_yd * 0.85, rec_yd * 0.45, gameTotal, isHome), target_share: estTargetShare });
     }
     if (rec && rec > 0) {
-      props.push(makeProp('receptions', rec * 0.85, rec * 0.55, gameTotal, isHome));
+      props.push({ ...makeProp('receptions', rec * 0.85, rec * 0.55, gameTotal, isHome), target_share: estTargetShare });
     }
   } else if (position === 'TE') {
     if (rec_yd && rec_yd > 0) {
-      props.push(makeProp('receiving_yards', rec_yd * 0.85, rec_yd * 0.50, gameTotal, isHome));
+      props.push({ ...makeProp('receiving_yards', rec_yd * 0.85, rec_yd * 0.50, gameTotal, isHome), target_share: estTargetShare });
     }
     if (rec && rec > 0) {
-      props.push(makeProp('receptions', rec * 0.85, rec * 0.55, gameTotal, isHome));
+      props.push({ ...makeProp('receptions', rec * 0.85, rec * 0.55, gameTotal, isHome), target_share: estTargetShare });
     }
   }
 

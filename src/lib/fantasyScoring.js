@@ -314,19 +314,31 @@ export function compareStartSit(playerA, propA, playerB, propB, settings) {
   const isHomeA = propA.is_home ?? false;
   const isHomeB = propB.is_home ?? false;
 
+  // For usage: RBs are measured by snap%, receivers by target share.
+  // Situation Score (tier4) is omitted — it never varies in NFL since there
+  // are no back-to-back games and we have no live trap-warning data.
+  function usageValue(player, prop) {
+    if (player.position === 'RB') return prop.snap_pct ?? null;
+    return prop.target_share ?? null;
+  }
+  const usageA = usageValue(playerA, propA);
+  const usageB = usageValue(playerB, propB);
+  const usageLabel = (playerA.position === 'RB' || playerB.position === 'RB')
+    ? 'Snap % / Target Share'
+    : 'Target Share';
+
   const dimensions = [
-    dim('Fantasy Score',   scoreA.total,            scoreB.total),
-    dim('Grade',           scoreA.total,            scoreB.total),
-    dim('Projected FP',    scoreA.projection,       scoreB.projection),
-    dim('Ceiling',         scoreA.ceiling,          scoreB.ceiling),
-    dim('Matchup',         oppStatA,                oppStatB),
+    dim('Fantasy Score',   scoreA.total,             scoreB.total),
+    dim('Grade',           scoreA.total,             scoreB.total),
+    dim('Projected FP',    scoreA.projection,        scoreB.projection),
+    dim('Ceiling',         scoreA.ceiling,           scoreB.ceiling),
+    dim('Matchup',         oppStatA,                 oppStatB),
     dim('Game Total',      propA.game_total ?? 45.5, propB.game_total ?? 45.5),
-    dim('Target Share',    propA.target_share ?? 0, propB.target_share ?? 0),
-    dim('Injury Status',   injWeight(injA),          injWeight(injB)),
-    dim('Home/Away',       isHomeA ? 1 : 0,         isHomeB ? 1 : 0),
-    dim('Floor',           scoreA.floor,            scoreB.floor),
-    dim('Role Score',      scoreA.tier3,            scoreB.tier3),
-    dim('Situation Score', scoreA.tier4,            scoreB.tier4),
+    dim(usageLabel,        usageA ?? 0,              usageB ?? 0),
+    dim('Injury Status',   injWeight(injA),           injWeight(injB)),
+    dim('Home/Away',       isHomeA ? 1 : 0,          isHomeB ? 1 : 0),
+    dim('Floor',           scoreA.floor,             scoreB.floor),
+    dim('Health & Role',   scoreA.tier3,             scoreB.tier3),
   ];
 
   dimensions[1] = { label: 'Grade', valueA: scoreA.grade, valueB: scoreB.grade,
