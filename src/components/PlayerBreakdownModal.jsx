@@ -184,20 +184,20 @@ function buildBullets(player, score, rank) {
 // result in sessionStorage so repeat opens are instant.
 
 async function fetchLastSeasonLog(playerId, team, position) {
-  const cacheKey = `locklab_ls24_${playerId}`;
+  const cacheKey = `locklab_ls25_${playerId}`;
   try {
     const cached = sessionStorage.getItem(cacheKey);
     if (cached) return JSON.parse(cached);
   } catch {}
 
-  const SEASON   = 2024;
+  const SEASON   = 2025;
   const espnTeam = SLEEPER_TO_ESPN[team] ?? team;
   const defKey   = POS_DEF_KEY[position];
 
   // All requests fire in parallel: ESPN schedule + 18 Sleeper weekly stat dumps
   const [schedRes, ...weekRes] = await Promise.allSettled([
     fetch(
-      `https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/${espnTeam}/schedule?season=${SEASON}&seasontype=2`,
+      `https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/${espnTeam}/schedule?season=2025&seasontype=2`,
     ).then(r => r.ok ? r.json() : null).catch(() => null),
     ...Array.from({ length: 18 }, (_, i) =>
       fetch(`https://api.sleeper.app/v1/stats/nfl/regular/${SEASON}/${i + 1}`)
@@ -331,7 +331,7 @@ function LSGameLog({ lsLog, pos, onRetry }) {
     return (
       <div className="flex flex-col items-center gap-3 py-10">
         <div className="w-5 h-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
-        <p className="text-[11px] text-muted-foreground">Loading 2024 game log…</p>
+        <p className="text-[11px] text-muted-foreground">Loading 2025 game log…</p>
         <p className="text-[10px] text-muted-foreground/60">
           Fetching 18 weeks of Sleeper stats — takes a moment the first time.
         </p>
@@ -342,7 +342,7 @@ function LSGameLog({ lsLog, pos, onRetry }) {
   if (lsLog === 'error') {
     return (
       <div className="flex flex-col items-center gap-3 py-8 text-center">
-        <p className="text-[11px] text-red-400">Failed to load 2024 game log.</p>
+        <p className="text-[11px] text-red-400">Failed to load 2025 game log.</p>
         <button onClick={onRetry} className="text-[10px] text-primary underline underline-offset-2">
           Retry
         </button>
@@ -450,7 +450,7 @@ function LSGameLog({ lsLog, pos, onRetry }) {
       </div>
 
       <p className="text-[10px] text-muted-foreground">
-        FP = half-PPR · Def rank uses <em>current</em> season stats as a proxy (2024 historical ranks unavailable) · Source: Sleeper
+        FP = half-PPR · Def rank reflects current season stats · Source: Sleeper
       </p>
     </div>
   );
@@ -670,7 +670,7 @@ export default function PlayerBreakdownModal({ entry, onClose }) {
 
             {/* FP Trend / Last Season — single section, filter always visible */}
             <Section
-              title={isLS ? '2024 Season Game Log' : 'FP Projection Model'}
+              title={isLS ? '2025 Season Game Log' : 'FP Projection Model'}
               icon={isLS ? Calendar : BarChart2}
               defaultOpen
             >
@@ -741,7 +741,7 @@ export default function PlayerBreakdownModal({ entry, onClose }) {
 
                     <p className="text-[10px] text-muted-foreground">
                       Simulated from this week's projection model (floor {score.floor} / proj {score.projection} / ceil {score.ceiling} FP).
-                      Switch to <strong>Last Season</strong> for real 2024 game-by-game data.
+                      Switch to <strong>Last Season</strong> for real 2025 game-by-game data.
                     </p>
                   </>
                 ) : (
