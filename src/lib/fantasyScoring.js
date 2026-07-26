@@ -343,17 +343,38 @@ export function compareStartSit(playerA, propA, playerB, propB, settings) {
   const isHomeA = propA.is_home ?? false;
   const isHomeB = propB.is_home ?? false;
 
+  // Human-readable health & role label (replaces raw tier3 decimal like "14.63")
+  function healthRoleLabel(player) {
+    const depth = player.depth_chart_order ?? 99;
+    const inj   = (player.injury_status ?? 'healthy').toLowerCase();
+    const status = inj === 'healthy' ? '' : ` (${inj})`;
+    if (depth === 1) return `Starter${status}`;
+    if (depth === 2) return `Backup${status}`;
+    if (depth <= 4) return `Depth ${depth}${status}`;
+    return `Depth${status}`;
+  }
+
   // For usage: RBs are measured by snap%, receivers by target share.
+  // QBs don't have a meaningful target share — show N/A instead of 0.
   // Situation Score (tier4) is omitted — it never varies in NFL since there
   // are no back-to-back games and we have no live trap-warning data.
   function usageValue(player, prop) {
+    if (player.position === 'QB') return null;
     if (player.position === 'RB') return prop.snap_pct ?? null;
     return prop.target_share ?? null;
   }
+  function usageDisplay(player, val) {
+    if (player.position === 'QB') return 'N/A';
+    if (val == null || val === 0) return '—';
+    if (player.position === 'RB') return `${Math.round(val * 100)}% snaps`;
+    return `${Math.round(val * 100)}% tgt`;
+  }
+
   const usageA = usageValue(playerA, propA);
   const usageB = usageValue(playerB, propB);
-  const usageLabel = (playerA.position === 'RB' || playerB.position === 'RB')
-    ? 'Snap % / Target Share'
+  const bothQB = posA === 'QB' && posB === 'QB';
+  const usageLabel = bothQB ? 'Target Share'
+    : (posA === 'RB' || posB === 'RB') ? 'Snap % / Target Share'
     : 'Target Share';
 
   const dimensions = [
@@ -374,10 +395,16 @@ export function compareStartSit(playerA, propA, playerB, propB, settings) {
     winner: scoreA.total > scoreB.total ? 'A' : scoreA.total < scoreB.total ? 'B' : 'tie' };
   dimensions[4] = { label: 'Matchup', valueA: scoreA.matchupRating, valueB: scoreB.matchupRating,
     winner: scoreA.tier2 > scoreB.tier2 ? 'A' : scoreA.tier2 < scoreB.tier2 ? 'B' : 'tie' };
+  // Usage: show formatted string values, not raw decimals
+  dimensions[6] = { label: usageLabel, valueA: usageDisplay(playerA, usageA), valueB: usageDisplay(playerB, usageB),
+    winner: (usageA ?? 0) > (usageB ?? 0) ? 'A' : (usageA ?? 0) < (usageB ?? 0) ? 'B' : 'tie' };
   dimensions[7] = { label: 'Injury Status', valueA: playerA.injury_status ?? 'Healthy', valueB: playerB.injury_status ?? 'Healthy',
     winner: injWeight(injA) > injWeight(injB) ? 'A' : injWeight(injA) < injWeight(injB) ? 'B' : 'tie' };
   dimensions[8] = { label: 'Home/Away', valueA: isHomeA ? 'Home' : 'Away', valueB: isHomeB ? 'Home' : 'Away',
     winner: (isHomeA && !isHomeB) ? 'A' : (!isHomeA && isHomeB) ? 'B' : 'tie' };
+  // Health & Role: show human-readable label instead of raw tier3 decimal
+  dimensions[10] = { label: 'Health & Role', valueA: healthRoleLabel(playerA), valueB: healthRoleLabel(playerB),
+    winner: scoreA.tier3 > scoreB.tier3 ? 'A' : scoreA.tier3 < scoreB.tier3 ? 'B' : 'tie' };
 
   const aWins     = dimensions.filter(d => d.winner === 'A').length;
   const bWins     = dimensions.filter(d => d.winner === 'B').length;
@@ -444,7 +471,10 @@ function scorePosition(players, position, s) {
       const score = fantasyScore(player, prop, s);
       if (!score) return null;
 
-      if (score.projection === 0 && score.floor === 0 && (player.depth_chart_order ?? 99) > 3) {
+      // Drop players with no real Sleeper projection data (they get identical fallback
+      // lines — QB: 246 pass yds, RB: 69 rush yds, TE: 36 rec yds — and 0/0/0 FP).
+      // Keep depth-chart starters even without week data since they belong in rankings.
+      if (score.projection === 0 && score.floor === 0 && player.proj_pts_ppr == null) {
         return null;
       }
 

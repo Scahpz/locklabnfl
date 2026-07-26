@@ -736,9 +736,10 @@ export default function StartSit() {
     }
     return activePlayers
       .filter(p =>
-        (p.depth_chart_order ?? 99) >= 2 &&
-        (p.depth_chart_order ?? 99) <= 4 &&
-        (p.proj_pts_ppr ?? 0) > 0.5,
+        // Require real Sleeper projection data (no offseason placeholders)
+        p.proj_pts_ppr != null &&
+        // Exclude clearly startable players projecting 12+ FP — they belong in rankings
+        p.proj_pts_ppr >= 0.5 && p.proj_pts_ppr < 12,
       )
       .map(p => {
         const starter = starterMap[`${p.team}_${p.position}`];
@@ -837,7 +838,7 @@ export default function StartSit() {
             </div>
             <p className="text-sm text-muted-foreground">
               {isLive
-                ? `${activePlayers.length} players · live roster + schedule`
+                ? `${filteredRankings.length} ranked · ${activePlayers.length} loaded`
                 : 'AI-powered start/sit decisions for your lineup'
               }
             </p>
@@ -881,7 +882,7 @@ export default function StartSit() {
           Head-to-Head Comparison
         </h2>
 
-        <div className="flex gap-3 items-stretch">
+        <div className="flex flex-col sm:flex-row gap-3 sm:items-stretch">
           <PlayerSlot
             label="Player A"
             player={compareA}
@@ -892,7 +893,7 @@ export default function StartSit() {
             onClear={() => { setCompareA(null); setPropA(null); }}
             onPick={() => setShowComparePicker('A')}
           />
-          <div className="flex items-center justify-center w-10 flex-shrink-0">
+          <div className="flex sm:flex-col items-center justify-center sm:w-10 flex-shrink-0 py-1 sm:py-0">
             <span className="text-xs font-bold text-muted-foreground bg-white/5 rounded-full w-8 h-8 flex items-center justify-center border border-white/8">
               VS
             </span>

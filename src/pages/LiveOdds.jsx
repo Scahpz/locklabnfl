@@ -5,7 +5,112 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
 import { NFL_API } from '@/lib/config';
+import { isBackendReachable } from '@/lib/liveData';
 const REFRESH_MS = 5 * 60 * 1000;
+
+const ESPN_SCOREBOARD = 'https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard';
+
+function espnDateStr(d) {
+  return d.toISOString().slice(0, 10).replace(/-/g, '');
+}
+
+// Tries multiple ESPN endpoints in sequence until we get games.
+// Order: current week → preseason → next 60-day window (early regular season lines).
+async function fetchESPNGames() {
+  async function tryUrl(url) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const data = await res.json();
+      const mapped = mapESPNToGames(data);
+      return mapped.length ? mapped : null;
+    } catch { return null; }
+  }
+
+  // 1. Current week (works once the season is active)
+  const current = await tryUrl(ESPN_SCOREBOARD);
+  if (current) return current;
+
+  // 2. Preseason (NFL preseason typically starts early August)
+  const preseason = await tryUrl(`${ESPN_SCOREBOARD}?seasontype=1&limit=50`);
+  if (preseason) return preseason;
+
+  // 3. Next 60 days — catches early regular-season lines posted in the offseason
+  const today = new Date();
+  const start  = espnDateStr(today);
+  const end    = espnDateStr(new Date(today.getTime() + 60 * 24 * 60 * 60 * 1000));
+  const upcoming = await tryUrl(`${ESPN_SCOREBOARD}?dates=${start}-${end}&limit=50`);
+  if (upcoming) return upcoming;
+
+  // 4. Explicit regular season Week 1 for upcoming year
+  const year = today.getMonth() >= 6 ? today.getFullYear() : today.getFullYear() - 1; // July+ = upcoming season
+  const week1 = await tryUrl(`${ESPN_SCOREBOARD}?seasontype=2&week=1&year=${year}&limit=20`);
+  if (week1) return week1;
+
+  return [];
+}
+
+// Maps ESPN scoreboard response to the shape GameOddsCard expects.
+// Maps ESPN scoreboard response to the shape GameOddsCard expects.
+// ESPN embeds DraftKings odds — moneyline/pointSpread/total subfields, no key required.
+function mapESPNToGames(espn) {
+  if (!espn?.events?.length) return [];
+  return espn.events.flatMap(event => {
+    const comp = event.competitions?.[0];
+    if (!comp) return [];
+    const home = comp.competitors?.find(c => c.homeAway === 'home');
+    const away = comp.competitors?.find(c => c.homeAway === 'away');
+    if (!home?.team?.abbreviation || !away?.team?.abbreviation) return [];
+
+    const homeAbv  = home.team.abbreviation;
+    const awayAbv  = away.team.abbreviation;
+    const odds     = comp.odds?.[0] ?? null;
+    const provider = odds?.provider?.name ?? 'DraftKings';
+
+    const toNum = str => str != null ? parseFloat(str) : null;
+
+    // Moneylines: odds.moneyline.home/away.close.odds (string like "-198", "+164")
+    const homeMl = toNum(odds?.moneyline?.home?.close?.odds);
+    const awayMl = toNum(odds?.moneyline?.away?.close?.odds);
+
+    // Spread: odds.pointSpread.home/away.close.line (string like "-3.5", "+3.5")
+    const homeSpread     = toNum(odds?.pointSpread?.home?.close?.line) ?? (odds?.spread ?? null);
+    const awaySpread     = toNum(odds?.pointSpread?.away?.close?.line) ?? (homeSpread != null ? -homeSpread : null);
+    const homeSpreadOdds = toNum(odds?.pointSpread?.home?.close?.odds) ?? -110;
+    const awaySpreadOdds = toNum(odds?.pointSpread?.away?.close?.odds) ?? -110;
+
+    // Total: odds.overUnder (float) + odds.total.over/under.close.odds
+    const totalLine      = odds?.overUnder ?? null;
+    const totalOverOdds  = toNum(odds?.total?.over?.close?.odds)  ?? (totalLine != null ? -110 : null);
+    const totalUnderOdds = toNum(odds?.total?.under?.close?.odds) ?? (totalLine != null ? -110 : null);
+
+    const hasOdds = homeMl != null || homeSpread != null || totalLine != null;
+    const allBooks = hasOdds ? [{
+      key:              'dk',
+      title:            provider,
+      ml_home:          homeMl,
+      ml_away:          awayMl,
+      spread_home:      homeSpread,
+      spread_away:      awaySpread,
+      spread_home_odds: homeSpreadOdds,
+      spread_away_odds: awaySpreadOdds,
+      total_line:       totalLine,
+      total_over_odds:  totalOverOdds,
+      total_under_odds: totalUnderOdds,
+    }] : [];
+
+    return [{
+      id:            comp.id,
+      commence_time: event.date,
+      homeAbv,
+      awayAbv,
+      moneyline: { home: homeMl, away: awayMl, bookmaker: provider },
+      spread:    { home: homeSpread, homeOdds: homeSpreadOdds, away: awaySpread, awayOdds: awaySpreadOdds },
+      total:     { line: totalLine, overOdds: totalOverOdds, underOdds: totalUnderOdds },
+      allBooks,
+    }];
+  });
+}
 
 const ALL_BOOKS = [
   { key: 'draftkings',    label: 'DraftKings' },
@@ -34,8 +139,9 @@ export default function LiveOdds() {
   const [savingSettings, setSavingSettings] = useState(false);
   const [selectedBooks, setSelectedBooks] = useState(['draftkings', 'fanduel', 'betmgm', 'caesars', 'pointsbetus']);
 
-  // Load settings on mount
+  // Load settings on mount (skip if backend not reachable)
   useEffect(() => {
+    if (!isBackendReachable()) return;
     fetch(`${NFL_API}/api/settings`)
       .then(r => r.json())
       .then(s => {
@@ -72,6 +178,21 @@ export default function LiveOdds() {
   };
 
   const load = useCallback(async () => {
+    if (!isBackendReachable()) {
+      setLoading(true);
+      setError(null);
+      try {
+        const mapped = await fetchESPNGames();
+        setGames(mapped);
+        setOddsSource(mapped.length ? 'odds_api' : null);
+        setLastUpdated(new Date());
+      } catch {
+        setGames([]);
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
     setLoading(true);
     setError(null);
     setCountdown(REFRESH_MS / 1000);
@@ -99,6 +220,7 @@ export default function LiveOdds() {
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
+    if (!isBackendReachable()) return;
     const iv = setInterval(load, REFRESH_MS);
     return () => clearInterval(iv);
   }, [load]);
@@ -123,27 +245,30 @@ export default function LiveOdds() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-foreground flex items-center gap-2">
-            <Activity className="w-7 h-7 text-primary" /> Live NBA Odds
+            <Activity className="w-7 h-7 text-primary" /> Live NFL Odds
           </h1>
           <p className="text-sm text-muted-foreground mt-1">Moneyline · Spread · Totals — updated every 5 min</p>
         </div>
         <div className="flex items-center gap-2">
-          {lastUpdated && (
+          {lastUpdated && !loading && (
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Clock className="w-3.5 h-3.5" />
               <span>Next refresh in {Math.floor(countdown / 60)}:{String(countdown % 60).padStart(2, '0')}</span>
             </div>
           )}
-          <button
-            onClick={() => setShowSettings(v => !v)}
-            className={cn(
-              "flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-all border",
-              showSettings ? "bg-primary/10 border-primary/40 text-primary" : "bg-secondary border-border text-foreground hover:bg-secondary/80"
-            )}
-          >
-            <Key className="w-3.5 h-3.5" />
-            {settings.odds_api_key ? 'Settings' : 'Add API Key'}
-          </button>
+          {/* API key settings only relevant when a custom backend is configured */}
+          {isBackendReachable() && (
+            <button
+              onClick={() => setShowSettings(v => !v)}
+              className={cn(
+                "flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-all border",
+                showSettings ? "bg-primary/10 border-primary/40 text-primary" : "bg-secondary border-border text-foreground hover:bg-secondary/80"
+              )}
+            >
+              <Key className="w-3.5 h-3.5" />
+              {settings.odds_api_key ? 'Settings' : 'Add API Key'}
+            </button>
+          )}
           <button
             onClick={load} disabled={loading}
             className={cn(
@@ -157,8 +282,8 @@ export default function LiveOdds() {
         </div>
       </div>
 
-      {/* Settings Panel */}
-      {showSettings && (
+      {/* Settings Panel — only when a custom backend is wired up */}
+      {showSettings && isBackendReachable() && (
         <div className="rounded-xl border border-border bg-card p-5 space-y-4">
           <h3 className="font-bold text-foreground flex items-center gap-2">
             <Key className="w-4 h-4 text-primary" /> Sportsbook Settings
@@ -223,8 +348,8 @@ export default function LiveOdds() {
         </div>
       )}
 
-      {/* PrizePicks free source banner — shown when no paid Odds API key */}
-      {!settings.odds_api_key && !showSettings && oddsSource === 'prizepicks' && (
+      {/* Upgrade hint — only when backend is configured and no paid key */}
+      {isBackendReachable() && !settings.odds_api_key && !showSettings && oddsSource === 'prizepicks' && (
         <div className="rounded-xl border border-chart-3/20 bg-chart-3/5 px-4 py-3 flex items-start gap-3">
           <Zap className="w-4 h-4 text-chart-3 mt-0.5 shrink-0" />
           <div className="flex-1 min-w-0">
@@ -289,7 +414,7 @@ export default function LiveOdds() {
       {lastUpdated && (
         <p className="text-center text-[11px] text-muted-foreground flex items-center justify-center gap-2">
           Last updated: {lastUpdated.toLocaleTimeString()}
-          {oddsSource === 'odds_api' && <span className="text-primary font-medium">· Live sportsbook odds</span>}
+          {oddsSource === 'odds_api' && <span className="text-primary font-medium">· {isBackendReachable() ? 'Live sportsbook odds' : 'Via ESPN (free)'}</span>}
           {oddsSource === 'underdog' && (
             <span className="flex items-center gap-1 text-chart-3 font-medium">
               <Zap className="w-3 h-3" />· Powered by Underdog Fantasy (free live lines)

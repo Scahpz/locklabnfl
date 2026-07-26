@@ -925,16 +925,6 @@ export default function Props() {
                       </span>
                     )}
                   </div>
-                  {/* Sportsbook unlock hint — only when no sportsbook data loaded */}
-                  {hasOnlyFreeSources && (
-                    <p className="text-[10px] text-muted-foreground/40 pl-1">
-                      FanDuel · Bet365 · BetMGM · Caesars + more available with an{' '}
-                      <a href="https://the-odds-api.com" target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-muted-foreground/70 transition-colors">
-                        Odds API key
-                      </a>
-                      {' '}in Settings.
-                    </p>
-                  )}
                 </div>
               );
             })()}

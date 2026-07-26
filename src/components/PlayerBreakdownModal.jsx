@@ -64,12 +64,12 @@ function estimateFPAllowed(opponent, pos) {
   return Math.round(POSITION_AVG_FP[pos] * (defStat / leagueAvg) * 10) / 10;
 }
 
-function findSimilarDefenses(opponent, pos, count = 3) {
+function findSimilarDefenses(opponent, pos, excludeTeam = null, count = 3) {
   const keys = Object.keys(NFL_LEAGUE_AVGS);
   const opp  = TEAM_STATS[opponent];
   if (!opp) return [];
   return Object.entries(TEAM_STATS)
-    .filter(([team]) => team !== opponent)
+    .filter(([team]) => team !== opponent && team !== excludeTeam)
     .map(([team, stats]) => {
       const dist = Math.sqrt(
         keys.reduce((sum, k) => {
@@ -121,12 +121,12 @@ function buildSummary(player, score, rank) {
   else
     parts.push(`${player.player_name} currently has no confirmed projection for this week (${grade}, ${total}/100).`);
   if (rank != null) {
-    if (rank <= 10)
+    if (rank <= 8)
       parts.push(`The ${player.opponent} defense ranks #${rank}/32 against ${pos}s — one of the toughest matchups in the league, factored into the grade.`);
-    else if (rank <= 22)
-      parts.push(`The matchup vs ${player.opponent} (#${rank}/32 against ${pos}s) is roughly league-average.`);
-    else
+    else if (rank >= 25)
       parts.push(`The ${player.opponent} defense ranks #${rank}/32 against ${pos}s — one of the softest matchups in the league, adding upside to the projection.`);
+    else
+      parts.push(`The matchup vs ${player.opponent} (#${rank}/32 against ${pos}s) is roughly league-average — no strong directional edge.`);
   }
   if (verdict === 'START')
     parts.push(`The projection, role, and matchup all align — a confident start.`);
@@ -528,9 +528,10 @@ export default function PlayerBreakdownModal({ entry, onClose }) {
       .catch(() => setLsLog('error'));
   }, [entry, lsLog, pos]);
 
+  const playerTeam = entry?.player?.team ?? null;
   const similar = useMemo(
-    () => findSimilarDefenses(opponent, pos),
-    [opponent, pos],
+    () => findSimilarDefenses(opponent, pos, playerTeam),
+    [opponent, pos, playerTeam],
   );
 
   if (!entry) return null;
@@ -605,7 +606,6 @@ export default function PlayerBreakdownModal({ entry, onClose }) {
               </div>
               <div className="text-[11px] text-muted-foreground mt-0.5">
                 {player.team} vs {opponent}
-                {prop?.line != null && ` · ${propLabel} ${prop.line}`}
               </div>
             </div>
             <div className="flex items-center gap-3 flex-shrink-0">
@@ -728,11 +728,11 @@ export default function PlayerBreakdownModal({ entry, onClose }) {
                   )}
 
                   <p className="text-[11px] text-muted-foreground">
-                    {rank <= 10
-                      ? `${opponent} ranks #${rank}/32 against ${pos}s — one of the toughest defenses in the league. Rank #1 = best defense.`
-                      : rank <= 22
-                      ? `${opponent} (#${rank}/32 vs ${pos}s) is roughly league-average — no strong directional edge.`
-                      : `${opponent} ranks #${rank}/32 against ${pos}s — one of the softest defenses in the league. Rank #32 = worst defense.`}
+                    {rank <= 8
+                      ? `${opponent} ranks #${rank}/32 against ${pos}s — one of the toughest matchups in the league. Rank #1 = best defense.`
+                      : rank >= 25
+                      ? `${opponent} ranks #${rank}/32 against ${pos}s — one of the softest matchups in the league. Rank #32 = worst defense.`
+                      : `${opponent} (#${rank}/32 vs ${pos}s) is roughly league-average against ${pos}s — no strong directional edge.`}
                   </p>
                 </div>
               ) : (
@@ -869,11 +869,10 @@ export default function PlayerBreakdownModal({ entry, onClose }) {
 
             {/* Betting Context stub */}
             <Section title="Betting Context" icon={Target} defaultOpen={false}>
-              <div className="rounded-xl bg-white/3 border border-white/8 px-4 py-3">
+              <div className="rounded-xl bg-white/3 border border-white/8 px-4 py-5 flex flex-col items-center gap-2">
+                <Target className="w-5 h-5 text-muted-foreground/40" />
                 <p className="text-[11px] text-muted-foreground text-center">
-                  Live lines (spread, O/U, player props, implied totals) require a connected sportsbook API.
-                  Set <code className="text-primary/80 text-[10px]">VITE_API_URL</code> in Vercel to your
-                  Railway backend to enable this section.
+                  Odds data unavailable. Live lines, spreads, and player props will appear here once a sportsbook feed is connected.
                 </p>
               </div>
             </Section>

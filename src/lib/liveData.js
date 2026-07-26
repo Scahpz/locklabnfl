@@ -12,11 +12,12 @@ const FRESH_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 
 import { NFL_API } from './config';
 import { isDemoMode, getMockPayload } from './mockData';
+import { fetchPropsNoBackend } from './propsNoBackend';
 
 // True when the API URL points to localhost but the browser is on a real domain.
 // This happens in Vercel production builds where .env has VITE_API_URL=http://localhost:8000
 // embedded at build time. Calling localhost from a remote domain always 503s.
-function isBackendReachable() {
+export function isBackendReachable() {
   const apiIsLocal = NFL_API.includes('localhost') || NFL_API.includes('127.0.0.1');
   if (!apiIsLocal) return true; // external URL — assume reachable
   if (typeof window === 'undefined') return true; // SSR / build — skip check
@@ -222,9 +223,17 @@ let _fetchPromise = null;
 
 async function _doFetch() {
   // If the configured API URL is localhost but we're running on a real domain,
-  // the calls will always 503. Skip them immediately rather than hanging for 55s.
+  // fall back to public APIs (PrizePicks + Sleeper) instead of failing.
   if (!isBackendReachable()) {
-    return { game_date: new Date().toLocaleDateString(), games_summary: [], props: [], _backendMissing: true };
+    const fallback = await fetchPropsNoBackend();
+    if (fallback) {
+      const payload = { ...fallback, props: fallback.props.map((p, i) => enrichProp(p, i)) };
+      localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
+      localStorage.setItem(CACHE_TS_KEY, String(Date.now()));
+      return payload;
+    }
+    // No NFL props available right now (offseason / no games today)
+    return { game_date: new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }), games_summary: [], props: [] };
   }
 
   const defaultBookmakers = 'draftkings,fanduel,betmgm,caesars,pointsbetus';
