@@ -49,6 +49,13 @@ const POS_TOP_FP = { QB: 28, RB: 22, WR: 20, TE: 16 };
 // uses the same tier1 scale.
 const REPLACEMENT_LEVEL = { QB: 12, RB: 4, WR: 5, TE: 2 };
 
+// Roster-slot based START/FLEX thresholds for a 12-team 1QB/2RB/2WR/1TE/1FLEX league.
+// Scaled proportionally by s.leagueSize at runtime.
+// START = players expected to start leaguewide each week.
+// FLEX  = borderline / streaming tier below that.
+const STARTER_COUNTS = { QB: 13, RB: 26, WR: 26, TE: 13 };
+const FLEX_COUNTS    = { QB: 9,  RB: 18, WR: 18, TE: 7  };
+
 // ─── Dynamic variance ─────────────────────────────────────────────────────────
 // Coefficient of variation (std / mean) for floor/ceiling spread.
 // High-volume players are more consistent; boom/bust players have wider ranges.
@@ -376,11 +383,16 @@ const PRIMARY_PROP_TYPE = {
   TE: 'receiving_yards',
 };
 
-// Score all players at one position and return unsorted entries.
-// Skips players with no props and filters out those with 0-projection
-// AND no depth-chart role (pure backups with no expected value).
+// Score all players at one position, sort by total, then assign START/FLEX/SIT
+// by rank within the position group (not by raw score thresholds).
+// This means the top-N projected starters leaguewide always get START regardless
+// of how the 0-100 score distributes — fixing compression in mixed "All" views.
 function scorePosition(players, position, s) {
-  return players
+  const scale  = (s.leagueSize ?? 12) / 12;
+  const startN = Math.round(STARTER_COUNTS[position] * scale);
+  const flexN  = Math.round(FLEX_COUNTS[position]    * scale);
+
+  const scored = players
     .filter(p => p.position === position)
     .map(player => {
       const primaryType = PRIMARY_PROP_TYPE[position] ?? 'receiving_yards';
@@ -391,15 +403,22 @@ function scorePosition(players, position, s) {
       const score = fantasyScore(player, prop, s);
       if (!score) return null;
 
-      // Hard-filter: players with zero floor/proj/ceiling AND deep on depth chart
-      // should not appear in rankings at all.
       if (score.projection === 0 && score.floor === 0 && (player.depth_chart_order ?? 99) > 3) {
         return null;
       }
 
       return { player, prop, score };
     })
-    .filter(Boolean);
+    .filter(Boolean)
+    .sort((a, b) => (b.score?.total ?? 0) - (a.score?.total ?? 0));
+
+  // Assign verdict by position rank, not by score cutoff.
+  // rankPlayers() merges these after the fact; the verdict survives unchanged.
+  return scored.map((entry, idx) => {
+    const rank    = idx + 1;
+    const verdict = rank <= startN ? 'START' : rank <= startN + flexN ? 'FLEX' : 'SIT';
+    return { ...entry, score: { ...entry.score, verdict } };
+  });
 }
 
 export function rankPlayers(players, position = 'all', settings) {
