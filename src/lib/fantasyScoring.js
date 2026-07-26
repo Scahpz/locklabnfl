@@ -3,9 +3,7 @@ import { getLeagueSettings } from '@/lib/leagueSettings';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function clamp(v, min, max) {
-  return Math.max(min, Math.min(max, v));
-}
+function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 
 function getDefStatKey(propType, position) {
   if (propType === 'passing_yards' || propType === 'passing_tds') return 'pass_yds_allowed';
@@ -40,126 +38,128 @@ function matchupRatingLabel(tier2Score) {
   return 'Avoid';
 }
 
+// ─── Positional constants ─────────────────────────────────────────────────────
+
+// "Elite week" ceiling per position (not theoretical max, just a great week)
+const POS_TOP_FP = { QB: 28, RB: 22, WR: 20, TE: 16 };
+
+// Replacement-level FP — the floor of a waiver-wire starter in a 12-team league.
+// PAR = projFP - replacementFP. Cross-position comparisons are fair because
+// a TE who is 8 pts above replacement is worth more than an RB 8 pts above replacement
+// uses the same tier1 scale.
+const REPLACEMENT_LEVEL = { QB: 12, RB: 4, WR: 5, TE: 2 };
+
+// ─── Dynamic variance ─────────────────────────────────────────────────────────
+// Coefficient of variation (std / mean) for floor/ceiling spread.
+// High-volume players are more consistent; boom/bust players have wider ranges.
+
+function computeCV(player) {
+  const pos    = player.position ?? 'WR';
+  const rec    = player.proj_rec    ?? null;
+  const rushYd = player.proj_rush_yd ?? null;
+
+  if (pos === 'QB') return 0.28;
+
+  if (pos === 'WR') {
+    if (rec != null) return Math.max(0.38, 0.72 - rec * 0.024);
+    return 0.55;
+  }
+  if (pos === 'TE') {
+    if (rec != null) return Math.max(0.40, 0.78 - rec * 0.030);
+    return 0.60;
+  }
+  if (pos === 'RB') {
+    if (rushYd != null) return Math.max(0.35, 0.65 - rushYd * 0.004);
+    return 0.52;
+  }
+  return 0.50;
+}
+
 // ─── Format bonus ─────────────────────────────────────────────────────────────
-// PPR vs Standard is already captured in Sleeper's pts_ppr / pts_std projections.
-// Only add bonuses for rules Sleeper doesn't know: TE premium, 6PT TDs, superflex.
+// PPR vs Standard is already baked into Sleeper's pts_ppr / pts_std projections.
+// Only bonus for rules Sleeper can't know: TE premium, 6PT passing TDs, superflex.
 
 function formatBonus(position, s) {
   let bonus = 0;
-
-  // TE Premium: extra 0.5/rec for TEs (not in Sleeper pts_ppr)
   if (position === 'TE' && s.tePremium) bonus += 5;
-
-  // 6-point QB TDs: Sleeper assumes 4PT TDs — adjust for the extra 2 pts/TD
   if (position === 'QB' && s.passTDPts === 6) bonus += 4;
-
-  // Superflex: QBs gain major scarcity value when a 2nd QB slot exists
-  if (position === 'QB' && s.superflex) {
-    bonus += 8;
-  } else if (position === 'QB' && s.flexType === 'RB/WR/TE/QB') {
-    bonus += 4;
-  }
-
-  // TE-eligible flex slot adds a small bump to TE value
-  if (position === 'TE' && ['RB/WR/TE', 'RB/WR/TE/QB'].includes(s.flexType)) {
-    bonus += 2;
-  }
-
+  if (position === 'QB' && s.superflex) bonus += 8;
+  else if (position === 'QB' && s.flexType === 'RB/WR/TE/QB') bonus += 4;
+  if (position === 'TE' && ['RB/WR/TE', 'RB/WR/TE/QB'].includes(s.flexType)) bonus += 2;
   return bonus;
 }
 
-// Resolve the projected FP for a player under the current scoring format
+// Resolve projected FP for current scoring format
 function getProjectedFP(player, s) {
   if (!player) return null;
   if (s.scoring === 'ppr')      return player.proj_pts_ppr      ?? null;
   if (s.scoring === 'half_ppr') return player.proj_pts_half_ppr ?? player.proj_pts_ppr ?? null;
-  /* standard */                return player.proj_pts_std      ?? player.proj_pts_ppr ?? null;
+  return player.proj_pts_std ?? player.proj_pts_ppr ?? null;
 }
-
-// Rough FP estimate from a prop line when no Sleeper projection is available
-function estimateFPFromProp(l6, propType, position, s) {
-  let base = 0;
-  if (propType === 'passing_yards')   base = l6 * s.passYdPts;
-  else if (propType === 'rushing_yards')   base = l6 * s.rushYdPts;
-  else if (propType === 'receiving_yards') base = l6 * s.recYdPts;
-  else if (propType === 'receptions')      base = l6 * s.recPts;
-  else base = l6 * 0.1;
-  // Add typical TD contribution by position
-  const tdBonus =
-    position === 'QB' ? 1.5 * s.passTDPts :
-    position === 'RB' ? 0.3 * s.rushTDPts :
-    position === 'WR' ? 0.15 * s.recTDPts :
-    position === 'TE' ? 0.2  * s.recTDPts : 0;
-  return base + tdBonus;
-}
-
-// "Great week" FP per position — players projected near this mark should rank as clear STARTs.
-// Intentionally not the all-time max (Josh Allen can hit 45+); represents a strong elite week.
-const POS_TOP_FP = { QB: 28, RB: 22, WR: 22, TE: 16 };
 
 // ─── Main scoring engine ──────────────────────────────────────────────────────
 
-/**
- * Returns a score 0-100 and breakdown for a single player + prop.
- * Projected FP (from Sleeper) is the primary ranking driver (~60% of score).
- * Matchup, health, and situation are modifiers.
- */
 export function fantasyScore(player, prop, settings) {
   if (!player || !prop) return null;
   const s = settings || getLeagueSettings();
 
-  const position  = player.position ?? 'WR';
-  const propType  = prop.prop_type  ?? 'receiving_yards';
-  const opponent  = player.opponent ?? '';
-  const isStarter = player.is_starter ?? true;
-  const depthOrder = player.depth_chart_order ?? (isStarter ? 1 : 99);
-  const injStatus = (player.injury_status ?? 'healthy').toLowerCase();
-  const injNote   = player.injury_note ?? '';
-  const gameTotal = prop.game_total ?? 45.5;
-  const isHome    = prop.is_home    ?? false;
+  const position   = player.position   ?? 'WR';
+  const propType   = prop.prop_type    ?? 'receiving_yards';
+  const opponent   = player.opponent   ?? '';
+  const depthOrder = player.depth_chart_order ?? (player.is_starter ? 1 : 99);
+  const injStatus  = (player.injury_status ?? 'healthy').toLowerCase();
+  const gameTotal  = prop.game_total   ?? 45.5;
+  const isHome     = prop.is_home      ?? false;
 
   const criteria = [];
 
-  // ── TIER 1 – Projected Fantasy Value (60 pts) ────────────────────────────
-  // The single biggest factor: how many FP is this player expected to score?
-  // Uses Sleeper's per-player weekly projection when available, otherwise
-  // estimates from the prop line average.
+  // ── TIER 1 – Points Above Replacement (60 pts) ───────────────────────────
+  // Primary ranking driver. Uses Sleeper's per-player weekly projection.
+  // Normalized against PAR so cross-position comparisons are fair:
+  //   a TE 8 FP above replacement ranks higher than an RB 8 FP above replacement
+  //   because replacement TEs are easier to stream.
 
-  const rawProjFP = getProjectedFP(player, s);
-  const topFP     = POS_TOP_FP[position] ?? 25;
+  const rawProjFP  = getProjectedFP(player, s);
+  const replLevel  = REPLACEMENT_LEVEL[position] ?? 5;
+  const topFP      = POS_TOP_FP[position]        ?? 20;
+  const parRange   = topFP - replLevel;
 
   let tier1Score;
-  let projFPLabel;
+  let projFPBase;
 
   if (rawProjFP != null) {
-    tier1Score  = clamp(rawProjFP / topFP, 0, 1.1) * 60;
-    const fmt   = s.scoring === 'ppr' ? 'PPR' : s.scoring === 'half_ppr' ? 'Half PPR' : 'Std';
-    projFPLabel = `${rawProjFP.toFixed(1)} proj FP (${fmt})`;
+    const par = Math.max(0, rawProjFP - replLevel);
+    tier1Score = clamp(par / parRange, 0, 1.1) * 60;
+    projFPBase = rawProjFP;
+    const fmt = s.scoring === 'ppr' ? 'PPR' : s.scoring === 'half_ppr' ? 'Half PPR' : 'Std';
+    criteria.push({
+      label: 'Projected Fantasy Points',
+      score: parseFloat(tier1Score.toFixed(2)),
+      maxScore: 60,
+      tip: `${rawProjFP.toFixed(1)} proj FP (${fmt}) · ${par.toFixed(1)} pts above replacement`,
+    });
   } else {
-    // Fallback: estimate FP from the prop line average
-    const l6       = prop.avg_last_10 ?? prop.line ?? 0;
-    const estFP    = estimateFPFromProp(l6, propType, position, s);
-    tier1Score     = clamp(estFP / topFP, 0, 1.1) * 60;
-    projFPLabel    = `~${estFP.toFixed(1)} est FP (no projection data)`;
+    // No Sleeper projection — player has no projected fantasy value this week.
+    // Assign a minimal tier1 so they still appear in the list but rank at the bottom.
+    tier1Score = 2;
+    projFPBase = null;
+    criteria.push({
+      label: 'Projected Fantasy Points',
+      score: 2,
+      maxScore: 60,
+      tip: 'No projection data — not expected to have fantasy value this week',
+    });
   }
-
-  criteria.push({
-    label:    'Projected Fantasy Points',
-    score:    parseFloat(tier1Score.toFixed(2)),
-    maxScore: 60,
-    tip:      projFPLabel,
-  });
 
   const tier1 = tier1Score;
 
   // ── TIER 2 – Matchup (20 pts) ─────────────────────────────────────────────
 
-  const defStatKey  = getDefStatKey(propType, position);
+  const defStatKey   = getDefStatKey(propType, position);
   const teamDefStats = TEAM_STATS[opponent] ?? null;
-  const oppStat     = teamDefStats ? teamDefStats[defStatKey] : null;
-  const leagueAvg   = NFL_LEAGUE_AVGS[defStatKey] ?? 100;
+  const oppStat      = teamDefStats ? teamDefStats[defStatKey] : null;
+  const leagueAvg    = NFL_LEAGUE_AVGS[defStatKey] ?? 100;
 
-  // 2a. Opponent defense vs position (12 pts)
   let defScore = 0.5 * 12;
   let defTip   = 'Defense data unavailable — neutral';
   if (oppStat != null) {
@@ -168,11 +168,9 @@ export function fantasyScore(player, prop, settings) {
   }
   criteria.push({ label: 'Opponent Defense', score: parseFloat(defScore.toFixed(2)), maxScore: 12, tip: defTip });
 
-  // 2b. Game total (6 pts)
   const totalScore = clamp(0.5 + (gameTotal - 45.5) / 12, 0, 1) * 6;
   criteria.push({ label: 'Game Total', score: parseFloat(totalScore.toFixed(2)), maxScore: 6, tip: `O/U ${gameTotal} (avg 45.5)` });
 
-  // 2c. Home/Away (2 pts)
   const homeScore = (isHome ? 0.65 : 0.35) * 2;
   criteria.push({ label: 'Home/Away', score: parseFloat(homeScore.toFixed(2)), maxScore: 2, tip: isHome ? 'Home game' : 'Away game' });
 
@@ -180,30 +178,23 @@ export function fantasyScore(player, prop, settings) {
 
   // ── TIER 3 – Health / Role (15 pts) ──────────────────────────────────────
 
-  // 3a. Injury status (8 pts)
   let injMult = 1.0;
   if      (injStatus.includes('out'))          injMult = 0.0;
   else if (injStatus.includes('doubtful'))     injMult = 0.1;
   else if (injStatus.includes('questionable')) injMult = 0.45;
   const injScore = injMult * 8;
   criteria.push({
-    label:    'Injury Status',
-    score:    parseFloat(injScore.toFixed(2)),
-    maxScore: 8,
-    tip:      injStatus.charAt(0).toUpperCase() + injStatus.slice(1) || 'Healthy',
+    label: 'Injury Status', score: parseFloat(injScore.toFixed(2)), maxScore: 8,
+    tip: injStatus.charAt(0).toUpperCase() + injStatus.slice(1) || 'Healthy',
   });
 
-  // 3b. Depth / starting role (5 pts)
   const roleMulti = depthOrder === 1 ? 1.0 : depthOrder === 2 ? 0.5 : 0.15;
   const roleScore = roleMulti * 5;
   criteria.push({
-    label:    'Starting Role',
-    score:    parseFloat(roleScore.toFixed(2)),
-    maxScore: 5,
-    tip:      depthOrder === 1 ? 'Confirmed starter' : depthOrder === 2 ? 'Backup (depth 2)' : 'Deep depth chart',
+    label: 'Starting Role', score: parseFloat(roleScore.toFixed(2)), maxScore: 5,
+    tip: depthOrder === 1 ? 'Confirmed starter' : depthOrder === 2 ? 'Backup (depth 2)' : 'Deep depth chart',
   });
 
-  // 3c. Usage / target share (2 pts)
   const targetShare = prop.target_share ?? null;
   const snapPct     = prop.snap_pct     ?? null;
   let usageScore = 0.5 * 2;
@@ -221,15 +212,11 @@ export function fantasyScore(player, prop, settings) {
 
   // ── TIER 4 – Situation (5 pts) ────────────────────────────────────────────
 
-  // 4a. Rest / short week (3 pts)
-  const isShortWeek = prop.is_back_to_back ?? false;
-  const restScore   = (isShortWeek ? 0.3 : 1.0) * 3;
-  criteria.push({ label: 'Rest / Schedule', score: parseFloat(restScore.toFixed(2)), maxScore: 3, tip: isShortWeek ? 'Short week — fatigue risk' : 'Full rest' });
+  const restScore = (prop.is_back_to_back ? 0.3 : 1.0) * 3;
+  criteria.push({ label: 'Rest / Schedule', score: parseFloat(restScore.toFixed(2)), maxScore: 3, tip: prop.is_back_to_back ? 'Short week' : 'Full rest' });
 
-  // 4b. Trap warning (2 pts)
-  const trapWarning = prop.trap_warning ?? false;
-  const trapScore   = (trapWarning ? 0.2 : 1.0) * 2;
-  criteria.push({ label: 'Trap Warning', score: parseFloat(trapScore.toFixed(2)), maxScore: 2, tip: trapWarning ? 'TRAP: public fade — use caution' : 'No trap warning' });
+  const trapScore = (prop.trap_warning ? 0.2 : 1.0) * 2;
+  criteria.push({ label: 'Trap Warning', score: parseFloat(trapScore.toFixed(2)), maxScore: 2, tip: prop.trap_warning ? 'TRAP: public fade' : 'No trap warning' });
 
   const tier4 = restScore + trapScore;
 
@@ -237,17 +224,17 @@ export function fantasyScore(player, prop, settings) {
   const fmtBonus = formatBonus(position, s);
   if (fmtBonus > 0) {
     const tags = [
-      position === 'TE' && s.tePremium                              ? 'TE Premium' : null,
-      position === 'QB' && s.superflex                              ? 'Superflex'  : null,
-      position === 'QB' && s.passTDPts === 6                        ? '6PT TDs'    : null,
-      position === 'QB' && !s.superflex && s.flexType === 'RB/WR/TE/QB' ? 'QB Flex' : null,
+      position === 'TE' && s.tePremium                                   ? 'TE Premium' : null,
+      position === 'QB' && s.superflex                                    ? 'Superflex'  : null,
+      position === 'QB' && s.passTDPts === 6                             ? '6PT TDs'    : null,
+      position === 'QB' && !s.superflex && s.flexType === 'RB/WR/TE/QB' ? 'QB Flex'    : null,
       position === 'TE' && ['RB/WR/TE','RB/WR/TE/QB'].includes(s.flexType) ? 'TE Flex' : null,
     ].filter(Boolean).join(' · ');
     criteria.push({
-      label:    `Format Bonus (${tags})`,
-      score:    parseFloat(fmtBonus.toFixed(2)),
+      label: `Format Bonus (${tags})`,
+      score: parseFloat(fmtBonus.toFixed(2)),
       maxScore: fmtBonus,
-      tip:      `+${fmtBonus.toFixed(1)} pts from your league settings`,
+      tip: `+${fmtBonus.toFixed(1)} pts from your league settings`,
     });
   }
 
@@ -255,27 +242,25 @@ export function fantasyScore(player, prop, settings) {
   const grade   = letterGrade(total);
   const verdict = total >= 72 ? 'START' : total >= 52 ? 'FLEX' : 'SIT';
 
-  // ── Floor / Projection / Ceiling (fantasy points) ────────────────────────
-  // Derived from real Sleeper weekly projection with realistic variance:
-  //   floor = bad game (10th percentile) ≈ 45% of projection
-  //   ceiling = great game (90th percentile) ≈ 165% of projection
-  const projFPBase = rawProjFP ?? 0;
-  const floor      = parseFloat((projFPBase * 0.45).toFixed(1));
-  const projection = parseFloat(projFPBase.toFixed(1));
-  const ceiling    = parseFloat((projFPBase * 1.65).toFixed(1));
+  // ── Floor / Projection / Ceiling ─────────────────────────────────────────
+  // Player-specific variance: high-volume players have tighter ranges,
+  // boom/bust players have wider ranges. CV derived from projected stats.
+  let floor = 0, projection = 0, ceiling = 0;
+  if (projFPBase != null && projFPBase > 0) {
+    const cv   = computeCV(player);
+    floor      = parseFloat(Math.max(0, projFPBase * (1 - cv)).toFixed(1));
+    projection = parseFloat(projFPBase.toFixed(1));
+    ceiling    = parseFloat((projFPBase * (1 + cv)).toFixed(1));
+  }
 
   return {
-    total,
-    grade,
-    tier1:    parseFloat(tier1.toFixed(2)),
-    tier2:    parseFloat(tier2.toFixed(2)),
-    tier3:    parseFloat(tier3.toFixed(2)),
-    tier4:    parseFloat(tier4.toFixed(2)),
+    total, grade, verdict,
+    tier1: parseFloat(tier1.toFixed(2)),
+    tier2: parseFloat(tier2.toFixed(2)),
+    tier3: parseFloat(tier3.toFixed(2)),
+    tier4: parseFloat(tier4.toFixed(2)),
     criteria,
-    verdict,
-    projection,
-    ceiling,
-    floor,
+    projection, ceiling, floor,
     projFPts: projection,
     matchupRating: matchupRatingLabel(tier2),
     scoringFormat: s.scoring,
@@ -296,18 +281,15 @@ export function compareStartSit(playerA, propA, playerB, propB, settings) {
     let winner = 'tie';
     if (typeof vA === 'number' && typeof vB === 'number') {
       const diff = higherWins ? vA - vB : vB - vA;
-      if (diff > 0.01)       winner = 'A';
-      else if (diff < -0.01) winner = 'B';
-    } else if (vA !== vB) {
-      winner = vA > vB ? (higherWins ? 'A' : 'B') : (higherWins ? 'B' : 'A');
+      if (diff > 0.01) winner = 'A'; else if (diff < -0.01) winner = 'B';
     }
     return { label, valueA: vA, valueB: vB, winner };
   }
 
-  const posA   = playerA.position ?? 'WR';
-  const posB   = playerB.position ?? 'WR';
-  const oppA   = playerA.opponent ?? '';
-  const oppB   = playerB.opponent ?? '';
+  const posA  = playerA.position ?? 'WR';
+  const posB  = playerB.position ?? 'WR';
+  const oppA  = playerA.opponent ?? '';
+  const oppB  = playerB.opponent ?? '';
   const defKeyA = getDefStatKey(propA.prop_type, posA);
   const defKeyB = getDefStatKey(propB.prop_type, posB);
   const oppStatA = TEAM_STATS[oppA]?.[defKeyA] ?? NFL_LEAGUE_AVGS[defKeyA];
@@ -326,41 +308,28 @@ export function compareStartSit(playerA, propA, playerB, propB, settings) {
   const isHomeB = propB.is_home ?? false;
 
   const dimensions = [
-    dim('Fantasy Score',      scoreA.total,               scoreB.total),
-    dim('Grade',              scoreA.total,               scoreB.total),
-    dim('Projected FP',       scoreA.projection,           scoreB.projection),
-    dim('Ceiling',            scoreA.ceiling,              scoreB.ceiling),
-    dim('Matchup',            oppStatA,                    oppStatB),
-    dim('Game Total',         propA.game_total ?? 45.5,   propB.game_total ?? 45.5),
-    dim('Target Share',       propA.target_share ?? 0,    propB.target_share ?? 0),
-    dim('Injury Status',      injWeight(injA),             injWeight(injB)),
-    dim('Home/Away',          isHomeA ? 1 : 0,            isHomeB ? 1 : 0),
-    dim('Floor',              scoreA.floor,                scoreB.floor),
-    dim('Role Score',         scoreA.tier3,                scoreB.tier3),
-    dim('Situation Score',    scoreA.tier4,                scoreB.tier4),
+    dim('Fantasy Score',   scoreA.total,            scoreB.total),
+    dim('Grade',           scoreA.total,            scoreB.total),
+    dim('Projected FP',    scoreA.projection,       scoreB.projection),
+    dim('Ceiling',         scoreA.ceiling,          scoreB.ceiling),
+    dim('Matchup',         oppStatA,                oppStatB),
+    dim('Game Total',      propA.game_total ?? 45.5, propB.game_total ?? 45.5),
+    dim('Target Share',    propA.target_share ?? 0, propB.target_share ?? 0),
+    dim('Injury Status',   injWeight(injA),          injWeight(injB)),
+    dim('Home/Away',       isHomeA ? 1 : 0,         isHomeB ? 1 : 0),
+    dim('Floor',           scoreA.floor,            scoreB.floor),
+    dim('Role Score',      scoreA.tier3,            scoreB.tier3),
+    dim('Situation Score', scoreA.tier4,            scoreB.tier4),
   ];
 
-  // Human-readable overrides
-  dimensions[1] = {
-    label: 'Grade',
-    valueA: scoreA.grade, valueB: scoreB.grade,
-    winner: scoreA.total > scoreB.total ? 'A' : scoreA.total < scoreB.total ? 'B' : 'tie',
-  };
-  dimensions[4] = {
-    label: 'Matchup',
-    valueA: scoreA.matchupRating, valueB: scoreB.matchupRating,
-    winner: scoreA.tier2 > scoreB.tier2 ? 'A' : scoreA.tier2 < scoreB.tier2 ? 'B' : 'tie',
-  };
-  dimensions[7] = {
-    label: 'Injury Status',
-    valueA: playerA.injury_status ?? 'Healthy', valueB: playerB.injury_status ?? 'Healthy',
-    winner: injWeight(injA) > injWeight(injB) ? 'A' : injWeight(injA) < injWeight(injB) ? 'B' : 'tie',
-  };
-  dimensions[8] = {
-    label: 'Home/Away',
-    valueA: isHomeA ? 'Home' : 'Away', valueB: isHomeB ? 'Home' : 'Away',
-    winner: (isHomeA && !isHomeB) ? 'A' : (!isHomeA && isHomeB) ? 'B' : 'tie',
-  };
+  dimensions[1] = { label: 'Grade', valueA: scoreA.grade, valueB: scoreB.grade,
+    winner: scoreA.total > scoreB.total ? 'A' : scoreA.total < scoreB.total ? 'B' : 'tie' };
+  dimensions[4] = { label: 'Matchup', valueA: scoreA.matchupRating, valueB: scoreB.matchupRating,
+    winner: scoreA.tier2 > scoreB.tier2 ? 'A' : scoreA.tier2 < scoreB.tier2 ? 'B' : 'tie' };
+  dimensions[7] = { label: 'Injury Status', valueA: playerA.injury_status ?? 'Healthy', valueB: playerB.injury_status ?? 'Healthy',
+    winner: injWeight(injA) > injWeight(injB) ? 'A' : injWeight(injA) < injWeight(injB) ? 'B' : 'tie' };
+  dimensions[8] = { label: 'Home/Away', valueA: isHomeA ? 'Home' : 'Away', valueB: isHomeB ? 'Home' : 'Away',
+    winner: (isHomeA && !isHomeB) ? 'A' : (!isHomeA && isHomeB) ? 'B' : 'tie' };
 
   const aWins     = dimensions.filter(d => d.winner === 'A').length;
   const bWins     = dimensions.filter(d => d.winner === 'B').length;
@@ -378,36 +347,28 @@ export function compareStartSit(playerA, propA, playerB, propB, settings) {
   } else {
     reasoning.push(`Scores are close (${scoreA.total} vs ${scoreB.total}) — this is a genuine toss-up decision.`);
   }
-
   if (Math.abs(scoreA.tier1 - scoreB.tier1) > 2) {
-    const betterProj = scoreA.tier1 > scoreB.tier1 ? playerA.player_name : playerB.player_name;
-    reasoning.push(`${betterProj} has a higher projected fantasy output for this week.`);
+    const better = scoreA.tier1 > scoreB.tier1 ? playerA.player_name : playerB.player_name;
+    reasoning.push(`${better} has a higher projected fantasy output this week.`);
   }
-
   if (Math.abs(scoreA.tier2 - scoreB.tier2) > 1) {
-    const betterMatchup = scoreA.tier2 > scoreB.tier2 ? playerA.player_name : playerB.player_name;
-    reasoning.push(`${betterMatchup} has the better matchup this week (${betterMatchup === playerA.player_name ? scoreA.matchupRating : scoreB.matchupRating}).`);
+    const better = scoreA.tier2 > scoreB.tier2 ? playerA.player_name : playerB.player_name;
+    reasoning.push(`${better} has the better matchup (${better === playerA.player_name ? scoreA.matchupRating : scoreB.matchupRating}).`);
   }
-
   if (injA !== injB && (injA !== 'healthy' || injB !== 'healthy')) {
     const concern = injA !== 'healthy' ? playerA.player_name : playerB.player_name;
     const status  = injA !== 'healthy' ? injA : injB;
-    reasoning.push(`Injury concern: ${concern} is listed as ${status} — factor in closer to game time.`);
+    reasoning.push(`Injury concern: ${concern} is listed as ${status}.`);
   }
-
-  if (winnerName) {
-    reasoning.push(`Recommendation: Start ${winnerName} with ${confidence.toLowerCase()} confidence.`);
-  } else {
-    reasoning.push(`Too close to call — go with the player in the better matchup or flip a coin.`);
-  }
+  reasoning.push(winnerName
+    ? `Recommendation: Start ${winnerName} with ${confidence.toLowerCase()} confidence.`
+    : 'Too close to call — go with the better matchup or flip a coin.');
 
   return { winner: winnerKey, dimensions, reasoning, confidence, scoreA, scoreB };
 }
 
 // ─── Rankings ─────────────────────────────────────────────────────────────────
 
-// Always score each player on their most relevant prop type (correct def stat key,
-// accurate matchup context). Tier1 still uses player.proj_pts_* regardless.
 const PRIMARY_PROP_TYPE = {
   QB: 'passing_yards',
   RB: 'rushing_yards',
@@ -415,57 +376,76 @@ const PRIMARY_PROP_TYPE = {
   TE: 'receiving_yards',
 };
 
-export function rankPlayers(players, position = 'all', settings) {
-  const s = settings || getLeagueSettings();
-  const filtered = position === 'all'
-    ? players
-    : players.filter(p => p.position === position);
-
-  return filtered
+// Score all players at one position and return unsorted entries.
+// Skips players with no props and filters out those with 0-projection
+// AND no depth-chart role (pure backups with no expected value).
+function scorePosition(players, position, s) {
+  return players
+    .filter(p => p.position === position)
     .map(player => {
-      const primaryType = PRIMARY_PROP_TYPE[player.position] ?? 'receiving_yards';
+      const primaryType = PRIMARY_PROP_TYPE[position] ?? 'receiving_yards';
       const prop = (player.props ?? []).find(p => p.prop_type === primaryType)
         ?? (player.props ?? [])[0];
       if (!prop) return null;
 
       const score = fantasyScore(player, prop, s);
+      if (!score) return null;
+
+      // Hard-filter: players with zero floor/proj/ceiling AND deep on depth chart
+      // should not appear in rankings at all.
+      if (score.projection === 0 && score.floor === 0 && (player.depth_chart_order ?? 99) > 3) {
+        return null;
+      }
+
       return { player, prop, score };
     })
-    .filter(Boolean)
+    .filter(Boolean);
+}
+
+export function rankPlayers(players, position = 'all', settings) {
+  const s = settings || getLeagueSettings();
+
+  // For "All" tab: explicitly run per-position and merge.
+  // This guarantees the same code path as each individual position tab —
+  // same prop selection, same PAR normalization, same results.
+  const positions = position === 'all' ? ['QB', 'RB', 'WR', 'TE'] : [position];
+
+  return positions
+    .flatMap(pos => scorePosition(players, pos, s))
     .sort((a, b) => (b.score?.total ?? 0) - (a.score?.total ?? 0));
 }
 
 export function rankWaiverWire(players, position = 'all', settings) {
   const s = settings || getLeagueSettings();
-  const filtered = position === 'all'
-    ? players
-    : players.filter(p => p.position === position);
+  const positions = position === 'all' ? ['QB', 'RB', 'WR', 'TE'] : [position];
 
-  return filtered
-    .map(player => {
-      const primaryType = PRIMARY_PROP_TYPE[player.position] ?? 'receiving_yards';
-      const prop = (player.props ?? []).find(p => p.prop_type === primaryType)
-        ?? (player.props ?? [])[0];
-      if (!prop) return null;
+  return positions
+    .flatMap(pos =>
+      players
+        .filter(p => p.position === pos)
+        .map(player => {
+          const primaryType = PRIMARY_PROP_TYPE[pos] ?? 'receiving_yards';
+          const prop = (player.props ?? []).find(p => p.prop_type === primaryType)
+            ?? (player.props ?? [])[0];
+          if (!prop) return null;
 
-      const base = fantasyScore(player, prop, s);
+          const base = fantasyScore(player, prop, s);
+          const opportunityBoost = player.waiver_priority === 'high'   ? 15
+                                 : player.waiver_priority === 'medium' ?  8
+                                 : player.is_handcuff                  ?  5 : 0;
+          const injuryUpside = player.injury_upside ? 10 : 0;
+          const waiverTotal  = Math.min(100, (base?.total ?? 0) + opportunityBoost + injuryUpside);
 
-      const opportunityBoost = player.waiver_priority === 'high'   ? 15
-                             : player.waiver_priority === 'medium' ?  8
-                             : player.is_handcuff                  ?  5 : 0;
-      const injuryUpside = player.injury_upside ? 10 : 0;
-      const waiverTotal  = Math.min(100, (base?.total ?? 0) + opportunityBoost + injuryUpside);
-
-      return {
-        player,
-        prop,
-        score: { ...base, total: parseFloat(waiverTotal.toFixed(1)), waiverBoost: opportunityBoost + injuryUpside },
-        waiverReason:   player.waiver_reason ?? null,
-        injuryUpside:   player.injury_upside ?? null,
-        isHandcuff:     player.is_handcuff   ?? false,
-        waiverPriority: player.waiver_priority ?? 'low',
-      };
-    })
-    .filter(Boolean)
+          return {
+            player, prop,
+            score: { ...base, total: parseFloat(waiverTotal.toFixed(1)), waiverBoost: opportunityBoost + injuryUpside },
+            waiverReason:   player.waiver_reason   ?? null,
+            injuryUpside:   player.injury_upside   ?? null,
+            isHandcuff:     player.is_handcuff     ?? false,
+            waiverPriority: player.waiver_priority ?? 'low',
+          };
+        })
+        .filter(Boolean)
+    )
     .sort((a, b) => (b.score?.total ?? 0) - (a.score?.total ?? 0));
 }
