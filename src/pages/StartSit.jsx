@@ -9,6 +9,7 @@ import { getLeagueSettings, saveLeagueSettings, SCORING_FORMATS } from '@/lib/le
 import { fetchLivePlayers, clearLiveCache } from '@/lib/nflLiveData';
 import { cn } from '@/lib/utils';
 import TeamLogo from '@/components/common/TeamLogo';
+import PlayerBreakdownModal from '@/components/PlayerBreakdownModal';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -244,11 +245,14 @@ function SettingsModal({ settings, onSave, onClose }) {
 
 // ─── Player Rank Card ─────────────────────────────────────────────────────────
 
-function PlayerRankCard({ rank, player, prop, score, onCompare }) {
+function PlayerRankCard({ rank, player, prop, score, onCompare, onOpen }) {
   const propLabel = PROP_LABELS[prop.prop_type] ?? prop.prop_type;
 
   return (
-    <div className="rounded-2xl border border-white/6 bg-[hsl(222,47%,9%)] p-4 flex items-center gap-4 hover:border-white/12 transition-colors">
+    <div
+      onClick={onOpen}
+      className="rounded-2xl border border-white/6 bg-[hsl(222,47%,9%)] p-4 flex items-center gap-4 hover:border-white/18 hover:bg-white/2 transition-colors cursor-pointer"
+    >
       <div className="w-8 text-center flex-shrink-0">
         <span className={cn(
           'text-sm font-bold',
@@ -291,7 +295,7 @@ function PlayerRankCard({ rank, player, prop, score, onCompare }) {
       </div>
 
       <button
-        onClick={() => onCompare(player, prop)}
+        onClick={e => { e.stopPropagation(); onCompare(player, prop); }}
         className="flex-shrink-0 text-[11px] text-muted-foreground hover:text-primary border border-white/10 hover:border-primary/40 rounded-xl px-2.5 py-1.5 transition-colors"
       >
         Compare
@@ -650,6 +654,7 @@ export default function StartSit() {
   const [searchQuery, setSearchQuery]             = useState('');
   const [selectedGame, setSelectedGame]           = useState(null); // null | { key, teams: [t1, t2] }
   const [teamFilter, setTeamFilter]               = useState(null); // null | team abbreviation
+  const [breakdownEntry, setBreakdownEntry]       = useState(null); // null | { player, prop, score }
 
   // Live data state
   const [liveStatus, setLiveStatus] = useState({ loading: true, players: null, hasSchedule: false, week: null, error: false });
@@ -1073,6 +1078,7 @@ export default function StartSit() {
                     prop={prop}
                     score={score}
                     onCompare={handleCompareFromRanking}
+                    onOpen={() => setBreakdownEntry({ player, prop, score })}
                   />
                 ))}
                 {filteredRankings.length === 0 && (
@@ -1154,6 +1160,12 @@ export default function StartSit() {
           onClose={() => setShowSettings(false)}
         />
       )}
+
+      <PlayerBreakdownModal
+        entry={breakdownEntry}
+        onClose={() => setBreakdownEntry(null)}
+        settings={settings}
+      />
     </div>
   );
 }
