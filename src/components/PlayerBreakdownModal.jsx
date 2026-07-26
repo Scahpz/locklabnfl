@@ -12,7 +12,7 @@ import { TEAM_STATS, NFL_LEAGUE_AVGS } from '@/lib/teamStats';
 import TeamLogo from '@/components/common/TeamLogo';
 import { cn } from '@/lib/utils';
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Constants & Helpers ─────────────────────────────────────────────────────
 
 const POS_DEF_KEY = {
   QB: 'pass_yds_allowed',
@@ -28,6 +28,10 @@ const POS_DEF_LABEL = {
   TE: 'TE Rec Yds Allowed / G',
 };
 
+// Estimated half-PPR FP per game allowed to position WR1/RB1/TE1/QB1 at league average.
+// Used to convert defensive yardage stats to a FP-unit comparison the user can relate to.
+const POSITION_AVG_FP = { QB: 20, RB: 13, WR: 13, TE: 8 };
+
 const PROP_LABELS = {
   passing_yards: 'Pass Yds', passing_tds: 'Pass TDs',
   rushing_yards: 'Rush Yds', rushing_tds: 'Rush TDs',
@@ -38,13 +42,21 @@ function defRank(opponent, statKey) {
   const val = TEAM_STATS[opponent]?.[statKey];
   if (val == null) return null;
   const sorted = Object.values(TEAM_STATS)
-    .map(t => t[statKey])
-    .filter(Boolean)
-    .sort((a, b) => b - a);
+    .map(t => t[statKey]).filter(Boolean).sort((a, b) => b - a);
   return sorted.indexOf(val) + 1;
 }
 
-function findSimilarDefenses(opponent, count = 3) {
+// Estimated FP allowed per game to the given position vs. a specific defense.
+// Scales league-average FP by how much more/less this defense allows vs the mean.
+function estimateFPAllowed(opponent, pos) {
+  const key = POS_DEF_KEY[pos];
+  const defStat  = TEAM_STATS[opponent]?.[key];
+  const leagueAvg = NFL_LEAGUE_AVGS[key];
+  if (!defStat || !leagueAvg) return null;
+  return Math.round(POSITION_AVG_FP[pos] * (defStat / leagueAvg) * 10) / 10;
+}
+
+function findSimilarDefenses(opponent, pos, count = 3) {
   const keys = Object.keys(NFL_LEAGUE_AVGS);
   const opp = TEAM_STATS[opponent];
   if (!opp) return [];
@@ -64,107 +76,97 @@ function findSimilarDefenses(opponent, count = 3) {
     .slice(0, count);
 }
 
-// Estimate probability of FP exceeding threshold using sigmoid on
-// the [floor, ceiling] interval centered on projection.
 function probAbove(projection, floor, ceiling, threshold) {
   if (projection <= 0) return threshold <= 0 ? 99 : 1;
-  const safeFloor = Math.min(floor, projection * 0.5);
-  const safeCeil  = Math.max(ceiling, projection * 1.5);
-  if (threshold <= safeFloor) return 99;
-  if (threshold >= safeCeil)  return 1;
-  const sigma = Math.max(1, (safeCeil - safeFloor) / 4);
+  const lo = Math.min(floor, projection * 0.4);
+  const hi = Math.max(ceiling, projection * 1.6);
+  if (threshold <= lo) return 99;
+  if (threshold >= hi) return 1;
+  const sigma = Math.max(1, (hi - lo) / 4);
   const z = (threshold - projection) / sigma;
   return Math.max(1, Math.min(99, Math.round(100 / (1 + Math.exp(1.6 * z)))));
 }
 
 function matchupColor(rank) {
   if (rank == null) return 'text-muted-foreground';
-  if (rank <= 8)  return 'text-emerald-400';
-  if (rank <= 22) return 'text-amber-400';
-  return 'text-red-400';
+  return rank <= 8 ? 'text-emerald-400' : rank <= 22 ? 'text-amber-400' : 'text-red-400';
 }
 
 function matchupBg(rank) {
   if (rank == null) return 'bg-white/5 border-white/10';
-  if (rank <= 8)  return 'bg-emerald-500/10 border-emerald-500/25';
-  if (rank <= 22) return 'bg-amber-500/10 border-amber-500/25';
-  return 'bg-red-500/10 border-red-500/25';
+  return rank <= 8
+    ? 'bg-emerald-500/10 border-emerald-500/25'
+    : rank <= 22
+    ? 'bg-amber-500/10 border-amber-500/25'
+    : 'bg-red-500/10 border-red-500/25';
 }
 
 function buildSummary(player, score, rank) {
   const { verdict, grade, projection, total } = score;
   const pos = player.position;
   const parts = [];
-
   if (projection > 0) {
     parts.push(`${player.player_name} projects for ${projection} fantasy points this week, earning a ${grade} grade (${total}/100).`);
   } else {
     parts.push(`${player.player_name} currently has no confirmed projection for this week (${grade}, ${total}/100).`);
   }
-
   if (rank != null) {
-    if (rank <= 10) {
+    if (rank <= 10)
       parts.push(`The ${player.opponent} defense ranks #${rank} in ${pos} production allowed — a clear plus matchup.`);
-    } else if (rank <= 22) {
+    else if (rank <= 22)
       parts.push(`The matchup vs ${player.opponent} (#${rank} against ${pos}s) is roughly league-average.`);
-    } else {
+    else
       parts.push(`The ${player.opponent} defense (#${rank} against ${pos}s) presents a headwind factored into the grade.`);
-    }
   }
-
-  if (verdict === 'START') {
-    parts.push(`He's a confident start — the projection, role, and matchup all align.`);
-  } else if (verdict === 'FLEX') {
+  if (verdict === 'START')
+    parts.push(`The projection, role, and matchup all align — a confident start.`);
+  else if (verdict === 'FLEX')
     parts.push(`He's in the flex conversation with real upside if the game script develops favorably.`);
-  } else {
+  else
     parts.push(`The data suggests more risk than reward this week; consider alternatives where available.`);
-  }
-
   return parts.join(' ');
 }
 
 function buildBullets(player, score, rank) {
   const likes = [];
   const risks = [];
-  const { tier1, tier2, floor, ceiling, projection, criteria } = score;
+  const { tier2, floor, ceiling, projection, criteria } = score;
   const pos = player.position;
-  const defLabel = POS_DEF_LABEL[pos];
 
   if (rank != null && rank <= 12)
-    likes.push(`Favorable matchup — ${player.opponent} ranks #${rank} in ${defLabel} allowed.`);
+    likes.push(`Favorable matchup — ${player.opponent} ranks #${rank} in ${POS_DEF_LABEL[pos]} allowed.`);
   if (projection >= 12)
     likes.push(`Projection of ${projection} FP is well above replacement level.`);
   if (player.depth_chart_order === 1)
-    likes.push(`Confirmed starter with full expected workload and snap share.`);
+    likes.push(`Confirmed starter with full expected workload.`);
   if ((player.proj_rec ?? 0) >= 5 && pos !== 'QB')
-    likes.push(`${Math.round(player.proj_rec * 10) / 10} projected receptions — high-volume PPR floor.`);
+    likes.push(`${Math.round((player.proj_rec ?? 0) * 10) / 10} projected receptions — high PPR floor.`);
   if ((player.proj_rush_yd ?? 0) >= 70 && pos === 'RB')
-    likes.push(`${Math.round(player.proj_rush_yd)} projected rush yards — strong volume bet.`);
+    likes.push(`${Math.round(player.proj_rush_yd)} projected rush yards — volume-based upside.`);
   if ((player.proj_pass_yd ?? 0) >= 260 && pos === 'QB')
     likes.push(`${Math.round(player.proj_pass_yd)} projected pass yards — elite QB volume.`);
   if (ceiling - projection >= 8)
-    likes.push(`Ceiling of ${ceiling} FP offers meaningful boom upside.`);
+    likes.push(`Ceiling of ${ceiling} FP offers meaningful boom-week upside.`);
   const gameTotal = criteria?.find(c => c.label === 'Game Total')?.tip?.match(/O\/U ([\d.]+)/)?.[1];
   if (gameTotal && parseFloat(gameTotal) > 47)
     likes.push(`High-total game environment (O/U ${gameTotal}) boosts scoring opportunity.`);
 
   if (rank != null && rank >= 23)
-    risks.push(`Tough matchup — ${player.opponent} ranks #${rank} in ${defLabel} allowed.`);
+    risks.push(`Tough matchup — ${player.opponent} ranks #${rank} in ${POS_DEF_LABEL[pos]} allowed.`);
   const inj = (player.injury_status ?? 'healthy').toLowerCase();
   if (inj.includes('questionable'))
     risks.push(`Questionable injury tag — monitor the injury report through the week.`);
   else if (inj.includes('doubtful'))
-    risks.push(`Doubtful designation — high risk of being ruled out.`);
+    risks.push(`Doubtful designation — significant risk of being ruled out.`);
   if ((player.depth_chart_order ?? 99) >= 2)
-    risks.push(`Not the primary option — upside is contingent on starter availability.`);
+    risks.push(`Not the primary option — upside contingent on starter availability.`);
   if (tier2 < 8)
     risks.push(`Below-average game environment caps the scoring ceiling.`);
   if (floor < 5 && pos !== 'QB' && projection > 0)
-    risks.push(`Floor of ${floor} FP leaves significant bust risk on a bad day.`);
+    risks.push(`Floor of ${floor} FP leaves meaningful bust risk on a bad day.`);
 
   if (likes.length === 0) likes.push('Grade reflects all currently available projection data.');
   if (risks.length === 0) risks.push('No significant red flags detected in available data.');
-
   return { likes: likes.slice(0, 5), risks: risks.slice(0, 4) };
 }
 
@@ -207,7 +209,7 @@ function CriteriaBar({ label, score, maxScore, tip }) {
           className={cn('h-full rounded-full', barColor)}
           initial={{ width: 0 }}
           animate={{ width: `${pct}%` }}
-          transition={{ duration: 0.6, ease: 'easeOut' }}
+          transition={{ duration: 0.55, ease: 'easeOut' }}
         />
       </div>
       {tip && <p className="text-[10px] text-muted-foreground/60">{tip}</p>}
@@ -220,26 +222,48 @@ function ChartTooltip({ active, payload, label }) {
   return (
     <div className="bg-[hsl(222,47%,9%)] border border-white/12 rounded-xl px-3 py-2 text-xs shadow-xl">
       <p className="text-muted-foreground">{label}</p>
-      <p className="font-semibold text-primary">{payload[0].value}</p>
+      <p className="font-semibold text-primary">{payload[0].value} FP</p>
     </div>
   );
 }
 
+const FILTER_OPTIONS = [
+  { key: 'L3',  label: 'L3',  n: 3  },
+  { key: 'L5',  label: 'L5',  n: 5  },
+  { key: 'L10', label: 'L10', n: 10 },
+];
+
 // ─── Main Modal ───────────────────────────────────────────────────────────────
 
 export default function PlayerBreakdownModal({ entry, onClose, settings }) {
-  // All hooks must run unconditionally
-  const gameData = useMemo(() => {
-    const games = entry?.prop?.last_10_games ?? [];
-    return [...games].reverse().map((v, i) => ({
-      label: `G-${games.length - i}`,
-      value: v,
-    }));
-  }, [entry?.prop?.last_10_games]);
+  const [chartFilter, setChartFilter] = useState('L10');
+
+  // Generate FP-based simulated games (not raw yardage from prop.last_10_games).
+  // Uses floor/projection/ceiling to build values in the correct FP range.
+  const fpGames = useMemo(() => {
+    const proj  = entry?.score?.projection ?? 0;
+    const floor = entry?.score?.floor ?? 0;
+    const ceil  = entry?.score?.ceiling ?? proj * 1.8;
+    if (proj <= 0) return [];
+    const sigma = Math.max(0.5, (ceil - floor) / 4);
+    // Pseudo-deterministic seed from player id to avoid reshuffling on re-render
+    const seed = (entry?.player?.id ?? 'x').split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) & 0xffff, 1);
+    return Array.from({ length: 10 }, (_, i) => {
+      // Simple LCG
+      const r = ((seed + i * 2654435761) & 0xffff) / 0xffff;
+      const fp = Math.max(0, Math.round((proj + (r * 2 - 1) * sigma * 1.8) * 10) / 10);
+      return { label: `G${10 - i}`, fp };
+    }).reverse();
+  }, [entry?.score?.projection, entry?.score?.floor, entry?.score?.ceiling, entry?.player?.id]);
+
+  const displayedGames = useMemo(() => {
+    const n = FILTER_OPTIONS.find(f => f.key === chartFilter)?.n ?? 10;
+    return fpGames.slice(-n);
+  }, [fpGames, chartFilter]);
 
   const similar = useMemo(
-    () => findSimilarDefenses(entry?.player?.opponent ?? ''),
-    [entry?.player?.opponent],
+    () => findSimilarDefenses(entry?.player?.opponent ?? '', entry?.player?.position ?? 'WR'),
+    [entry?.player?.opponent, entry?.player?.position],
   );
 
   if (!entry) return null;
@@ -251,6 +275,8 @@ export default function PlayerBreakdownModal({ entry, onClose, settings }) {
   const defStat  = TEAM_STATS[opponent]?.[defKey];
   const leagueAvg = NFL_LEAGUE_AVGS[defKey];
   const rank     = defRank(opponent, defKey);
+  const fpAllowed = estimateFPAllowed(opponent, pos);
+  const leagueFP  = POSITION_AVG_FP[pos];
   const propLabel = PROP_LABELS[prop?.prop_type] ?? prop?.prop_type ?? '';
 
   const verdictCls = score.verdict === 'START'
@@ -267,13 +293,27 @@ export default function PlayerBreakdownModal({ entry, onClose, settings }) {
     pct: probAbove(score.projection, score.floor, score.ceiling, t),
   }));
 
-  const recentAvg = gameData.length >= 3
-    ? Math.round(gameData.slice(-3).reduce((a, b) => a + b.value, 0) / 3) : null;
-  const earlyAvg = gameData.length >= 3
-    ? Math.round(gameData.slice(0, 3).reduce((a, b) => a + b.value, 0) / 3) : null;
-  const trend = recentAvg != null && earlyAvg != null
-    ? recentAvg > earlyAvg + 5 ? 'up' : recentAvg < earlyAvg - 5 ? 'down' : 'neutral'
+  // FP chart stats from simulated values
+  const visibleFP   = displayedGames.map(g => g.fp);
+  const fpAvg       = visibleFP.length
+    ? Math.round((visibleFP.reduce((a, b) => a + b, 0) / visibleFP.length) * 10) / 10
+    : 0;
+  const fpHigh      = visibleFP.length ? Math.max(...visibleFP) : 0;
+  const fpLow       = visibleFP.length ? Math.min(...visibleFP) : 0;
+
+  // Trend from the full 10-game simulated set
+  const early3Avg = fpGames.length >= 3
+    ? fpGames.slice(0, 3).reduce((a, b) => a + b.fp, 0) / 3 : null;
+  const recent3Avg = fpGames.length >= 3
+    ? fpGames.slice(-3).reduce((a, b) => a + b.fp, 0) / 3 : null;
+  const trend = early3Avg != null && recent3Avg != null
+    ? recent3Avg > early3Avg + 2 ? 'up' : recent3Avg < early3Avg - 2 ? 'down' : 'neutral'
     : 'neutral';
+
+  // Usage criterion — read from score.criteria so Grade Breakdown and Snapshot agree
+  const usageCrit = score.criteria?.find(c =>
+    c.label === 'Target Share' || c.label === 'Snap % / Workload' || c.label === 'Rushing Volume',
+  );
 
   const injStatus = (player.injury_status ?? 'healthy').toLowerCase();
   const hasInjury = injStatus !== 'healthy' && injStatus !== '';
@@ -286,13 +326,13 @@ export default function PlayerBreakdownModal({ entry, onClose, settings }) {
     ? Math.round(((score.projection - score.floor) / projRange) * 100)
     : 50;
 
+  const fpChartMax = Math.max(score.ceiling + 4, fpHigh + 4, 15);
+
   return (
     <AnimatePresence>
       <motion.div
         key="backdrop"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         transition={{ duration: 0.18 }}
         className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4"
         onClick={onClose}
@@ -309,7 +349,7 @@ export default function PlayerBreakdownModal({ entry, onClose, settings }) {
           onClick={e => e.stopPropagation()}
         >
 
-          {/* ── Sticky header ─────────────────────────────────────────────── */}
+          {/* ── Sticky header ── */}
           <div className="sticky top-0 z-20 bg-[hsl(222,47%,7%)]/96 backdrop-blur-sm border-b border-white/8 px-4 py-3 flex items-center gap-3">
             <TeamLogo team={player.team} className="w-10 h-10 flex-shrink-0" />
             <div className="flex-1 min-w-0">
@@ -339,7 +379,7 @@ export default function PlayerBreakdownModal({ entry, onClose, settings }) {
             </div>
           </div>
 
-          {/* ── Scrollable body ───────────────────────────────────────────── */}
+          {/* ── Scrollable body ── */}
           <div className="flex-1 overflow-y-auto overscroll-contain p-3 space-y-2.5" style={{ scrollbarWidth: 'none' }}>
 
             {/* Hero: Floor / Proj / Ceiling */}
@@ -356,15 +396,12 @@ export default function PlayerBreakdownModal({ entry, onClose, settings }) {
                   </div>
                 ))}
               </div>
-
-              {/* Projection range bar */}
               <div className="relative h-2 rounded-full bg-gradient-to-r from-red-500/30 via-primary/40 to-emerald-500/30">
                 <div
                   className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded-full bg-primary border-2 border-[hsl(222,47%,7%)] shadow-lg"
                   style={{ left: `${Math.min(95, Math.max(5, projPct))}%` }}
                 />
               </div>
-
               <p className="text-[11px] text-muted-foreground leading-relaxed">{summary}</p>
             </div>
 
@@ -387,7 +424,7 @@ export default function PlayerBreakdownModal({ entry, onClose, settings }) {
                         className="absolute bottom-0 left-0 right-0 bg-primary/25"
                         initial={{ height: 0 }}
                         animate={{ height: `${pct}%` }}
-                        transition={{ duration: 0.7, ease: 'easeOut', delay: 0.1 }}
+                        transition={{ duration: 0.65, ease: 'easeOut', delay: 0.1 }}
                       />
                       <span className="relative text-[11px] font-bold text-foreground pb-1">{pct}%</span>
                     </div>
@@ -396,61 +433,95 @@ export default function PlayerBreakdownModal({ entry, onClose, settings }) {
                 ))}
               </div>
               <p className="text-[10px] text-muted-foreground">
-                Probability of exceeding each FP threshold based on floor / projection / ceiling spread.
+                Probability of exceeding each FP threshold, derived from floor ({score.floor}) → ceiling ({score.ceiling}).
               </p>
             </Section>
 
-            {/* Recent Performance */}
-            {gameData.length > 1 && (
-              <Section title="Simulated Performance Trend" icon={BarChart2} defaultOpen>
-                <div className="flex items-center gap-4 mb-2">
-                  <div>
-                    <div className="text-[10px] text-muted-foreground">Avg last 3</div>
-                    <div className="text-sm font-semibold text-foreground">{prop?.avg_last_5}</div>
+            {/* FP Projection Trend (simulated) */}
+            {fpGames.length > 1 && (
+              <Section title="FP Projection Model" icon={BarChart2} defaultOpen>
+                {/* Filter buttons */}
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex gap-1">
+                    {FILTER_OPTIONS.map(({ key, label }) => (
+                      <button
+                        key={key}
+                        onClick={() => setChartFilter(key)}
+                        className={cn(
+                          'px-2.5 py-1 text-[10px] font-semibold rounded-lg border transition-all',
+                          chartFilter === key
+                            ? 'bg-primary/20 border-primary/40 text-primary'
+                            : 'border-white/8 text-muted-foreground hover:border-white/18 hover:text-foreground',
+                        )}
+                      >
+                        {label}
+                      </button>
+                    ))}
                   </div>
-                  <div>
-                    <div className="text-[10px] text-muted-foreground">Avg last 10</div>
-                    <div className="text-sm font-semibold text-foreground">{prop?.avg_last_10}</div>
-                  </div>
-                  <div className="ml-auto">
-                    {trend === 'up'   && <div className="flex items-center gap-1 text-[11px] text-emerald-400"><TrendingUp className="w-3.5 h-3.5" /> Trending up</div>}
-                    {trend === 'down' && <div className="flex items-center gap-1 text-[11px] text-red-400"><TrendingDown className="w-3.5 h-3.5" /> Trending down</div>}
-                    {trend === 'neutral' && <div className="flex items-center gap-1 text-[11px] text-muted-foreground"><Minus className="w-3.5 h-3.5" /> Stable</div>}
+                  <div className="flex items-center gap-1">
+                    {trend === 'up'      && <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />}
+                    {trend === 'down'    && <TrendingDown className="w-3.5 h-3.5 text-red-400" />}
+                    {trend === 'neutral' && <Minus className="w-3.5 h-3.5 text-muted-foreground" />}
+                    <span className="text-[10px] text-muted-foreground">
+                      {trend === 'up' ? 'Trending up' : trend === 'down' ? 'Trending down' : 'Stable'}
+                    </span>
                   </div>
                 </div>
+
+                {/* Stat pills */}
+                <div className="flex gap-3 mb-2">
+                  {[
+                    { label: `Avg (${chartFilter})`, value: `${fpAvg} FP` },
+                    { label: 'High',                 value: `${fpHigh} FP`, color: 'text-emerald-400' },
+                    { label: 'Low',                  value: `${fpLow} FP`,  color: 'text-red-400'     },
+                  ].map(({ label, value, color }) => (
+                    <div key={label}>
+                      <div className="text-[10px] text-muted-foreground">{label}</div>
+                      <div className={cn('text-xs font-semibold', color ?? 'text-foreground')}>{value}</div>
+                    </div>
+                  ))}
+                </div>
+
                 <ResponsiveContainer width="100%" height={110}>
-                  <AreaChart data={gameData} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
+                  <AreaChart data={displayedGames} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
                     <defs>
-                      <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+                      <linearGradient id="fpGrad" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.35} />
                         <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0} />
                       </linearGradient>
                     </defs>
                     <XAxis dataKey="label" tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }} />
-                    <YAxis tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }} />
+                    <YAxis domain={[0, fpChartMax]} tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }} />
                     <Tooltip content={<ChartTooltip />} />
-                    {prop?.line != null && (
-                      <ReferenceLine y={prop.line} stroke="rgba(255,255,255,0.18)" strokeDasharray="3 3" />
+                    {/* Projection line */}
+                    <ReferenceLine y={score.projection} stroke="hsl(var(--primary))" strokeOpacity={0.3} strokeDasharray="4 3" />
+                    {/* Floor/ceiling band */}
+                    {score.floor > 0 && (
+                      <ReferenceLine y={score.floor} stroke="rgba(255,80,80,0.2)" strokeDasharray="2 3" />
                     )}
+                    <ReferenceLine y={score.ceiling} stroke="rgba(80,255,120,0.18)" strokeDasharray="2 3" />
                     <Area
-                      type="monotone" dataKey="value"
+                      type="monotone" dataKey="fp"
                       stroke="hsl(var(--primary))" strokeWidth={2}
-                      fill="url(#areaGrad)"
+                      fill="url(#fpGrad)"
                       dot={{ fill: 'hsl(var(--primary))', r: 2.5, strokeWidth: 0 }}
                       activeDot={{ r: 4 }}
                     />
                   </AreaChart>
                 </ResponsiveContainer>
+
                 <p className="text-[10px] text-muted-foreground">
-                  Values derived from stat distribution model. Dashed line = prop line ({prop?.line} {propLabel}).
+                  Simulated from this week's projection model (floor {score.floor} / proj {score.projection} / ceil {score.ceiling} FP).
+                  Real game-log history requires a backend data connection.
                 </p>
               </Section>
             )}
 
-            {/* Matchup Analysis */}
-            <Section title={`Matchup vs ${opponent}`} icon={Shield} defaultOpen>
+            {/* Position vs. Opponent FP */}
+            <Section title={`${pos} Scoring vs ${opponent}`} icon={Shield} defaultOpen>
               {defStat != null ? (
                 <div className="space-y-3">
+                  {/* Main matchup card */}
                   <div className={cn('rounded-xl border px-4 py-3 flex items-center justify-between', matchupBg(rank))}>
                     <div>
                       <div className="text-[10px] text-muted-foreground uppercase tracking-wider">{POS_DEF_LABEL[pos]}</div>
@@ -462,12 +533,45 @@ export default function PlayerBreakdownModal({ entry, onClose, settings }) {
                       <div className="text-[10px] text-muted-foreground">of 32</div>
                     </div>
                   </div>
+
+                  {/* FP estimate row */}
+                  {fpAllowed != null && (
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        {
+                          label: `Est. ${pos} FP Allowed`,
+                          value: `${fpAllowed}`,
+                          sub: 'per game (est.)',
+                          color: matchupColor(rank),
+                        },
+                        {
+                          label: 'League Average',
+                          value: `${leagueFP}`,
+                          sub: 'FP per game',
+                          color: 'text-muted-foreground',
+                        },
+                        {
+                          label: 'vs League Avg',
+                          value: `${fpAllowed >= leagueFP ? '+' : ''}${Math.round((fpAllowed - leagueFP) * 10) / 10}`,
+                          sub: 'FP diff',
+                          color: fpAllowed >= leagueFP ? 'text-emerald-400' : 'text-red-400',
+                        },
+                      ].map(({ label, value, sub, color }) => (
+                        <div key={label} className="rounded-xl bg-white/3 border border-white/8 px-3 py-2.5 text-center">
+                          <div className="text-[10px] text-muted-foreground">{label}</div>
+                          <div className={cn('text-lg font-bold mt-0.5', color)}>{value}</div>
+                          <div className="text-[9px] text-muted-foreground">{sub}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                   <p className="text-[11px] text-muted-foreground">
                     {rank <= 10
-                      ? `${opponent} is one of the most generous defenses for ${pos}s — a clear green-light matchup.`
+                      ? `${opponent} is one of the softest defenses for ${pos}s this season — this matchup adds meaningful upside.`
                       : rank <= 22
-                      ? `${opponent} sits near league average against ${pos}s — a neutral matchup without a strong edge either way.`
-                      : `${opponent} has been among the stingier defenses against ${pos}s — this headwind is reflected in the grade.`}
+                      ? `${opponent} sits near league average against ${pos}s — a neutral matchup without a strong directional edge.`
+                      : `${opponent} has been among the tougher ${pos} defenses — this headwind is reflected in the grade.`}
                   </p>
                 </div>
               ) : (
@@ -479,19 +583,19 @@ export default function PlayerBreakdownModal({ entry, onClose, settings }) {
             {similar.length > 0 && (
               <Section title="Similar Defensive Profiles" icon={Info} defaultOpen={false}>
                 <p className="text-[10px] text-muted-foreground mb-2">
-                  Defenses with the closest statistical profile to {opponent} this season:
+                  These defenses have the closest statistical fingerprint to {opponent}:
                 </p>
                 <div className="space-y-2">
                   {similar.map(({ team, similarity }) => {
                     const simRank = defRank(team, defKey);
-                    const simStat = TEAM_STATS[team]?.[defKey];
+                    const simFP   = estimateFPAllowed(team, pos);
                     return (
                       <div key={team} className="flex items-center gap-3 rounded-xl bg-white/3 border border-white/8 px-3 py-2.5">
                         <TeamLogo team={team} className="w-7 h-7 flex-shrink-0" />
                         <div className="flex-1 min-w-0">
                           <div className="text-xs font-semibold text-foreground">{team}</div>
                           <div className="text-[10px] text-muted-foreground">
-                            {POS_DEF_LABEL[pos]}: {simStat} · Rank #{simRank}
+                            Rank #{simRank} · ~{simFP} est. {pos} FP/G
                           </div>
                         </div>
                         <div className={cn('text-[11px] font-bold', similarity >= 85 ? 'text-primary' : 'text-muted-foreground')}>
@@ -514,8 +618,7 @@ export default function PlayerBreakdownModal({ entry, onClose, settings }) {
                   <ul className="space-y-1.5">
                     {likes.map((text, i) => (
                       <li key={i} className="flex items-start gap-2 text-[11px] text-muted-foreground">
-                        <span className="text-emerald-500 mt-0.5 flex-shrink-0 font-bold">+</span>
-                        {text}
+                        <span className="text-emerald-500 mt-0.5 flex-shrink-0 font-bold">+</span> {text}
                       </li>
                     ))}
                   </ul>
@@ -527,8 +630,7 @@ export default function PlayerBreakdownModal({ entry, onClose, settings }) {
                   <ul className="space-y-1.5">
                     {risks.map((text, i) => (
                       <li key={i} className="flex items-start gap-2 text-[11px] text-muted-foreground">
-                        <span className="text-amber-500 mt-0.5 flex-shrink-0 font-bold">−</span>
-                        {text}
+                        <span className="text-amber-500 mt-0.5 flex-shrink-0 font-bold">−</span> {text}
                       </li>
                     ))}
                   </ul>
@@ -536,13 +638,13 @@ export default function PlayerBreakdownModal({ entry, onClose, settings }) {
               </div>
             </Section>
 
-            {/* Player Trends */}
+            {/* Player Snapshot */}
             <Section title="Player Snapshot" icon={TrendingUp} defaultOpen={false}>
               <div className="grid grid-cols-2 gap-2">
                 {[
                   {
                     label: 'Depth Chart',
-                    value: player.depth_chart_order === 1 ? 'Starter' : `Depth ${player.depth_chart_order}`,
+                    value: player.depth_chart_order === 1 ? 'Starter' : `Depth ${player.depth_chart_order ?? '—'}`,
                     good: player.depth_chart_order === 1,
                   },
                   {
@@ -550,19 +652,11 @@ export default function PlayerBreakdownModal({ entry, onClose, settings }) {
                     value: (player.injury_status ?? 'Healthy').charAt(0).toUpperCase() + (player.injury_status ?? 'Healthy').slice(1),
                     good: !hasInjury,
                   },
-                  pos !== 'QB' && player.proj_rec != null && {
-                    label: 'Est. Target Share',
-                    value: prop?.target_share != null
-                      ? `${Math.round(prop.target_share * 100)}%`
-                      : `${Math.round((player.proj_rec / (pos === 'TE' ? 24 : 22)) * 100)}% est.`,
-                    good: (prop?.target_share ?? 0) >= 0.15 || (player.proj_rec ?? 0) >= 4,
-                  },
-                  pos === 'RB' && player.proj_rush_yd != null && {
-                    label: 'Est. Snap %',
-                    value: prop?.snap_pct != null
-                      ? `${Math.round(prop.snap_pct * 100)}%`
-                      : `${Math.round(Math.min(75, (player.proj_rush_yd / 130) * 100))}% est.`,
-                    good: (player.proj_rush_yd ?? 0) >= 60,
+                  // Usage metric — sourced from score.criteria so it matches Grade Breakdown exactly
+                  usageCrit && {
+                    label: usageCrit.label,
+                    value: usageCrit.tip,
+                    good: usageCrit.score >= 1,
                   },
                   pos === 'QB' && player.proj_pass_yd != null && {
                     label: 'Proj. Pass Yds',
@@ -574,10 +668,20 @@ export default function PlayerBreakdownModal({ entry, onClose, settings }) {
                     value: (Math.round(player.proj_pass_td * 10) / 10).toString(),
                     good: player.proj_pass_td >= 1.5,
                   },
+                  pos === 'RB' && player.proj_rush_yd != null && {
+                    label: 'Proj. Rush Yds',
+                    value: `${Math.round(player.proj_rush_yd)}`,
+                    good: player.proj_rush_yd >= 60,
+                  },
+                  (pos === 'WR' || pos === 'TE') && player.proj_rec_yd != null && {
+                    label: 'Proj. Rec Yds',
+                    value: `${Math.round(player.proj_rec_yd)}`,
+                    good: player.proj_rec_yd >= 50,
+                  },
                 ].filter(Boolean).map(({ label, value, good }) => (
                   <div key={label} className="rounded-xl bg-white/3 border border-white/8 px-3 py-2.5">
                     <div className="text-[10px] text-muted-foreground">{label}</div>
-                    <div className={cn('text-xs font-semibold mt-0.5', good ? 'text-emerald-400' : 'text-amber-400')}>
+                    <div className={cn('text-[11px] font-semibold mt-0.5', good ? 'text-emerald-400' : 'text-amber-400')}>
                       {value}
                     </div>
                   </div>
@@ -597,7 +701,7 @@ export default function PlayerBreakdownModal({ entry, onClose, settings }) {
                     <p className="text-[11px] text-amber-200/80">{player.injury_note}</p>
                   )}
                   <p className="text-[11px] text-muted-foreground">
-                    Monitor the official injury report before finalizing your lineup decision.
+                    Monitor the official injury report before finalizing your lineup.
                   </p>
                 </div>
               </Section>
@@ -605,11 +709,11 @@ export default function PlayerBreakdownModal({ entry, onClose, settings }) {
 
             {/* Betting Context stub */}
             <Section title="Betting Context" icon={Target} defaultOpen={false}>
-              <div className="rounded-xl bg-white/3 border border-white/8 px-4 py-3 text-center">
-                <p className="text-[11px] text-muted-foreground">
-                  Live betting lines (spread, O/U, player props) require a connected sportsbook API.
+              <div className="rounded-xl bg-white/3 border border-white/8 px-4 py-3">
+                <p className="text-[11px] text-muted-foreground text-center">
+                  Live lines (spread, O/U, player props, implied totals) require a connected sportsbook API.
                   Set <code className="text-primary/80 text-[10px]">VITE_API_URL</code> in Vercel to your
-                  backend to enable this section.
+                  Railway backend to enable this section.
                 </p>
               </div>
             </Section>

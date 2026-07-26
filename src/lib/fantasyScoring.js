@@ -204,16 +204,45 @@ export function fantasyScore(player, prop, settings) {
 
   const targetShare = prop.target_share ?? null;
   const snapPct     = prop.snap_pct     ?? null;
+  // Fallback: estimate from player-level volume data when prop doesn't carry usage fields
+  // (happens with stale cache or POS_DEFAULTS props). This keeps Grade Breakdown and
+  // Player Snapshot showing the same value.
+  const catchRateEst = position === 'TE' ? 0.75 : position === 'RB' ? 0.82 : 0.68;
+  const estTargetShare = (position !== 'QB' && targetShare == null && player?.proj_rec != null)
+    ? Math.min(player.proj_rec / (catchRateEst * 33), 0.45)
+    : targetShare;
+  const estSnapPct = (position === 'RB' && snapPct == null && player?.proj_rush_yd != null)
+    ? Math.min(player.proj_rush_yd / 130, 0.75)
+    : snapPct;
+
+  const usageLabel = position === 'QB' ? 'Rushing Volume'
+    : position === 'RB' ? 'Snap % / Workload'
+    : 'Target Share';
+
   let usageScore = 0.5 * 2;
   let usageTip   = 'Usage data unavailable';
-  if (position === 'RB' && snapPct != null) {
-    usageScore = clamp(snapPct / 0.70, 0, 1) * 2;
-    usageTip   = `Snap % ${Math.round(snapPct * 100)}%`;
-  } else if (targetShare != null) {
-    usageScore = clamp(targetShare / 0.25, 0, 1) * 2;
-    usageTip   = `Target share ${Math.round(targetShare * 100)}%`;
+
+  if (position === 'QB') {
+    const rushYd = player?.proj_rush_yd ?? null;
+    if (rushYd != null && rushYd > 5) {
+      usageScore = clamp(rushYd / 40, 0, 1) * 2;
+      usageTip   = `${Math.round(rushYd)} proj. rush yds — dual-threat upside`;
+    } else {
+      usageScore = 0.7 * 2;
+      usageTip   = 'Projected starter at QB';
+    }
+  } else if (position === 'RB' && estSnapPct != null) {
+    usageScore = clamp(estSnapPct / 0.70, 0, 1) * 2;
+    usageTip   = snapPct != null
+      ? `Snap % ${Math.round(snapPct * 100)}%`
+      : `Snap % ~${Math.round(estSnapPct * 100)}% (est. from rush volume)`;
+  } else if (estTargetShare != null) {
+    usageScore = clamp(estTargetShare / 0.25, 0, 1) * 2;
+    usageTip   = targetShare != null
+      ? `Target share ${Math.round(targetShare * 100)}%`
+      : `Target share ~${Math.round(estTargetShare * 100)}% (est. from proj. receptions)`;
   }
-  criteria.push({ label: 'Usage / Target Share', score: parseFloat(usageScore.toFixed(2)), maxScore: 2, tip: usageTip });
+  criteria.push({ label: usageLabel, score: parseFloat(usageScore.toFixed(2)), maxScore: 2, tip: usageTip });
 
   const tier3 = injScore + roleScore + usageScore;
 
