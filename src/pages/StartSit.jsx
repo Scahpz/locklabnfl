@@ -4,7 +4,7 @@ import {
   Settings, Shield, Zap, AlertTriangle, Link2, Loader2, RefreshCw, Wifi,
 } from 'lucide-react';
 import { fantasyScore, compareStartSit, rankPlayers, rankWaiverWire } from '@/lib/fantasyScoring';
-import { mockPlayers, isDemoMode, waiverPlayers } from '@/lib/mockData';
+import { mockPlayers, isDemoMode } from '@/lib/mockData';
 import { getLeagueSettings, saveLeagueSettings, SCORING_FORMATS } from '@/lib/leagueSettings';
 import { fetchLivePlayers, clearLiveCache } from '@/lib/nflLiveData';
 import { cn } from '@/lib/utils';
@@ -374,7 +374,6 @@ function WaiverCard({ rank, player, prop, score, waiverReason, injuryUpside, isH
               Boost <span className="text-primary font-medium">+{score.waiverBoost}</span>
             </span>
           )}
-          <VerdictChip verdict={score.verdict} />
         </div>
       )}
 
@@ -720,9 +719,55 @@ export default function StartSit() {
     );
   }, [rankings, selectedGame, teamFilter, searchQuery]);
 
+  // Build waiver candidates from live activePlayers so matchups + projections
+  // always match the Rankings tab instead of stale mock data.
+  const waiverCandidates = useMemo(() => {
+    if (!activePlayers?.length) return [];
+    const starterMap = {};
+    for (const p of activePlayers) {
+      if ((p.depth_chart_order ?? 99) === 1) {
+        starterMap[`${p.team}_${p.position}`] = p;
+      }
+    }
+    return activePlayers
+      .filter(p =>
+        (p.depth_chart_order ?? 99) >= 2 &&
+        (p.depth_chart_order ?? 99) <= 4 &&
+        (p.proj_pts_ppr ?? 0) > 0.5,
+      )
+      .map(p => {
+        const starter = starterMap[`${p.team}_${p.position}`];
+        const isHandcuff = p.position === 'RB' && (p.depth_chart_order ?? 99) === 2;
+        const projPts = p.proj_pts_ppr ?? 0;
+        const priority = projPts >= 10 ? 'high' : projPts >= 5 ? 'medium' : 'low';
+        let reason = null;
+        if (isHandcuff && starter) {
+          const lastName = starter.player_name.split(' ').slice(-1)[0];
+          reason = `Handcuff to ${starter.player_name} — immediately startable if ${lastName} misses time`;
+        } else if (p.position === 'WR') {
+          const catches = p.proj_rec != null ? ` — ${Math.round(p.proj_rec * 10) / 10} projected catches` : '';
+          reason = `Receiving option in ${p.team}'s passing game${catches}`;
+        } else if (p.position === 'TE') {
+          reason = `Streaming TE option vs ${p.opponent}`;
+        } else if (p.position === 'QB') {
+          reason = `Streaming QB option vs ${p.opponent}`;
+        } else {
+          reason = `Change-of-pace back with PPR upside in ${p.team}'s backfield`;
+        }
+        return {
+          ...p,
+          waiver_priority: priority,
+          waiver_reason: reason,
+          is_handcuff: isHandcuff,
+          injury_upside: null,
+          is_waiver: true,
+        };
+      });
+  }, [activePlayers]);
+
   const waiverRankings = useMemo(
-    () => rankWaiverWire(waiverPlayers, waiverPosition, settings),
-    [waiverPosition, settings],
+    () => rankWaiverWire(waiverCandidates, waiverPosition, settings),
+    [waiverCandidates, waiverPosition, settings],
   );
 
   const scoreA = useMemo(
