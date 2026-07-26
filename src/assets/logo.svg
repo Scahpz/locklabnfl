@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <defs>
+    <linearGradient id="tubeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#15803d"/>
+      <stop offset="45%" stop-color="#4ade80"/>
+      <stop offset="100%" stop-color="#15803d"/>
+    </linearGradient>
+    <linearGradient id="ballGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#c47a3a"/>
+      <stop offset="100%" stop-color="#7c4010"/>
+    </linearGradient>
+    <clipPath id="tubeBodyClip">
+      <rect x="-14" y="-55" width="28" height="115" rx="14"/>
+    </clipPath>
+  </defs>
+
+  <!-- Background -->
+  <rect width="200" height="200" fill="#0a0a0a" rx="26"/>
+
+  <!-- Test tube (rotated -45deg, bottom at lower-left, opening at upper-right) -->
+  <g transform="translate(76, 122) rotate(-45)">
+    <!-- Tube body -->
+    <rect x="-14" y="-55" width="28" height="95" fill="url(#tubeGrad)" rx="4"/>
+    <!-- Rounded bottom cap -->
+    <ellipse cx="0" cy="40" rx="14" ry="14" fill="url(#tubeGrad)"/>
+    <!-- Shine -->
+    <rect x="-7" y="-50" width="5" height="82" rx="2.5" fill="rgba(255,255,255,0.22)" clip-path="url(#tubeBodyClip)"/>
+    <!-- Dark liquid shadow at bottom interior -->
+    <ellipse cx="0" cy="28" rx="10" ry="20" fill="rgba(0,0,0,0.18)" clip-path="url(#tubeBodyClip)"/>
+    <!-- Opening rim -->
+    <rect x="-16" y="-63" width="32" height="11" rx="4" fill="#22c55e"/>
+    <rect x="-14" y="-63" width="28" height="5" rx="3" fill="#4ade80"/>
+  </g>
+
+  <!-- Bubble dots -->
+  <circle cx="110" cy="87" r="4" fill="white" opacity="0.85"/>
+  <circle cx="122" cy="74" r="2.8" fill="white" opacity="0.65"/>
+  <circle cx="118" cy="63" r="2" fill="white" opacity="0.5"/>
+
+  <!-- Football (rotated -45deg — pointed along launch trajectory) -->
+  <g transform="translate(152, 46) rotate(-45)">
+    <!-- Football body — slightly pointed ellipse -->
+    <ellipse cx="0" cy="0" rx="27" ry="18" fill="url(#ballGrad)"/>
+    <!-- Seam arcs (white stitched lines) -->
+    <path d="M -22 0 Q -11 -15 0 -18" stroke="white" stroke-width="1.3" fill="none" stroke-linecap="round" opacity="0.75"/>
+    <path d="M 22 0 Q 11 15 0 18" stroke="white" stroke-width="1.3" fill="none" stroke-linecap="round" opacity="0.75"/>
+    <!-- Center lace spine -->
+    <line x1="0" y1="-10" x2="0" y2="10" stroke="white" stroke-width="2.2" stroke-linecap="round"/>
+    <!-- Lace cross stitches -->
+    <line x1="-5" y1="-7" x2="5" y2="-7" stroke="white" stroke-width="1.6" stroke-linecap="round"/>
+    <line x1="-5" y1="-2.5" x2="5" y2="-2.5" stroke="white" stroke-width="1.6" stroke-linecap="round"/>
+    <line x1="-5" y1="2.5" x2="5" y2="2.5" stroke="white" stroke-width="1.6" stroke-linecap="round"/>
+    <line x1="-5" y1="7" x2="5" y2="7" stroke="white" stroke-width="1.6" stroke-linecap="round"/>
+    <!-- Highlight glint -->
+    <ellipse cx="-7" cy="-6" rx="5" ry="3" fill="rgba(255,255,255,0.15)" transform="rotate(-30)"/>
+  </g>
+</svg>

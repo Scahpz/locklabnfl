@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { TrendingUp, Zap, Layers, Bell, User, GitCompare, Activity, ChevronLeft, ChevronRight, Sparkles, Search, ClipboardList, Trophy } from 'lucide-react';
-import logo from '@/assets/logo.png';
+import logo from '@/assets/logo.svg';
 
 const navItems = [
   { path: '/', label: 'Props', icon: Zap },
