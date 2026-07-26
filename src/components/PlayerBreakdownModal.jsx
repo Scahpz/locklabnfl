@@ -1,8 +1,9 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X, TrendingUp, TrendingDown, Minus, AlertTriangle, Shield,
   Zap, Target, Activity, ChevronDown, ChevronUp, Info, BarChart2,
+  Calendar,
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip,
@@ -12,7 +13,7 @@ import { TEAM_STATS, NFL_LEAGUE_AVGS } from '@/lib/teamStats';
 import TeamLogo from '@/components/common/TeamLogo';
 import { cn } from '@/lib/utils';
 
-// ─── Constants & Helpers ─────────────────────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
 
 const POS_DEF_KEY = {
   QB: 'pass_yds_allowed',
@@ -28,8 +29,6 @@ const POS_DEF_LABEL = {
   TE: 'TE Rec Yds Allowed / G',
 };
 
-// Estimated half-PPR FP per game allowed to position WR1/RB1/TE1/QB1 at league average.
-// Used to convert defensive yardage stats to a FP-unit comparison the user can relate to.
 const POSITION_AVG_FP = { QB: 20, RB: 13, WR: 13, TE: 8 };
 
 const PROP_LABELS = {
@@ -37,6 +36,21 @@ const PROP_LABELS = {
   rushing_yards: 'Rush Yds', rushing_tds: 'Rush TDs',
   receiving_yards: 'Rec Yds', receptions: 'Receptions',
 };
+
+// ESPN returns some different team abbreviations than Sleeper.
+// ESPN_TO_SLEEPER: parse ESPN schedule responses → our internal format.
+// SLEEPER_TO_ESPN: build the ESPN schedule URL from our team abbreviations.
+const ESPN_TO_SLEEPER = { WSH: 'WAS', LA: 'LAR' };
+const SLEEPER_TO_ESPN = { WAS: 'WSH', LAR: 'LA' };
+
+const FILTER_OPTIONS = [
+  { key: 'L3',  label: 'L3'          },
+  { key: 'L5',  label: 'L5'          },
+  { key: 'L10', label: 'L10'         },
+  { key: 'LS',  label: 'Last Season' },
+];
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function defRank(opponent, statKey) {
   const val = TEAM_STATS[opponent]?.[statKey];
@@ -46,11 +60,9 @@ function defRank(opponent, statKey) {
   return sorted.indexOf(val) + 1;
 }
 
-// Estimated FP allowed per game to the given position vs. a specific defense.
-// Scales league-average FP by how much more/less this defense allows vs the mean.
 function estimateFPAllowed(opponent, pos) {
-  const key = POS_DEF_KEY[pos];
-  const defStat  = TEAM_STATS[opponent]?.[key];
+  const key       = POS_DEF_KEY[pos];
+  const defStat   = TEAM_STATS[opponent]?.[key];
   const leagueAvg = NFL_LEAGUE_AVGS[key];
   if (!defStat || !leagueAvg) return null;
   return Math.round(POSITION_AVG_FP[pos] * (defStat / leagueAvg) * 10) / 10;
@@ -58,14 +70,14 @@ function estimateFPAllowed(opponent, pos) {
 
 function findSimilarDefenses(opponent, pos, count = 3) {
   const keys = Object.keys(NFL_LEAGUE_AVGS);
-  const opp = TEAM_STATS[opponent];
+  const opp  = TEAM_STATS[opponent];
   if (!opp) return [];
   return Object.entries(TEAM_STATS)
     .filter(([team]) => team !== opponent)
     .map(([team, stats]) => {
       const dist = Math.sqrt(
         keys.reduce((sum, k) => {
-          const avg = NFL_LEAGUE_AVGS[k] || 1;
+          const avg  = NFL_LEAGUE_AVGS[k] || 1;
           const diff = ((stats[k] ?? avg) - (opp[k] ?? avg)) / avg;
           return sum + diff * diff;
         }, 0),
@@ -78,12 +90,12 @@ function findSimilarDefenses(opponent, pos, count = 3) {
 
 function probAbove(projection, floor, ceiling, threshold) {
   if (projection <= 0) return threshold <= 0 ? 99 : 1;
-  const lo = Math.min(floor, projection * 0.4);
-  const hi = Math.max(ceiling, projection * 1.6);
+  const lo    = Math.min(floor, projection * 0.4);
+  const hi    = Math.max(ceiling, projection * 1.6);
   if (threshold <= lo) return 99;
   if (threshold >= hi) return 1;
   const sigma = Math.max(1, (hi - lo) / 4);
-  const z = (threshold - projection) / sigma;
+  const z     = (threshold - projection) / sigma;
   return Math.max(1, Math.min(99, Math.round(100 / (1 + Math.exp(1.6 * z)))));
 }
 
@@ -103,13 +115,12 @@ function matchupBg(rank) {
 
 function buildSummary(player, score, rank) {
   const { verdict, grade, projection, total } = score;
-  const pos = player.position;
+  const pos   = player.position;
   const parts = [];
-  if (projection > 0) {
+  if (projection > 0)
     parts.push(`${player.player_name} projects for ${projection} fantasy points this week, earning a ${grade} grade (${total}/100).`);
-  } else {
+  else
     parts.push(`${player.player_name} currently has no confirmed projection for this week (${grade}, ${total}/100).`);
-  }
   if (rank != null) {
     if (rank <= 10)
       parts.push(`The ${player.opponent} defense ranks #${rank} in ${pos} production allowed — a clear plus matchup.`);
@@ -130,7 +141,7 @@ function buildSummary(player, score, rank) {
 function buildBullets(player, score, rank) {
   const likes = [];
   const risks = [];
-  const { tier2, floor, ceiling, projection, criteria } = score;
+  const { tier2, floor, ceiling, projection } = score;
   const pos = player.position;
 
   if (rank != null && rank <= 12)
@@ -147,9 +158,6 @@ function buildBullets(player, score, rank) {
     likes.push(`${Math.round(player.proj_pass_yd)} projected pass yards — elite QB volume.`);
   if (ceiling - projection >= 8)
     likes.push(`Ceiling of ${ceiling} FP offers meaningful boom-week upside.`);
-  const gameTotal = criteria?.find(c => c.label === 'Game Total')?.tip?.match(/O\/U ([\d.]+)/)?.[1];
-  if (gameTotal && parseFloat(gameTotal) > 47)
-    likes.push(`High-total game environment (O/U ${gameTotal}) boosts scoring opportunity.`);
 
   if (rank != null && rank >= 23)
     risks.push(`Tough matchup — ${player.opponent} ranks #${rank} in ${POS_DEF_LABEL[pos]} allowed.`);
@@ -168,6 +176,74 @@ function buildBullets(player, score, rank) {
   if (likes.length === 0) likes.push('Grade reflects all currently available projection data.');
   if (risks.length === 0) risks.push('No significant red flags detected in available data.');
   return { likes: likes.slice(0, 5), risks: risks.slice(0, 4) };
+}
+
+// ─── Last-season game log fetch ───────────────────────────────────────────────
+// Pulls real 2024 weekly stats (half-PPR) from Sleeper + team schedule from ESPN.
+// Fires 18 parallel requests (one per week) + 1 schedule request, then caches the
+// result in sessionStorage so repeat opens are instant.
+
+async function fetchLastSeasonLog(playerId, team, position) {
+  const cacheKey = `locklab_ls24_${playerId}`;
+  try {
+    const cached = sessionStorage.getItem(cacheKey);
+    if (cached) return JSON.parse(cached);
+  } catch {}
+
+  const SEASON   = 2024;
+  const espnTeam = SLEEPER_TO_ESPN[team] ?? team;
+  const defKey   = POS_DEF_KEY[position];
+
+  // All requests fire in parallel: ESPN schedule + 18 Sleeper weekly stat dumps
+  const [schedRes, ...weekRes] = await Promise.allSettled([
+    fetch(
+      `https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/${espnTeam}/schedule?season=${SEASON}&seasontype=2`,
+    ).then(r => r.ok ? r.json() : null).catch(() => null),
+    ...Array.from({ length: 18 }, (_, i) =>
+      fetch(`https://api.sleeper.app/v1/stats/nfl/regular/${SEASON}/${i + 1}`)
+        .then(r => r.ok ? r.json() : null).catch(() => null),
+    ),
+  ]);
+
+  // Build week-number → opponent abbreviation map (in Sleeper/internal format)
+  const oppByWeek = {};
+  const schedData = schedRes.status === 'fulfilled' ? schedRes.value : null;
+  for (const ev of schedData?.events ?? []) {
+    const week = ev.week?.number ?? ev.week;
+    if (!week) continue;
+    const comp   = ev.competitions?.[0];
+    const home   = comp?.competitors?.find(c => c.homeAway === 'home')?.team?.abbreviation?.toUpperCase();
+    const away   = comp?.competitors?.find(c => c.homeAway === 'away')?.team?.abbreviation?.toUpperCase();
+    const mine   = espnTeam.toUpperCase();
+    const rawOpp = home === mine ? away : away === mine ? home : null;
+    if (rawOpp) oppByWeek[week] = ESPN_TO_SLEEPER[rawOpp] ?? rawOpp;
+  }
+
+  const log = weekRes
+    .map((res, i) => {
+      const week  = i + 1;
+      const stats = res.status === 'fulfilled' ? res.value?.[playerId] : null;
+      if (!stats || (stats.pts_half_ppr ?? 0) < 0.5) return null; // bye / did not play
+      const opp  = oppByWeek[week] ?? null;
+      const rank = opp ? defRank(opp, defKey) : null;
+      return {
+        week,
+        opponent:   opp,
+        defRankVal: rank,
+        fp:         Math.round((stats.pts_half_ppr ?? 0) * 10) / 10,
+        passYd:     stats.pass_yd != null ? Math.round(stats.pass_yd)         : null,
+        passTd:     stats.pass_td != null ? Math.round(stats.pass_td * 10) / 10 : null,
+        rushYd:     stats.rush_yd != null ? Math.round(stats.rush_yd)         : null,
+        rushTd:     stats.rush_td != null ? Math.round(stats.rush_td * 10) / 10 : null,
+        rec:        stats.rec     != null ? Math.round(stats.rec * 10) / 10   : null,
+        recYd:      stats.rec_yd  != null ? Math.round(stats.rec_yd)          : null,
+        recTd:      stats.rec_td  != null ? Math.round(stats.rec_td * 10) / 10 : null,
+      };
+    })
+    .filter(Boolean);
+
+  try { sessionStorage.setItem(cacheKey, JSON.stringify(log)); } catch {}
+  return log;
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -194,7 +270,7 @@ function Section({ title, icon: Icon, children, defaultOpen = true }) {
 }
 
 function CriteriaBar({ label, score, maxScore, tip }) {
-  const pct = Math.min(100, Math.max(0, (score / maxScore) * 100));
+  const pct      = Math.min(100, Math.max(0, (score / maxScore) * 100));
   const barColor = pct >= 70 ? 'bg-emerald-500' : pct >= 38 ? 'bg-amber-500' : 'bg-red-500';
   return (
     <div className="space-y-1">
@@ -227,54 +303,216 @@ function ChartTooltip({ active, payload, label }) {
   );
 }
 
-const FILTER_OPTIONS = [
-  { key: 'L3',  label: 'L3',  n: 3  },
-  { key: 'L5',  label: 'L5',  n: 5  },
-  { key: 'L10', label: 'L10', n: 10 },
-];
+function FilterButtons({ chartFilter, setChartFilter }) {
+  return (
+    <div className="flex gap-1 flex-wrap">
+      {FILTER_OPTIONS.map(({ key, label }) => (
+        <button
+          key={key}
+          onClick={() => setChartFilter(key)}
+          className={cn(
+            'px-2.5 py-1 text-[10px] font-semibold rounded-lg border transition-all',
+            chartFilter === key
+              ? 'bg-primary/20 border-primary/40 text-primary'
+              : 'border-white/8 text-muted-foreground hover:border-white/18 hover:text-foreground',
+          )}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ─── Last Season Game Log Table ───────────────────────────────────────────────
+
+function LSGameLog({ lsLog, pos, onRetry }) {
+  if (lsLog === 'loading' || lsLog === null) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-10">
+        <div className="w-5 h-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+        <p className="text-[11px] text-muted-foreground">Loading 2024 game log…</p>
+        <p className="text-[10px] text-muted-foreground/60">
+          Fetching 18 weeks of Sleeper stats — takes a moment the first time.
+        </p>
+      </div>
+    );
+  }
+
+  if (lsLog === 'error') {
+    return (
+      <div className="flex flex-col items-center gap-3 py-8 text-center">
+        <p className="text-[11px] text-red-400">Failed to load 2024 game log.</p>
+        <button onClick={onRetry} className="text-[10px] text-primary underline underline-offset-2">
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  if (lsLog.length === 0) {
+    return (
+      <div className="rounded-xl bg-white/3 border border-white/8 px-4 py-6 text-center">
+        <Calendar className="w-6 h-6 text-muted-foreground/40 mx-auto mb-2" />
+        <p className="text-[11px] text-muted-foreground">No 2024 regular season games found.</p>
+        <p className="text-[10px] text-muted-foreground/60 mt-1">
+          Player may have been injured, on a practice squad, or inactive most of the year.
+        </p>
+      </div>
+    );
+  }
+
+  const allFP  = lsLog.map(g => g.fp);
+  const avgFP  = Math.round((allFP.reduce((a, b) => a + b, 0) / allFP.length) * 10) / 10;
+  const highFP = Math.max(...allFP);
+  const lowFP  = Math.min(...allFP);
+  const boom   = lsLog.filter(g => g.fp >= 20).length;
+
+  const keyField = pos === 'QB' ? 'passYd' : pos === 'RB' ? 'rushYd' : 'recYd';
+  const keyLabel = pos === 'QB' ? 'Pass Yds' : pos === 'RB' ? 'Rush Yds' : 'Rec Yds';
+
+  return (
+    <div className="space-y-3">
+      {/* Summary strip */}
+      <div className="flex flex-wrap gap-x-5 gap-y-1">
+        {[
+          { label: 'Games',  value: lsLog.length },
+          { label: 'Avg FP', value: avgFP },
+          { label: 'High',   value: highFP, color: 'text-emerald-400' },
+          { label: 'Low',    value: lowFP,  color: 'text-red-400'     },
+          { label: '20+ FP', value: boom,   color: boom >= 3 ? 'text-emerald-400' : 'text-muted-foreground' },
+        ].map(({ label, value, color }) => (
+          <div key={label}>
+            <div className="text-[10px] text-muted-foreground">{label}</div>
+            <div className={cn('text-xs font-semibold', color ?? 'text-foreground')}>{value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Game log table */}
+      <div className="overflow-x-auto rounded-xl border border-white/8">
+        <table className="w-full text-[11px] min-w-[320px]">
+          <thead>
+            <tr className="border-b border-white/8 bg-white/3">
+              <th className="text-left px-3 py-2 text-muted-foreground font-medium w-8">Wk</th>
+              <th className="text-left px-3 py-2 text-muted-foreground font-medium">Opponent</th>
+              <th className="text-center px-2 py-2 text-muted-foreground font-medium leading-tight">
+                Def<br /><span className="text-[9px] font-normal opacity-60">vs {pos}</span>
+              </th>
+              <th className="text-right px-3 py-2 text-muted-foreground font-medium">FP</th>
+              <th className="text-right px-3 py-2 text-muted-foreground font-medium">{keyLabel}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {lsLog.map((game, i) => {
+              const isBoom  = game.fp >= highFP * 0.85;
+              const isBust  = game.fp <= lowFP  * 1.15 && game.fp < 8;
+              const fpColor = isBoom ? 'text-emerald-400 font-bold'
+                : isBust ? 'text-red-400' : 'text-foreground';
+              const keyVal  = game[keyField];
+
+              return (
+                <tr
+                  key={i}
+                  className="border-b border-white/5 last:border-0 hover:bg-white/3 transition-colors"
+                >
+                  <td className="px-3 py-2 text-muted-foreground tabular-nums">{game.week}</td>
+                  <td className="px-3 py-2">
+                    {game.opponent ? (
+                      <div className="flex items-center gap-1.5">
+                        <TeamLogo team={game.opponent} className="w-4 h-4 flex-shrink-0" />
+                        <span className="text-foreground font-medium">{game.opponent}</span>
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </td>
+                  <td className="px-2 py-2 text-center">
+                    {game.defRankVal != null ? (
+                      <span className={cn('font-semibold', matchupColor(game.defRankVal))}>
+                        #{game.defRankVal}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </td>
+                  <td className={cn('px-3 py-2 text-right tabular-nums', fpColor)}>
+                    {game.fp}
+                  </td>
+                  <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
+                    {keyVal ?? '—'}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <p className="text-[10px] text-muted-foreground">
+        FP = half-PPR · Def rank uses <em>current</em> season stats as a proxy (2024 historical ranks unavailable) · Source: Sleeper
+      </p>
+    </div>
+  );
+}
 
 // ─── Main Modal ───────────────────────────────────────────────────────────────
 
-export default function PlayerBreakdownModal({ entry, onClose, settings }) {
+export default function PlayerBreakdownModal({ entry, onClose }) {
   const [chartFilter, setChartFilter] = useState('L10');
+  // null = not fetched yet, 'loading', 'error', or GameEntry[]
+  const [lsLog, setLsLog] = useState(null);
 
-  // Generate FP-based simulated games (not raw yardage from prop.last_10_games).
-  // Uses floor/projection/ceiling to build values in the correct FP range.
+  const pos      = entry?.player?.position ?? 'WR';
+  const opponent = entry?.player?.opponent ?? '—';
+
+  // Reset last-season log when the player changes so we re-fetch for the new player
+  useEffect(() => {
+    setLsLog(null);
+  }, [entry?.player?.id]);
+
+  // Lazy-fetch: only trigger when LS filter is active and data hasn't been loaded yet
+  useEffect(() => {
+    if (chartFilter !== 'LS' || !entry || lsLog !== null) return;
+    setLsLog('loading');
+    fetchLastSeasonLog(entry.player.id, entry.player.team, pos)
+      .then(log => setLsLog(log))
+      .catch(() => setLsLog('error'));
+  }, [chartFilter, entry, lsLog, pos]);
+
+  // Simulated FP game values for L3/L5/L10 (no current-season data yet — fills in week by week)
   const fpGames = useMemo(() => {
     const proj  = entry?.score?.projection ?? 0;
     const floor = entry?.score?.floor ?? 0;
     const ceil  = entry?.score?.ceiling ?? proj * 1.8;
     if (proj <= 0) return [];
     const sigma = Math.max(0.5, (ceil - floor) / 4);
-    // Pseudo-deterministic seed from player id to avoid reshuffling on re-render
-    const seed = (entry?.player?.id ?? 'x').split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) & 0xffff, 1);
+    const seed  = (entry?.player?.id ?? 'x')
+      .split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) & 0xffff, 1);
     return Array.from({ length: 10 }, (_, i) => {
-      // Simple LCG
-      const r = ((seed + i * 2654435761) & 0xffff) / 0xffff;
+      const r  = ((seed + i * 2654435761) & 0xffff) / 0xffff;
       const fp = Math.max(0, Math.round((proj + (r * 2 - 1) * sigma * 1.8) * 10) / 10);
       return { label: `G${10 - i}`, fp };
     }).reverse();
   }, [entry?.score?.projection, entry?.score?.floor, entry?.score?.ceiling, entry?.player?.id]);
 
   const displayedGames = useMemo(() => {
-    const n = FILTER_OPTIONS.find(f => f.key === chartFilter)?.n ?? 10;
+    const n = chartFilter === 'L3' ? 3 : chartFilter === 'L5' ? 5 : 10;
     return fpGames.slice(-n);
   }, [fpGames, chartFilter]);
 
   const similar = useMemo(
-    () => findSimilarDefenses(entry?.player?.opponent ?? '', entry?.player?.position ?? 'WR'),
-    [entry?.player?.opponent, entry?.player?.position],
+    () => findSimilarDefenses(opponent, pos),
+    [opponent, pos],
   );
 
   if (!entry) return null;
 
   const { player, prop, score } = entry;
-  const pos      = player.position ?? 'WR';
-  const opponent = player.opponent ?? '—';
-  const defKey   = POS_DEF_KEY[pos];
-  const defStat  = TEAM_STATS[opponent]?.[defKey];
+  const defKey    = POS_DEF_KEY[pos];
+  const defStat   = TEAM_STATS[opponent]?.[defKey];
   const leagueAvg = NFL_LEAGUE_AVGS[defKey];
-  const rank     = defRank(opponent, defKey);
+  const rank      = defRank(opponent, defKey);
   const fpAllowed = estimateFPAllowed(opponent, pos);
   const leagueFP  = POSITION_AVG_FP[pos];
   const propLabel = PROP_LABELS[prop?.prop_type] ?? prop?.prop_type ?? '';
@@ -293,24 +531,18 @@ export default function PlayerBreakdownModal({ entry, onClose, settings }) {
     pct: probAbove(score.projection, score.floor, score.ceiling, t),
   }));
 
-  // FP chart stats from simulated values
-  const visibleFP   = displayedGames.map(g => g.fp);
-  const fpAvg       = visibleFP.length
-    ? Math.round((visibleFP.reduce((a, b) => a + b, 0) / visibleFP.length) * 10) / 10
-    : 0;
-  const fpHigh      = visibleFP.length ? Math.max(...visibleFP) : 0;
-  const fpLow       = visibleFP.length ? Math.min(...visibleFP) : 0;
+  const visibleFP = displayedGames.map(g => g.fp);
+  const fpAvg     = visibleFP.length
+    ? Math.round((visibleFP.reduce((a, b) => a + b, 0) / visibleFP.length) * 10) / 10 : 0;
+  const fpHigh    = visibleFP.length ? Math.max(...visibleFP) : 0;
+  const fpLow     = visibleFP.length ? Math.min(...visibleFP) : 0;
 
-  // Trend from the full 10-game simulated set
-  const early3Avg = fpGames.length >= 3
-    ? fpGames.slice(0, 3).reduce((a, b) => a + b.fp, 0) / 3 : null;
-  const recent3Avg = fpGames.length >= 3
-    ? fpGames.slice(-3).reduce((a, b) => a + b.fp, 0) / 3 : null;
-  const trend = early3Avg != null && recent3Avg != null
+  const early3Avg  = fpGames.length >= 3 ? fpGames.slice(0, 3).reduce((a, b) => a + b.fp, 0) / 3 : null;
+  const recent3Avg = fpGames.length >= 3 ? fpGames.slice(-3).reduce((a, b) => a + b.fp, 0) / 3 : null;
+  const trend      = early3Avg != null && recent3Avg != null
     ? recent3Avg > early3Avg + 2 ? 'up' : recent3Avg < early3Avg - 2 ? 'down' : 'neutral'
     : 'neutral';
 
-  // Usage criterion — read from score.criteria so Grade Breakdown and Snapshot agree
   const usageCrit = score.criteria?.find(c =>
     c.label === 'Target Share' || c.label === 'Snap % / Workload' || c.label === 'Rushing Volume',
   );
@@ -321,12 +553,12 @@ export default function PlayerBreakdownModal({ entry, onClose, settings }) {
   const summary = buildSummary(player, score, rank);
   const { likes, risks } = buildBullets(player, score, rank);
 
-  const projRange = score.ceiling - score.floor;
-  const projPct   = projRange > 0
-    ? Math.round(((score.projection - score.floor) / projRange) * 100)
-    : 50;
-
+  const projRange  = score.ceiling - score.floor;
+  const projPct    = projRange > 0
+    ? Math.round(((score.projection - score.floor) / projRange) * 100) : 50;
   const fpChartMax = Math.max(score.ceiling + 4, fpHigh + 4, 15);
+
+  const isLS = chartFilter === 'LS';
 
   return (
     <AnimatePresence>
@@ -348,7 +580,6 @@ export default function PlayerBreakdownModal({ entry, onClose, settings }) {
           className="relative z-10 w-full sm:max-w-xl max-h-[96dvh] flex flex-col bg-[hsl(222,47%,7%)] rounded-t-3xl sm:rounded-3xl border border-white/10 shadow-2xl overflow-hidden"
           onClick={e => e.stopPropagation()}
         >
-
           {/* ── Sticky header ── */}
           <div className="sticky top-0 z-20 bg-[hsl(222,47%,7%)]/96 backdrop-blur-sm border-b border-white/8 px-4 py-3 flex items-center gap-3">
             <TeamLogo team={player.team} className="w-10 h-10 flex-shrink-0" />
@@ -386,9 +617,9 @@ export default function PlayerBreakdownModal({ entry, onClose, settings }) {
             <div className="rounded-2xl border border-white/8 bg-white/3 p-4 space-y-3">
               <div className="grid grid-cols-3 divide-x divide-white/8">
                 {[
-                  { label: 'Floor',      value: score.floor,      color: 'text-red-400'     },
-                  { label: 'Projection', value: score.projection,  color: 'text-primary'     },
-                  { label: 'Ceiling',    value: score.ceiling,     color: 'text-emerald-400' },
+                  { label: 'Floor',      value: score.floor,     color: 'text-red-400'     },
+                  { label: 'Projection', value: score.projection, color: 'text-primary'     },
+                  { label: 'Ceiling',    value: score.ceiling,   color: 'text-emerald-400' },
                 ].map(({ label, value, color }) => (
                   <div key={label} className="text-center px-2">
                     <div className={cn('text-2xl font-bold', color)}>{value}</div>
@@ -437,91 +668,92 @@ export default function PlayerBreakdownModal({ entry, onClose, settings }) {
               </p>
             </Section>
 
-            {/* FP Projection Trend (simulated) */}
-            {fpGames.length > 1 && (
-              <Section title="FP Projection Model" icon={BarChart2} defaultOpen>
-                {/* Filter buttons */}
-                <div className="flex items-center justify-between mb-1">
-                  <div className="flex gap-1">
-                    {FILTER_OPTIONS.map(({ key, label }) => (
-                      <button
-                        key={key}
-                        onClick={() => setChartFilter(key)}
-                        className={cn(
-                          'px-2.5 py-1 text-[10px] font-semibold rounded-lg border transition-all',
-                          chartFilter === key
-                            ? 'bg-primary/20 border-primary/40 text-primary'
-                            : 'border-white/8 text-muted-foreground hover:border-white/18 hover:text-foreground',
-                        )}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
+            {/* FP Trend / Last Season — single section, filter always visible */}
+            <Section
+              title={isLS ? '2024 Season Game Log' : 'FP Projection Model'}
+              icon={isLS ? Calendar : BarChart2}
+              defaultOpen
+            >
+              {/* Filter row */}
+              <div className="flex items-center justify-between mb-2">
+                <FilterButtons chartFilter={chartFilter} setChartFilter={setChartFilter} />
+                {!isLS && (
                   <div className="flex items-center gap-1">
-                    {trend === 'up'      && <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />}
-                    {trend === 'down'    && <TrendingDown className="w-3.5 h-3.5 text-red-400" />}
-                    {trend === 'neutral' && <Minus className="w-3.5 h-3.5 text-muted-foreground" />}
+                    {trend === 'up'      && <TrendingUp   className="w-3.5 h-3.5 text-emerald-400" />}
+                    {trend === 'down'    && <TrendingDown  className="w-3.5 h-3.5 text-red-400" />}
+                    {trend === 'neutral' && <Minus         className="w-3.5 h-3.5 text-muted-foreground" />}
                     <span className="text-[10px] text-muted-foreground">
                       {trend === 'up' ? 'Trending up' : trend === 'down' ? 'Trending down' : 'Stable'}
                     </span>
                   </div>
-                </div>
+                )}
+              </div>
 
-                {/* Stat pills */}
-                <div className="flex gap-3 mb-2">
-                  {[
-                    { label: `Avg (${chartFilter})`, value: `${fpAvg} FP` },
-                    { label: 'High',                 value: `${fpHigh} FP`, color: 'text-emerald-400' },
-                    { label: 'Low',                  value: `${fpLow} FP`,  color: 'text-red-400'     },
-                  ].map(({ label, value, color }) => (
-                    <div key={label}>
-                      <div className="text-[10px] text-muted-foreground">{label}</div>
-                      <div className={cn('text-xs font-semibold', color ?? 'text-foreground')}>{value}</div>
+              {isLS ? (
+                /* ── Real 2024 game log ── */
+                <LSGameLog
+                  lsLog={lsLog}
+                  pos={pos}
+                  onRetry={() => setLsLog(null)}
+                />
+              ) : (
+                /* ── Simulated FP chart (current-season projection model) ── */
+                fpGames.length > 1 ? (
+                  <>
+                    <div className="flex gap-3 mb-2">
+                      {[
+                        { label: `Avg (${chartFilter})`, value: `${fpAvg} FP` },
+                        { label: 'High', value: `${fpHigh} FP`, color: 'text-emerald-400' },
+                        { label: 'Low',  value: `${fpLow} FP`,  color: 'text-red-400'     },
+                      ].map(({ label, value, color }) => (
+                        <div key={label}>
+                          <div className="text-[10px] text-muted-foreground">{label}</div>
+                          <div className={cn('text-xs font-semibold', color ?? 'text-foreground')}>{value}</div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
 
-                <ResponsiveContainer width="100%" height={110}>
-                  <AreaChart data={displayedGames} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="fpGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.35} />
-                        <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <XAxis dataKey="label" tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }} />
-                    <YAxis domain={[0, fpChartMax]} tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }} />
-                    <Tooltip content={<ChartTooltip />} />
-                    {/* Projection line */}
-                    <ReferenceLine y={score.projection} stroke="hsl(var(--primary))" strokeOpacity={0.3} strokeDasharray="4 3" />
-                    {/* Floor/ceiling band */}
-                    {score.floor > 0 && (
-                      <ReferenceLine y={score.floor} stroke="rgba(255,80,80,0.2)" strokeDasharray="2 3" />
-                    )}
-                    <ReferenceLine y={score.ceiling} stroke="rgba(80,255,120,0.18)" strokeDasharray="2 3" />
-                    <Area
-                      type="monotone" dataKey="fp"
-                      stroke="hsl(var(--primary))" strokeWidth={2}
-                      fill="url(#fpGrad)"
-                      dot={{ fill: 'hsl(var(--primary))', r: 2.5, strokeWidth: 0 }}
-                      activeDot={{ r: 4 }}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
+                    <ResponsiveContainer width="100%" height={110}>
+                      <AreaChart data={displayedGames} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
+                        <defs>
+                          <linearGradient id="fpGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%"   stopColor="hsl(var(--primary))" stopOpacity={0.35} />
+                            <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0}    />
+                          </linearGradient>
+                        </defs>
+                        <XAxis dataKey="label" tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }} />
+                        <YAxis domain={[0, fpChartMax]} tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }} />
+                        <Tooltip content={<ChartTooltip />} />
+                        <ReferenceLine y={score.projection} stroke="hsl(var(--primary))" strokeOpacity={0.3} strokeDasharray="4 3" />
+                        {score.floor > 0 && (
+                          <ReferenceLine y={score.floor} stroke="rgba(255,80,80,0.2)" strokeDasharray="2 3" />
+                        )}
+                        <ReferenceLine y={score.ceiling} stroke="rgba(80,255,120,0.18)" strokeDasharray="2 3" />
+                        <Area
+                          type="monotone" dataKey="fp"
+                          stroke="hsl(var(--primary))" strokeWidth={2}
+                          fill="url(#fpGrad)"
+                          dot={{ fill: 'hsl(var(--primary))', r: 2.5, strokeWidth: 0 }}
+                          activeDot={{ r: 4 }}
+                        />
+                      </AreaChart>
+                    </ResponsiveContainer>
 
-                <p className="text-[10px] text-muted-foreground">
-                  Simulated from this week's projection model (floor {score.floor} / proj {score.projection} / ceil {score.ceiling} FP).
-                  Real game-log history requires a backend data connection.
-                </p>
-              </Section>
-            )}
+                    <p className="text-[10px] text-muted-foreground">
+                      Simulated from this week's projection model (floor {score.floor} / proj {score.projection} / ceil {score.ceiling} FP).
+                      Switch to <strong>Last Season</strong> for real 2024 game-by-game data.
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground text-center py-4">No projection data available.</p>
+                )
+              )}
+            </Section>
 
             {/* Position vs. Opponent FP */}
             <Section title={`${pos} Scoring vs ${opponent}`} icon={Shield} defaultOpen>
               {defStat != null ? (
                 <div className="space-y-3">
-                  {/* Main matchup card */}
                   <div className={cn('rounded-xl border px-4 py-3 flex items-center justify-between', matchupBg(rank))}>
                     <div>
                       <div className="text-[10px] text-muted-foreground uppercase tracking-wider">{POS_DEF_LABEL[pos]}</div>
@@ -534,22 +766,11 @@ export default function PlayerBreakdownModal({ entry, onClose, settings }) {
                     </div>
                   </div>
 
-                  {/* FP estimate row */}
                   {fpAllowed != null && (
                     <div className="grid grid-cols-3 gap-2">
                       {[
-                        {
-                          label: `Est. ${pos} FP Allowed`,
-                          value: `${fpAllowed}`,
-                          sub: 'per game (est.)',
-                          color: matchupColor(rank),
-                        },
-                        {
-                          label: 'League Average',
-                          value: `${leagueFP}`,
-                          sub: 'FP per game',
-                          color: 'text-muted-foreground',
-                        },
+                        { label: `Est. ${pos} FP Allowed`, value: `${fpAllowed}`, sub: 'per game (est.)', color: matchupColor(rank) },
+                        { label: 'League Average',          value: `${leagueFP}`,  sub: 'FP per game',   color: 'text-muted-foreground' },
                         {
                           label: 'vs League Avg',
                           value: `${fpAllowed >= leagueFP ? '+' : ''}${Math.round((fpAllowed - leagueFP) * 10) / 10}`,
@@ -568,10 +789,10 @@ export default function PlayerBreakdownModal({ entry, onClose, settings }) {
 
                   <p className="text-[11px] text-muted-foreground">
                     {rank <= 10
-                      ? `${opponent} is one of the softest defenses for ${pos}s this season — this matchup adds meaningful upside.`
+                      ? `${opponent} is one of the softest defenses for ${pos}s — a clear plus matchup.`
                       : rank <= 22
-                      ? `${opponent} sits near league average against ${pos}s — a neutral matchup without a strong directional edge.`
-                      : `${opponent} has been among the tougher ${pos} defenses — this headwind is reflected in the grade.`}
+                      ? `${opponent} sits near league average against ${pos}s — a neutral matchup.`
+                      : `${opponent} has been among the tougher ${pos} defenses — factored into the grade.`}
                   </p>
                 </div>
               ) : (
@@ -583,7 +804,7 @@ export default function PlayerBreakdownModal({ entry, onClose, settings }) {
             {similar.length > 0 && (
               <Section title="Similar Defensive Profiles" icon={Info} defaultOpen={false}>
                 <p className="text-[10px] text-muted-foreground mb-2">
-                  These defenses have the closest statistical fingerprint to {opponent}:
+                  Defenses with the closest statistical fingerprint to {opponent}:
                 </p>
                 <div className="space-y-2">
                   {similar.map(({ team, similarity }) => {
@@ -652,7 +873,6 @@ export default function PlayerBreakdownModal({ entry, onClose, settings }) {
                     value: (player.injury_status ?? 'Healthy').charAt(0).toUpperCase() + (player.injury_status ?? 'Healthy').slice(1),
                     good: !hasInjury,
                   },
-                  // Usage metric — sourced from score.criteria so it matches Grade Breakdown exactly
                   usageCrit && {
                     label: usageCrit.label,
                     value: usageCrit.tip,
