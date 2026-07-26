@@ -42,15 +42,17 @@ const ESPN_TO_SLEEPER = { WSH: 'WAS', LA: 'LAR' };
 // SLEEPER_TO_ESPN: build the ESPN schedule URL from our team abbreviations
 const SLEEPER_TO_ESPN = { WAS: 'WSH', LAR: 'LA' };
 
-const GAME_FILTERS = ['L3', 'L5', 'L10'];
+const GAME_FILTERS = ['L3', 'L5', 'L10', 'All'];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+// Rank #1 = best defense (fewest yards allowed), #32 = worst defense (most yards allowed).
+// Ascending sort so the smallest value (fewest yards allowed) gets rank 1.
 function defRank(opponent, statKey) {
   const val = TEAM_STATS[opponent]?.[statKey];
   if (val == null) return null;
   const sorted = Object.values(TEAM_STATS)
-    .map(t => t[statKey]).filter(Boolean).sort((a, b) => b - a);
+    .map(t => t[statKey]).filter(Boolean).sort((a, b) => a - b);
   return sorted.indexOf(val) + 1;
 }
 
@@ -93,18 +95,21 @@ function probAbove(projection, floor, ceiling, threshold) {
   return Math.max(1, Math.min(99, Math.round(100 / (1 + Math.exp(1.6 * z)))));
 }
 
+// #1–8   = elite defense = TOUGH matchup for the fantasy player → red
+// #9–22  = average defense → amber
+// #23–32 = weak defense   = SOFT matchup, favorable for the fantasy player → green
 function matchupColor(rank) {
   if (rank == null) return 'text-muted-foreground';
-  return rank <= 8 ? 'text-emerald-400' : rank <= 22 ? 'text-amber-400' : 'text-red-400';
+  return rank <= 8 ? 'text-red-400' : rank <= 22 ? 'text-amber-400' : 'text-emerald-400';
 }
 
 function matchupBg(rank) {
   if (rank == null) return 'bg-white/5 border-white/10';
   return rank <= 8
-    ? 'bg-emerald-500/10 border-emerald-500/25'
+    ? 'bg-red-500/10 border-red-500/25'
     : rank <= 22
     ? 'bg-amber-500/10 border-amber-500/25'
-    : 'bg-red-500/10 border-red-500/25';
+    : 'bg-emerald-500/10 border-emerald-500/25';
 }
 
 function buildSummary(player, score, rank) {
@@ -117,11 +122,11 @@ function buildSummary(player, score, rank) {
     parts.push(`${player.player_name} currently has no confirmed projection for this week (${grade}, ${total}/100).`);
   if (rank != null) {
     if (rank <= 10)
-      parts.push(`The ${player.opponent} defense ranks #${rank} in ${pos} production allowed — a clear plus matchup.`);
+      parts.push(`The ${player.opponent} defense ranks #${rank}/32 against ${pos}s — one of the toughest matchups in the league, factored into the grade.`);
     else if (rank <= 22)
-      parts.push(`The matchup vs ${player.opponent} (#${rank} against ${pos}s) is roughly league-average.`);
+      parts.push(`The matchup vs ${player.opponent} (#${rank}/32 against ${pos}s) is roughly league-average.`);
     else
-      parts.push(`The ${player.opponent} defense (#${rank} against ${pos}s) presents a headwind factored into the grade.`);
+      parts.push(`The ${player.opponent} defense ranks #${rank}/32 against ${pos}s — one of the softest matchups in the league, adding upside to the projection.`);
   }
   if (verdict === 'START')
     parts.push(`The projection, role, and matchup all align — a confident start.`);
@@ -138,8 +143,8 @@ function buildBullets(player, score, rank) {
   const { tier2, floor, ceiling, projection } = score;
   const pos = player.position;
 
-  if (rank != null && rank <= 12)
-    likes.push(`Favorable matchup — ${player.opponent} ranks #${rank} in ${POS_DEF_LABEL[pos]} allowed.`);
+  if (rank != null && rank >= 21)
+    likes.push(`Soft matchup — ${player.opponent} ranks #${rank}/32 against ${pos}s (rank #32 = worst defense).`);
   if (projection >= 12)
     likes.push(`Projection of ${projection} FP is well above replacement level.`);
   if (player.depth_chart_order === 1)
@@ -153,8 +158,8 @@ function buildBullets(player, score, rank) {
   if (ceiling - projection >= 8)
     likes.push(`Ceiling of ${ceiling} FP offers meaningful boom-week upside.`);
 
-  if (rank != null && rank >= 23)
-    risks.push(`Tough matchup — ${player.opponent} ranks #${rank} in ${POS_DEF_LABEL[pos]} allowed.`);
+  if (rank != null && rank <= 12)
+    risks.push(`Tough matchup — ${player.opponent} ranks #${rank}/32 against ${pos}s (rank #1 = best defense).`);
   const inj = (player.injury_status ?? 'healthy').toLowerCase();
   if (inj.includes('questionable'))
     risks.push(`Questionable injury tag — monitor the injury report through the week.`);
@@ -297,7 +302,8 @@ function LSChartTooltip({ active, payload, pos }) {
       <p className="text-primary font-bold text-base">{g.fp} FP</p>
       {g.defRankVal != null && (
         <p className={cn('text-[10px]', matchupColor(g.defRankVal))}>
-          Def #{g.defRankVal} vs {pos}
+          {g.opponent} ranked #{g.defRankVal}/32 vs {pos}s
+          {' '}({g.defRankVal <= 8 ? 'tough' : g.defRankVal >= 23 ? 'soft' : 'neutral'})
         </p>
       )}
       {keyStat != null && (
@@ -315,6 +321,7 @@ function SeasonStatsSection({ lsLog, onRetryLS, pos, score }) {
 
   const slice = useMemo(() => {
     if (!Array.isArray(lsLog)) return [];
+    if (gameFilter === 'All') return lsLog;
     const n = gameFilter === 'L3' ? 3 : gameFilter === 'L5' ? 5 : 10;
     return lsLog.slice(-n);
   }, [lsLog, gameFilter]);
@@ -325,10 +332,16 @@ function SeasonStatsSection({ lsLog, onRetryLS, pos, score }) {
   const low      = allFP.length ? Math.min(...allFP) : 0;
   const chartMax = Math.max(high + 5, (score?.ceiling ?? 20) + 5, 20);
 
+  // X-axis label: "KC #3" — team the player faced + that defense's rank vs this position
   const chartData = slice.map(g => ({
     ...g,
-    xLabel: g.opponent ?? `W${g.week}`,
+    xLabel: g.opponent
+      ? `${g.opponent}${g.defRankVal != null ? ` #${g.defRankVal}` : ''}`
+      : `Wk${g.week}`,
   }));
+
+  // Angle labels when there are enough games that they'd overlap
+  const needsAngle = slice.length > 7;
 
   const isCurrent = seasonFilter === 'current';
 
@@ -434,8 +447,11 @@ function SeasonStatsSection({ lsLog, onRetryLS, pos, score }) {
           </div>
 
           {/* Area chart */}
-          <ResponsiveContainer width="100%" height={140}>
-            <AreaChart data={chartData} margin={{ top: 6, right: 4, left: -24, bottom: 0 }}>
+          <ResponsiveContainer width="100%" height={needsAngle ? 165 : 140}>
+            <AreaChart
+              data={chartData}
+              margin={{ top: 6, right: 4, left: -24, bottom: needsAngle ? 8 : 0 }}
+            >
               <defs>
                 <linearGradient id="lsGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%"   stopColor="hsl(var(--primary))" stopOpacity={0.4} />
@@ -446,6 +462,9 @@ function SeasonStatsSection({ lsLog, onRetryLS, pos, score }) {
                 dataKey="xLabel"
                 tick={{ fontSize: 8, fill: 'hsl(var(--muted-foreground))' }}
                 interval={0}
+                angle={needsAngle ? -40 : 0}
+                textAnchor={needsAngle ? 'end' : 'middle'}
+                height={needsAngle ? 46 : 20}
               />
               <YAxis
                 domain={[0, chartMax]}
@@ -710,10 +729,10 @@ export default function PlayerBreakdownModal({ entry, onClose }) {
 
                   <p className="text-[11px] text-muted-foreground">
                     {rank <= 10
-                      ? `${opponent} is one of the softest defenses for ${pos}s — a clear plus matchup.`
+                      ? `${opponent} ranks #${rank}/32 against ${pos}s — one of the toughest defenses in the league. Rank #1 = best defense.`
                       : rank <= 22
-                      ? `${opponent} sits near league average against ${pos}s — a neutral matchup.`
-                      : `${opponent} has been among the tougher ${pos} defenses — factored into the grade.`}
+                      ? `${opponent} (#${rank}/32 vs ${pos}s) is roughly league-average — no strong directional edge.`
+                      : `${opponent} ranks #${rank}/32 against ${pos}s — one of the softest defenses in the league. Rank #32 = worst defense.`}
                   </p>
                 </div>
               ) : (
