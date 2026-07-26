@@ -69,6 +69,27 @@ function ScoreBar({ total }) {
   );
 }
 
+function GameChip({ game, selected, onSelect }) {
+  const [t1, t2] = game.teams;
+  return (
+    <button
+      onClick={onSelect}
+      className={cn(
+        'flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex-shrink-0 transition-all',
+        selected
+          ? 'bg-primary/20 border-primary/40 text-primary'
+          : 'border-white/8 bg-white/3 text-muted-foreground hover:border-white/18 hover:text-foreground',
+      )}
+    >
+      <TeamLogo team={t1} className="w-4 h-4" />
+      <span>{t1}</span>
+      <span className="text-muted-foreground/40 font-normal">vs</span>
+      <TeamLogo team={t2} className="w-4 h-4" />
+      <span>{t2}</span>
+    </button>
+  );
+}
+
 // ─── Settings Modal ───────────────────────────────────────────────────────────
 
 function SettingsModal({ settings, onSave, onClose }) {
@@ -628,6 +649,8 @@ export default function StartSit() {
   const [propB, setPropB]                         = useState(null);
   const [showComparePicker, setShowComparePicker] = useState(null);
   const [searchQuery, setSearchQuery]             = useState('');
+  const [selectedGame, setSelectedGame]           = useState(null); // null | { key, teams: [t1, t2] }
+  const [teamFilter, setTeamFilter]               = useState(null); // null | team abbreviation
 
   // Live data state
   const [liveStatus, setLiveStatus] = useState({ loading: true, players: null, hasSchedule: false, week: null, error: false });
@@ -657,19 +680,45 @@ export default function StartSit() {
     setSettings(newSettings);
   }
 
+  function selectGame(game) {
+    setSelectedGame(prev => (prev?.key === game.key ? null : game));
+    setTeamFilter(null);
+  }
+
   const rankings = useMemo(
     () => liveStatus.loading ? [] : rankPlayers(activePlayers, position, settings),
     [activePlayers, position, settings, liveStatus.loading],
   );
 
+  const availableGames = useMemo(() => {
+    const seen = new Set();
+    const games = [];
+    for (const p of activePlayers) {
+      if (!p.opponent || p.opponent === 'TBD') continue;
+      const sorted = [p.team, p.opponent].sort();
+      const key = sorted.join('_');
+      if (!seen.has(key)) {
+        seen.add(key);
+        games.push({ key, teams: sorted });
+      }
+    }
+    return games.sort((a, b) => a.key.localeCompare(b.key));
+  }, [activePlayers]);
+
   const filteredRankings = useMemo(() => {
-    if (!searchQuery.trim()) return rankings;
+    let result = rankings;
+    if (selectedGame) {
+      result = teamFilter
+        ? result.filter(({ player }) => player.team === teamFilter)
+        : result.filter(({ player }) => selectedGame.teams.includes(player.team));
+    }
+    if (!searchQuery.trim()) return result;
     const q = searchQuery.toLowerCase();
-    return rankings.filter(({ player }) =>
+    return result.filter(({ player }) =>
       player.player_name.toLowerCase().includes(q) ||
       player.team.toLowerCase().includes(q)
     );
-  }, [rankings, searchQuery]);
+  }, [rankings, selectedGame, teamFilter, searchQuery]);
 
   const waiverRankings = useMemo(
     () => rankWaiverWire(waiverPlayers, waiverPosition, settings),
@@ -872,6 +921,67 @@ export default function StartSit() {
         {/* ── Rankings ── */}
         {rankTab === 'rankings' && (
           <>
+            {availableGames.length > 0 && (
+              <div className="space-y-2">
+                <div
+                  className="flex gap-1.5 overflow-x-auto pb-1"
+                  style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+                >
+                  <button
+                    onClick={() => { setSelectedGame(null); setTeamFilter(null); }}
+                    className={cn(
+                      'px-3 py-1.5 rounded-xl border text-[11px] font-semibold flex-shrink-0 transition-all',
+                      !selectedGame
+                        ? 'bg-primary/20 border-primary/40 text-primary'
+                        : 'border-white/8 text-muted-foreground hover:border-white/18 hover:text-foreground',
+                    )}
+                  >
+                    All Games
+                  </button>
+                  {availableGames.map(game => (
+                    <GameChip
+                      key={game.key}
+                      game={game}
+                      selected={selectedGame?.key === game.key}
+                      onSelect={() => selectGame(game)}
+                    />
+                  ))}
+                </div>
+
+                {selectedGame && (
+                  <div className="flex gap-1.5 items-center flex-wrap">
+                    <span className="text-[11px] text-muted-foreground flex-shrink-0">Show:</span>
+                    <button
+                      onClick={() => setTeamFilter(null)}
+                      className={cn(
+                        'px-2.5 py-1 text-[11px] rounded-lg border transition-all flex-shrink-0',
+                        !teamFilter
+                          ? 'bg-primary/20 border-primary/40 text-primary'
+                          : 'border-white/8 text-muted-foreground hover:border-white/18 hover:text-foreground',
+                      )}
+                    >
+                      Both teams
+                    </button>
+                    {selectedGame.teams.map(team => (
+                      <button
+                        key={team}
+                        onClick={() => setTeamFilter(prev => prev === team ? null : team)}
+                        className={cn(
+                          'flex items-center gap-1 px-2.5 py-1 text-[11px] rounded-lg border transition-all flex-shrink-0',
+                          teamFilter === team
+                            ? 'bg-primary/20 border-primary/40 text-primary'
+                            : 'border-white/8 text-muted-foreground hover:border-white/18 hover:text-foreground',
+                        )}
+                      >
+                        <TeamLogo team={team} className="w-3.5 h-3.5" />
+                        {team} only
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
               <input
