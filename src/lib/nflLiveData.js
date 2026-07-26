@@ -1,7 +1,7 @@
 // Fetches live NFL roster (Sleeper API) + per-player projections + schedule/totals (ESPN).
 // Returns a player array with real projected FP attached, compatible with fantasyScore().
 
-const CACHE_KEY = 'locklab_nfl_live_v4';  // v4: includes real Sleeper projections
+const CACHE_KEY = 'locklab_nfl_live_v5';  // v5: whole-number yard lines
 const CACHE_TTL = 4 * 60 * 60 * 1000;    // 4h
 
 const ESPN_NORM = { WSH: 'WAS' };
@@ -39,20 +39,14 @@ const POS_DEFAULTS = {
 function makeProp(prop_type, line, variance, gameTotal = 45.5, isHome = false) {
   const isInt = INT_TYPES.has(prop_type);
   const safeVariance = Math.max(variance, 0.3);
-  // Round to nearest 0.5 for yardage/non-integer props (matches real sportsbook increments).
-  // Integer props (TDs, receptions) round to nearest whole number.
   const rawLine = Math.max(line, 0);
-  const safeLine = isInt
-    ? Math.round(rawLine)
-    : Math.round(rawLine * 2) / 2;
+  const safeLine = Math.round(rawLine);
   const games = Array.from({ length: 6 }, () => {
     const raw = safeLine + (Math.random() * safeVariance * 2 - safeVariance);
-    return isInt
-      ? Math.max(0, Math.round(raw))
-      : parseFloat(Math.max(0, raw).toFixed(1));
+    return Math.max(0, Math.round(raw));
   });
-  const avg6 = parseFloat((games.reduce((a, b) => a + b, 0) / 6).toFixed(1));
-  const avg3 = parseFloat((games.slice(-3).reduce((a, b) => a + b, 0) / 3).toFixed(1));
+  const avg6 = Math.round(games.reduce((a, b) => a + b, 0) / 6);
+  const avg3 = Math.round(games.slice(-3).reduce((a, b) => a + b, 0) / 3);
   const hits = games.filter(v => v > safeLine).length;
   return {
     prop_type,
@@ -270,6 +264,7 @@ export async function fetchLivePlayers() {
 export function clearLiveCache() {
   try {
     localStorage.removeItem(CACHE_KEY);
-    localStorage.removeItem('locklab_nfl_live_v3'); // remove previous cache key
+    localStorage.removeItem('locklab_nfl_live_v3');
+    localStorage.removeItem('locklab_nfl_live_v4');
   } catch {}
 }
