@@ -37,18 +37,12 @@ const PROP_LABELS = {
   receiving_yards: 'Rec Yds', receptions: 'Receptions',
 };
 
-// ESPN returns some different team abbreviations than Sleeper.
-// ESPN_TO_SLEEPER: parse ESPN schedule responses → our internal format.
-// SLEEPER_TO_ESPN: build the ESPN schedule URL from our team abbreviations.
+// ESPN_TO_SLEEPER: normalize ESPN schedule abbreviations → our internal format
 const ESPN_TO_SLEEPER = { WSH: 'WAS', LA: 'LAR' };
+// SLEEPER_TO_ESPN: build the ESPN schedule URL from our team abbreviations
 const SLEEPER_TO_ESPN = { WAS: 'WSH', LAR: 'LA' };
 
-const FILTER_OPTIONS = [
-  { key: 'L3',  label: 'L3'          },
-  { key: 'L5',  label: 'L5'          },
-  { key: 'L10', label: 'L10'         },
-  { key: 'LS',  label: 'Last Season' },
-];
+const GAME_FILTERS = ['L3', 'L5', 'L10'];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -178,10 +172,9 @@ function buildBullets(player, score, rank) {
   return { likes: likes.slice(0, 5), risks: risks.slice(0, 4) };
 }
 
-// ─── Last-season game log fetch ───────────────────────────────────────────────
-// Pulls real 2024 weekly stats (half-PPR) from Sleeper + team schedule from ESPN.
-// Fires 18 parallel requests (one per week) + 1 schedule request, then caches the
-// result in sessionStorage so repeat opens are instant.
+// ─── Last-season fetch (2025) ─────────────────────────────────────────────────
+// 18 parallel Sleeper weekly stat dumps + 1 ESPN schedule request.
+// Cached in sessionStorage per player — subsequent opens are instant.
 
 async function fetchLastSeasonLog(playerId, team, position) {
   const cacheKey = `locklab_ls25_${playerId}`;
@@ -190,22 +183,20 @@ async function fetchLastSeasonLog(playerId, team, position) {
     if (cached) return JSON.parse(cached);
   } catch {}
 
-  const SEASON   = 2025;
   const espnTeam = SLEEPER_TO_ESPN[team] ?? team;
   const defKey   = POS_DEF_KEY[position];
 
-  // All requests fire in parallel: ESPN schedule + 18 Sleeper weekly stat dumps
   const [schedRes, ...weekRes] = await Promise.allSettled([
     fetch(
       `https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/${espnTeam}/schedule?season=2025&seasontype=2`,
     ).then(r => r.ok ? r.json() : null).catch(() => null),
     ...Array.from({ length: 18 }, (_, i) =>
-      fetch(`https://api.sleeper.app/v1/stats/nfl/regular/${SEASON}/${i + 1}`)
+      fetch(`https://api.sleeper.app/v1/stats/nfl/regular/2025/${i + 1}`)
         .then(r => r.ok ? r.json() : null).catch(() => null),
     ),
   ]);
 
-  // Build week-number → opponent abbreviation map (in Sleeper/internal format)
+  // Week-number → opponent abbreviation (Sleeper format)
   const oppByWeek = {};
   const schedData = schedRes.status === 'fulfilled' ? schedRes.value : null;
   for (const ev of schedData?.events ?? []) {
@@ -231,13 +222,12 @@ async function fetchLastSeasonLog(playerId, team, position) {
         opponent:   opp,
         defRankVal: rank,
         fp:         Math.round((stats.pts_half_ppr ?? 0) * 10) / 10,
-        passYd:     stats.pass_yd != null ? Math.round(stats.pass_yd)         : null,
+        passYd:     stats.pass_yd != null ? Math.round(stats.pass_yd)           : null,
         passTd:     stats.pass_td != null ? Math.round(stats.pass_td * 10) / 10 : null,
-        rushYd:     stats.rush_yd != null ? Math.round(stats.rush_yd)         : null,
-        rushTd:     stats.rush_td != null ? Math.round(stats.rush_td * 10) / 10 : null,
-        rec:        stats.rec     != null ? Math.round(stats.rec * 10) / 10   : null,
-        recYd:      stats.rec_yd  != null ? Math.round(stats.rec_yd)          : null,
-        recTd:      stats.rec_td  != null ? Math.round(stats.rec_td * 10) / 10 : null,
+        rushYd:     stats.rush_yd != null ? Math.round(stats.rush_yd)           : null,
+        rec:        stats.rec     != null ? Math.round(stats.rec * 10) / 10     : null,
+        recYd:      stats.rec_yd  != null ? Math.round(stats.rec_yd)            : null,
+        recTd:      stats.rec_td  != null ? Math.round(stats.rec_td * 10) / 10  : null,
       };
     })
     .filter(Boolean);
@@ -293,165 +283,206 @@ function CriteriaBar({ label, score, maxScore, tip }) {
   );
 }
 
-function ChartTooltip({ active, payload, label }) {
+// Custom tooltip for the last-season chart
+function LSChartTooltip({ active, payload, pos }) {
   if (!active || !payload?.length) return null;
-  return (
-    <div className="bg-[hsl(222,47%,9%)] border border-white/12 rounded-xl px-3 py-2 text-xs shadow-xl">
-      <p className="text-muted-foreground">{label}</p>
-      <p className="font-semibold text-primary">{payload[0].value} FP</p>
-    </div>
-  );
-}
-
-function FilterButtons({ chartFilter, setChartFilter }) {
-  return (
-    <div className="flex gap-1 flex-wrap">
-      {FILTER_OPTIONS.map(({ key, label }) => (
-        <button
-          key={key}
-          onClick={() => setChartFilter(key)}
-          className={cn(
-            'px-2.5 py-1 text-[10px] font-semibold rounded-lg border transition-all',
-            chartFilter === key
-              ? 'bg-primary/20 border-primary/40 text-primary'
-              : 'border-white/8 text-muted-foreground hover:border-white/18 hover:text-foreground',
-          )}
-        >
-          {label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-// ─── Last Season Game Log Table ───────────────────────────────────────────────
-
-function LSGameLog({ lsLog, pos, onRetry }) {
-  if (lsLog === 'loading' || lsLog === null) {
-    return (
-      <div className="flex flex-col items-center gap-3 py-10">
-        <div className="w-5 h-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
-        <p className="text-[11px] text-muted-foreground">Loading 2025 game log…</p>
-        <p className="text-[10px] text-muted-foreground/60">
-          Fetching 18 weeks of Sleeper stats — takes a moment the first time.
-        </p>
-      </div>
-    );
-  }
-
-  if (lsLog === 'error') {
-    return (
-      <div className="flex flex-col items-center gap-3 py-8 text-center">
-        <p className="text-[11px] text-red-400">Failed to load 2025 game log.</p>
-        <button onClick={onRetry} className="text-[10px] text-primary underline underline-offset-2">
-          Retry
-        </button>
-      </div>
-    );
-  }
-
-  if (lsLog.length === 0) {
-    return (
-      <div className="rounded-xl bg-white/3 border border-white/8 px-4 py-6 text-center">
-        <Calendar className="w-6 h-6 text-muted-foreground/40 mx-auto mb-2" />
-        <p className="text-[11px] text-muted-foreground">No 2024 regular season games found.</p>
-        <p className="text-[10px] text-muted-foreground/60 mt-1">
-          Player may have been injured, on a practice squad, or inactive most of the year.
-        </p>
-      </div>
-    );
-  }
-
-  const allFP  = lsLog.map(g => g.fp);
-  const avgFP  = Math.round((allFP.reduce((a, b) => a + b, 0) / allFP.length) * 10) / 10;
-  const highFP = Math.max(...allFP);
-  const lowFP  = Math.min(...allFP);
-  const boom   = lsLog.filter(g => g.fp >= 20).length;
-
-  const keyField = pos === 'QB' ? 'passYd' : pos === 'RB' ? 'rushYd' : 'recYd';
+  const g        = payload[0].payload;
+  const keyStat  = pos === 'QB' ? g.passYd : pos === 'RB' ? g.rushYd : g.recYd;
   const keyLabel = pos === 'QB' ? 'Pass Yds' : pos === 'RB' ? 'Rush Yds' : 'Rec Yds';
+  return (
+    <div className="bg-[hsl(222,47%,9%)] border border-white/12 rounded-xl px-3 py-2.5 text-xs shadow-xl space-y-1">
+      <p className="font-semibold text-foreground">
+        Week {g.week}{g.opponent ? ` · vs ${g.opponent}` : ''}
+      </p>
+      <p className="text-primary font-bold text-base">{g.fp} FP</p>
+      {g.defRankVal != null && (
+        <p className={cn('text-[10px]', matchupColor(g.defRankVal))}>
+          Def #{g.defRankVal} vs {pos}
+        </p>
+      )}
+      {keyStat != null && (
+        <p className="text-[10px] text-muted-foreground">{keyLabel}: {keyStat}</p>
+      )}
+    </div>
+  );
+}
+
+// ─── Season Stats section ─────────────────────────────────────────────────────
+
+function SeasonStatsSection({ lsLog, onRetryLS, pos, score }) {
+  const [seasonFilter, setSeasonFilter] = useState('last');
+  const [gameFilter,   setGameFilter]   = useState('L10');
+
+  const slice = useMemo(() => {
+    if (!Array.isArray(lsLog)) return [];
+    const n = gameFilter === 'L3' ? 3 : gameFilter === 'L5' ? 5 : 10;
+    return lsLog.slice(-n);
+  }, [lsLog, gameFilter]);
+
+  const allFP    = slice.map(g => g.fp);
+  const avg      = allFP.length ? Math.round(allFP.reduce((a, b) => a + b, 0) / allFP.length * 10) / 10 : 0;
+  const high     = allFP.length ? Math.max(...allFP) : 0;
+  const low      = allFP.length ? Math.min(...allFP) : 0;
+  const chartMax = Math.max(high + 5, (score?.ceiling ?? 20) + 5, 20);
+
+  const chartData = slice.map(g => ({
+    ...g,
+    xLabel: g.opponent ?? `W${g.week}`,
+  }));
+
+  const isCurrent = seasonFilter === 'current';
 
   return (
     <div className="space-y-3">
-      {/* Summary strip */}
-      <div className="flex flex-wrap gap-x-5 gap-y-1">
+      {/* Season toggle */}
+      <div className="flex gap-1.5 p-1 bg-white/4 rounded-xl w-fit">
         {[
-          { label: 'Games',  value: lsLog.length },
-          { label: 'Avg FP', value: avgFP },
-          { label: 'High',   value: highFP, color: 'text-emerald-400' },
-          { label: 'Low',    value: lowFP,  color: 'text-red-400'     },
-          { label: '20+ FP', value: boom,   color: boom >= 3 ? 'text-emerald-400' : 'text-muted-foreground' },
-        ].map(({ label, value, color }) => (
-          <div key={label}>
-            <div className="text-[10px] text-muted-foreground">{label}</div>
-            <div className={cn('text-xs font-semibold', color ?? 'text-foreground')}>{value}</div>
-          </div>
+          { key: 'current', label: '2026 Season' },
+          { key: 'last',    label: '2025 Season' },
+        ].map(({ key, label }) => (
+          <button
+            key={key}
+            onClick={() => setSeasonFilter(key)}
+            className={cn(
+              'px-3 py-1.5 text-[10px] font-semibold rounded-lg transition-all',
+              seasonFilter === key
+                ? 'bg-primary text-primary-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {label}
+          </button>
         ))}
       </div>
 
-      {/* Game log table */}
-      <div className="overflow-x-auto rounded-xl border border-white/8">
-        <table className="w-full text-[11px] min-w-[320px]">
-          <thead>
-            <tr className="border-b border-white/8 bg-white/3">
-              <th className="text-left px-3 py-2 text-muted-foreground font-medium w-8">Wk</th>
-              <th className="text-left px-3 py-2 text-muted-foreground font-medium">Opponent</th>
-              <th className="text-center px-2 py-2 text-muted-foreground font-medium leading-tight">
-                Def<br /><span className="text-[9px] font-normal opacity-60">vs {pos}</span>
-              </th>
-              <th className="text-right px-3 py-2 text-muted-foreground font-medium">FP</th>
-              <th className="text-right px-3 py-2 text-muted-foreground font-medium">{keyLabel}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {lsLog.map((game, i) => {
-              const isBoom  = game.fp >= highFP * 0.85;
-              const isBust  = game.fp <= lowFP  * 1.15 && game.fp < 8;
-              const fpColor = isBoom ? 'text-emerald-400 font-bold'
-                : isBust ? 'text-red-400' : 'text-foreground';
-              const keyVal  = game[keyField];
+      {/* Game filter — only visible for last season */}
+      {!isCurrent && (
+        <div className="flex gap-1">
+          {GAME_FILTERS.map(f => (
+            <button
+              key={f}
+              onClick={() => setGameFilter(f)}
+              className={cn(
+                'px-2.5 py-1 text-[10px] font-semibold rounded-lg border transition-all',
+                gameFilter === f
+                  ? 'bg-primary/20 border-primary/40 text-primary'
+                  : 'border-white/8 text-muted-foreground hover:border-white/18 hover:text-foreground',
+              )}
+            >
+              {f}
+            </button>
+          ))}
+        </div>
+      )}
 
-              return (
-                <tr
-                  key={i}
-                  className="border-b border-white/5 last:border-0 hover:bg-white/3 transition-colors"
-                >
-                  <td className="px-3 py-2 text-muted-foreground tabular-nums">{game.week}</td>
-                  <td className="px-3 py-2">
-                    {game.opponent ? (
-                      <div className="flex items-center gap-1.5">
-                        <TeamLogo team={game.opponent} className="w-4 h-4 flex-shrink-0" />
-                        <span className="text-foreground font-medium">{game.opponent}</span>
-                      </div>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </td>
-                  <td className="px-2 py-2 text-center">
-                    {game.defRankVal != null ? (
-                      <span className={cn('font-semibold', matchupColor(game.defRankVal))}>
-                        #{game.defRankVal}
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </td>
-                  <td className={cn('px-3 py-2 text-right tabular-nums', fpColor)}>
-                    {game.fp}
-                  </td>
-                  <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
-                    {keyVal ?? '—'}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      {/* Content */}
+      {isCurrent ? (
+        /* ── 2026 season — no data yet ── */
+        <div className="rounded-xl bg-white/3 border border-white/8 px-4 py-8 text-center">
+          <Calendar className="w-7 h-7 text-muted-foreground/30 mx-auto mb-2.5" />
+          <p className="text-sm font-semibold text-foreground">No stats available yet</p>
+          <p className="text-[11px] text-muted-foreground mt-1">
+            The 2026 NFL season hasn't started. Stats will populate week by week once games are played.
+          </p>
+        </div>
+      ) : lsLog === null || lsLog === 'loading' ? (
+        /* ── fetching ── */
+        <div className="flex flex-col items-center gap-3 py-10">
+          <div className="w-5 h-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+          <p className="text-[11px] text-muted-foreground">Loading 2025 game log…</p>
+          <p className="text-[10px] text-muted-foreground/60">
+            Fetching 18 weeks of stats — takes a moment the first time.
+          </p>
+        </div>
+      ) : lsLog === 'error' ? (
+        /* ── error ── */
+        <div className="flex flex-col items-center gap-2 py-8">
+          <p className="text-[11px] text-red-400">Failed to load 2025 game log.</p>
+          <button onClick={onRetryLS} className="text-[10px] text-primary underline underline-offset-2">
+            Retry
+          </button>
+        </div>
+      ) : lsLog.length === 0 ? (
+        /* ── no games ── */
+        <div className="rounded-xl bg-white/3 border border-white/8 px-4 py-6 text-center">
+          <Calendar className="w-6 h-6 text-muted-foreground/40 mx-auto mb-2" />
+          <p className="text-[11px] text-muted-foreground">No 2025 regular season games found.</p>
+          <p className="text-[10px] text-muted-foreground/60 mt-1">
+            Player may have been injured, on a practice squad, or inactive most of the year.
+          </p>
+        </div>
+      ) : (
+        /* ── chart ── */
+        <>
+          {/* Stat pills */}
+          <div className="flex flex-wrap gap-x-5 gap-y-1">
+            {[
+              { label: `Avg (${gameFilter})`, value: `${avg} FP` },
+              { label: 'High', value: `${high} FP`, color: 'text-emerald-400' },
+              { label: 'Low',  value: `${low} FP`,  color: 'text-red-400'     },
+              {
+                label: '20+ FP',
+                value: `${slice.filter(g => g.fp >= 20).length}`,
+                color: slice.filter(g => g.fp >= 20).length >= 2 ? 'text-emerald-400' : 'text-muted-foreground',
+              },
+            ].map(({ label, value, color }) => (
+              <div key={label}>
+                <div className="text-[10px] text-muted-foreground">{label}</div>
+                <div className={cn('text-xs font-semibold', color ?? 'text-foreground')}>{value}</div>
+              </div>
+            ))}
+          </div>
 
-      <p className="text-[10px] text-muted-foreground">
-        FP = half-PPR · Def rank reflects current season stats · Source: Sleeper
-      </p>
+          {/* Area chart */}
+          <ResponsiveContainer width="100%" height={140}>
+            <AreaChart data={chartData} margin={{ top: 6, right: 4, left: -24, bottom: 0 }}>
+              <defs>
+                <linearGradient id="lsGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%"   stopColor="hsl(var(--primary))" stopOpacity={0.4} />
+                  <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0}   />
+                </linearGradient>
+              </defs>
+              <XAxis
+                dataKey="xLabel"
+                tick={{ fontSize: 8, fill: 'hsl(var(--muted-foreground))' }}
+                interval={0}
+              />
+              <YAxis
+                domain={[0, chartMax]}
+                tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }}
+              />
+              <Tooltip content={(props) => <LSChartTooltip {...props} pos={pos} />} />
+              {/* Average reference line */}
+              <ReferenceLine
+                y={avg}
+                stroke="hsl(var(--primary))"
+                strokeOpacity={0.3}
+                strokeDasharray="4 3"
+              />
+              <Area
+                type="monotone"
+                dataKey="fp"
+                stroke="hsl(var(--primary))"
+                strokeWidth={2.5}
+                fill="url(#lsGrad)"
+                dot={({ cx, cy, payload }) => (
+                  <circle
+                    key={`dot-${payload.week}`}
+                    cx={cx} cy={cy} r={3.5}
+                    fill={payload.fp >= 20 ? 'hsl(142,76%,60%)' : 'hsl(var(--primary))'}
+                    stroke="hsl(222,47%,7%)" strokeWidth={1.5}
+                  />
+                )}
+                activeDot={{ r: 5, stroke: 'hsl(var(--primary))', strokeWidth: 2 }}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+
+          <p className="text-[10px] text-muted-foreground">
+            Real 2025 half-PPR stats · Source: Sleeper · Def rank = current season · Hover for game details
+          </p>
+        </>
+      )}
     </div>
   );
 }
@@ -459,47 +490,24 @@ function LSGameLog({ lsLog, pos, onRetry }) {
 // ─── Main Modal ───────────────────────────────────────────────────────────────
 
 export default function PlayerBreakdownModal({ entry, onClose }) {
-  const [chartFilter, setChartFilter] = useState('L10');
-  // null = not fetched yet, 'loading', 'error', or GameEntry[]
-  const [lsLog, setLsLog] = useState(null);
+  const [lsLog, setLsLog] = useState(null); // null | 'loading' | 'error' | GameEntry[]
 
   const pos      = entry?.player?.position ?? 'WR';
   const opponent = entry?.player?.opponent ?? '—';
 
-  // Reset last-season log when the player changes so we re-fetch for the new player
+  // Reset when player changes
   useEffect(() => {
     setLsLog(null);
   }, [entry?.player?.id]);
 
-  // Lazy-fetch: only trigger when LS filter is active and data hasn't been loaded yet
+  // Fetch 2025 game log on mount (lazy — cached after first load)
   useEffect(() => {
-    if (chartFilter !== 'LS' || !entry || lsLog !== null) return;
+    if (!entry || lsLog !== null) return;
     setLsLog('loading');
     fetchLastSeasonLog(entry.player.id, entry.player.team, pos)
       .then(log => setLsLog(log))
       .catch(() => setLsLog('error'));
-  }, [chartFilter, entry, lsLog, pos]);
-
-  // Simulated FP game values for L3/L5/L10 (no current-season data yet — fills in week by week)
-  const fpGames = useMemo(() => {
-    const proj  = entry?.score?.projection ?? 0;
-    const floor = entry?.score?.floor ?? 0;
-    const ceil  = entry?.score?.ceiling ?? proj * 1.8;
-    if (proj <= 0) return [];
-    const sigma = Math.max(0.5, (ceil - floor) / 4);
-    const seed  = (entry?.player?.id ?? 'x')
-      .split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) & 0xffff, 1);
-    return Array.from({ length: 10 }, (_, i) => {
-      const r  = ((seed + i * 2654435761) & 0xffff) / 0xffff;
-      const fp = Math.max(0, Math.round((proj + (r * 2 - 1) * sigma * 1.8) * 10) / 10);
-      return { label: `G${10 - i}`, fp };
-    }).reverse();
-  }, [entry?.score?.projection, entry?.score?.floor, entry?.score?.ceiling, entry?.player?.id]);
-
-  const displayedGames = useMemo(() => {
-    const n = chartFilter === 'L3' ? 3 : chartFilter === 'L5' ? 5 : 10;
-    return fpGames.slice(-n);
-  }, [fpGames, chartFilter]);
+  }, [entry, lsLog, pos]);
 
   const similar = useMemo(
     () => findSimilarDefenses(opponent, pos),
@@ -531,18 +539,6 @@ export default function PlayerBreakdownModal({ entry, onClose }) {
     pct: probAbove(score.projection, score.floor, score.ceiling, t),
   }));
 
-  const visibleFP = displayedGames.map(g => g.fp);
-  const fpAvg     = visibleFP.length
-    ? Math.round((visibleFP.reduce((a, b) => a + b, 0) / visibleFP.length) * 10) / 10 : 0;
-  const fpHigh    = visibleFP.length ? Math.max(...visibleFP) : 0;
-  const fpLow     = visibleFP.length ? Math.min(...visibleFP) : 0;
-
-  const early3Avg  = fpGames.length >= 3 ? fpGames.slice(0, 3).reduce((a, b) => a + b.fp, 0) / 3 : null;
-  const recent3Avg = fpGames.length >= 3 ? fpGames.slice(-3).reduce((a, b) => a + b.fp, 0) / 3 : null;
-  const trend      = early3Avg != null && recent3Avg != null
-    ? recent3Avg > early3Avg + 2 ? 'up' : recent3Avg < early3Avg - 2 ? 'down' : 'neutral'
-    : 'neutral';
-
   const usageCrit = score.criteria?.find(c =>
     c.label === 'Target Share' || c.label === 'Snap % / Workload' || c.label === 'Rushing Volume',
   );
@@ -553,12 +549,9 @@ export default function PlayerBreakdownModal({ entry, onClose }) {
   const summary = buildSummary(player, score, rank);
   const { likes, risks } = buildBullets(player, score, rank);
 
-  const projRange  = score.ceiling - score.floor;
-  const projPct    = projRange > 0
+  const projRange = score.ceiling - score.floor;
+  const projPct   = projRange > 0
     ? Math.round(((score.projection - score.floor) / projRange) * 100) : 50;
-  const fpChartMax = Math.max(score.ceiling + 4, fpHigh + 4, 15);
-
-  const isLS = chartFilter === 'LS';
 
   return (
     <AnimatePresence>
@@ -613,7 +606,7 @@ export default function PlayerBreakdownModal({ entry, onClose }) {
           {/* ── Scrollable body ── */}
           <div className="flex-1 overflow-y-auto overscroll-contain p-3 space-y-2.5" style={{ scrollbarWidth: 'none' }}>
 
-            {/* Hero: Floor / Proj / Ceiling */}
+            {/* Hero */}
             <div className="rounded-2xl border border-white/8 bg-white/3 p-4 space-y-3">
               <div className="grid grid-cols-3 divide-x divide-white/8">
                 {[
@@ -668,86 +661,14 @@ export default function PlayerBreakdownModal({ entry, onClose }) {
               </p>
             </Section>
 
-            {/* FP Trend / Last Season — single section, filter always visible */}
-            <Section
-              title={isLS ? '2025 Season Game Log' : 'FP Projection Model'}
-              icon={isLS ? Calendar : BarChart2}
-              defaultOpen
-            >
-              {/* Filter row */}
-              <div className="flex items-center justify-between mb-2">
-                <FilterButtons chartFilter={chartFilter} setChartFilter={setChartFilter} />
-                {!isLS && (
-                  <div className="flex items-center gap-1">
-                    {trend === 'up'      && <TrendingUp   className="w-3.5 h-3.5 text-emerald-400" />}
-                    {trend === 'down'    && <TrendingDown  className="w-3.5 h-3.5 text-red-400" />}
-                    {trend === 'neutral' && <Minus         className="w-3.5 h-3.5 text-muted-foreground" />}
-                    <span className="text-[10px] text-muted-foreground">
-                      {trend === 'up' ? 'Trending up' : trend === 'down' ? 'Trending down' : 'Stable'}
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              {isLS ? (
-                /* ── Real 2024 game log ── */
-                <LSGameLog
-                  lsLog={lsLog}
-                  pos={pos}
-                  onRetry={() => setLsLog(null)}
-                />
-              ) : (
-                /* ── Simulated FP chart (current-season projection model) ── */
-                fpGames.length > 1 ? (
-                  <>
-                    <div className="flex gap-3 mb-2">
-                      {[
-                        { label: `Avg (${chartFilter})`, value: `${fpAvg} FP` },
-                        { label: 'High', value: `${fpHigh} FP`, color: 'text-emerald-400' },
-                        { label: 'Low',  value: `${fpLow} FP`,  color: 'text-red-400'     },
-                      ].map(({ label, value, color }) => (
-                        <div key={label}>
-                          <div className="text-[10px] text-muted-foreground">{label}</div>
-                          <div className={cn('text-xs font-semibold', color ?? 'text-foreground')}>{value}</div>
-                        </div>
-                      ))}
-                    </div>
-
-                    <ResponsiveContainer width="100%" height={110}>
-                      <AreaChart data={displayedGames} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
-                        <defs>
-                          <linearGradient id="fpGrad" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%"   stopColor="hsl(var(--primary))" stopOpacity={0.35} />
-                            <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0}    />
-                          </linearGradient>
-                        </defs>
-                        <XAxis dataKey="label" tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }} />
-                        <YAxis domain={[0, fpChartMax]} tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }} />
-                        <Tooltip content={<ChartTooltip />} />
-                        <ReferenceLine y={score.projection} stroke="hsl(var(--primary))" strokeOpacity={0.3} strokeDasharray="4 3" />
-                        {score.floor > 0 && (
-                          <ReferenceLine y={score.floor} stroke="rgba(255,80,80,0.2)" strokeDasharray="2 3" />
-                        )}
-                        <ReferenceLine y={score.ceiling} stroke="rgba(80,255,120,0.18)" strokeDasharray="2 3" />
-                        <Area
-                          type="monotone" dataKey="fp"
-                          stroke="hsl(var(--primary))" strokeWidth={2}
-                          fill="url(#fpGrad)"
-                          dot={{ fill: 'hsl(var(--primary))', r: 2.5, strokeWidth: 0 }}
-                          activeDot={{ r: 4 }}
-                        />
-                      </AreaChart>
-                    </ResponsiveContainer>
-
-                    <p className="text-[10px] text-muted-foreground">
-                      Simulated from this week's projection model (floor {score.floor} / proj {score.projection} / ceil {score.ceiling} FP).
-                      Switch to <strong>Last Season</strong> for real 2025 game-by-game data.
-                    </p>
-                  </>
-                ) : (
-                  <p className="text-[11px] text-muted-foreground text-center py-4">No projection data available.</p>
-                )
-              )}
+            {/* Season Stats (2026 empty state / 2025 chart) */}
+            <Section title="Season Stats" icon={BarChart2} defaultOpen>
+              <SeasonStatsSection
+                lsLog={lsLog}
+                onRetryLS={() => setLsLog(null)}
+                pos={pos}
+                score={score}
+              />
             </Section>
 
             {/* Position vs. Opponent FP */}
@@ -774,7 +695,7 @@ export default function PlayerBreakdownModal({ entry, onClose }) {
                         {
                           label: 'vs League Avg',
                           value: `${fpAllowed >= leagueFP ? '+' : ''}${Math.round((fpAllowed - leagueFP) * 10) / 10}`,
-                          sub: 'FP diff',
+                          sub:   'FP diff',
                           color: fpAllowed >= leagueFP ? 'text-emerald-400' : 'text-red-400',
                         },
                       ].map(({ label, value, sub, color }) => (
