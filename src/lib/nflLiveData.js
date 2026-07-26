@@ -39,7 +39,12 @@ const POS_DEFAULTS = {
 function makeProp(prop_type, line, variance, gameTotal = 45.5, isHome = false) {
   const isInt = INT_TYPES.has(prop_type);
   const safeVariance = Math.max(variance, 0.3);
-  const safeLine = Math.max(line, 0);
+  // Round to nearest 0.5 for yardage/non-integer props (matches real sportsbook increments).
+  // Integer props (TDs, receptions) round to nearest whole number.
+  const rawLine = Math.max(line, 0);
+  const safeLine = isInt
+    ? Math.round(rawLine)
+    : Math.round(rawLine * 2) / 2;
   const games = Array.from({ length: 6 }, () => {
     const raw = safeLine + (Math.random() * safeVariance * 2 - safeVariance);
     return isInt

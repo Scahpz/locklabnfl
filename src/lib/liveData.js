@@ -13,6 +13,17 @@ const FRESH_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 import { NFL_API } from './config';
 import { isDemoMode, getMockPayload } from './mockData';
 
+// True when the API URL points to localhost but the browser is on a real domain.
+// This happens in Vercel production builds where .env has VITE_API_URL=http://localhost:8000
+// embedded at build time. Calling localhost from a remote domain always 503s.
+function isBackendReachable() {
+  const apiIsLocal = NFL_API.includes('localhost') || NFL_API.includes('127.0.0.1');
+  if (!apiIsLocal) return true; // external URL — assume reachable
+  if (typeof window === 'undefined') return true; // SSR / build — skip check
+  const host = window.location.hostname;
+  return host === 'localhost' || host === '127.0.0.1';
+}
+
 export function isCacheValid() {
   const ts = Number(localStorage.getItem(CACHE_TS_KEY) || 0);
   return Date.now() - ts < FRESH_TTL_MS && !!localStorage.getItem(CACHE_KEY);
@@ -210,16 +221,22 @@ function mergeSources(oddsData, ppData, udData, dkData) {
 let _fetchPromise = null;
 
 async function _doFetch() {
+  // If the configured API URL is localhost but we're running on a real domain,
+  // the calls will always 503. Skip them immediately rather than hanging for 55s.
+  if (!isBackendReachable()) {
+    return { game_date: new Date().toLocaleDateString(), games_summary: [], props: [], _backendMissing: true };
+  }
+
   const defaultBookmakers = 'draftkings,fanduel,betmgm,caesars,pointsbetus';
 
-  // Timeouts are set to 55s so Railway cold-starts (30-45s boot time) are survived.
-  // Railway holds incoming requests while the container boots, so the same request
-  // that triggered the wake-up gets served once the server is ready.
+  // 8s timeout: fast failure when backend is down. Set VITE_API_URL in Vercel
+  // environment variables to your Railway backend URL to enable live props.
+  const TIMEOUT = 8000;
   const [settingsResult, ppResult, udResult, dkResult] = await Promise.allSettled([
-    fetchWithTimeout(`${NFL_API}/api/settings`, {}, 55000).then(r => r.json()).catch(() => ({})),
-    fetchWithTimeout(`${NFL_API}/api/prizepicks/props`, {}, 55000).then(r => r.ok ? r.json() : null).catch(() => null),
-    fetchWithTimeout(`${NFL_API}/api/underdog/props`, {}, 55000).then(r => r.ok ? r.json() : null).catch(() => null),
-    fetchWithTimeout(`${NFL_API}/api/draftkings/props`, {}, 55000).then(r => r.ok ? r.json() : null).catch(() => null),
+    fetchWithTimeout(`${NFL_API}/api/settings`, {}, TIMEOUT).then(r => r.json()).catch(() => ({})),
+    fetchWithTimeout(`${NFL_API}/api/prizepicks/props`, {}, TIMEOUT).then(r => r.ok ? r.json() : null).catch(() => null),
+    fetchWithTimeout(`${NFL_API}/api/underdog/props`, {}, TIMEOUT).then(r => r.ok ? r.json() : null).catch(() => null),
+    fetchWithTimeout(`${NFL_API}/api/draftkings/props`, {}, TIMEOUT).then(r => r.ok ? r.json() : null).catch(() => null),
   ]);
 
   const settings    = settingsResult.status === 'fulfilled' ? settingsResult.value : {};
@@ -241,7 +258,7 @@ async function _doFetch() {
 
   // Last-resort fallback
   if (!rawProps.length) {
-    const fallback = await fetchWithTimeout(`${NFL_API}/api/live-props`, {}, 55000)
+    const fallback = await fetchWithTimeout(`${NFL_API}/api/live-props`, {}, TIMEOUT)
       .then(r => r.ok ? r.json() : null).catch(() => null);
     if (fallback?.rawProps?.length) {
       rawProps = fallback.rawProps.map(p => ({ ...p, sources: [], all_books: [] }));
