@@ -2,7 +2,7 @@ import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Bell, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import logo from '@/assets/logo.svg';
+import logo from '@/assets/logo.png';
 
 export default function MobileHeader() {
   const location = useLocation();
