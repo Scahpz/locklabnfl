@@ -1,6 +1,7 @@
-// NFL team defensive stats — yards allowed per game (2024 regular season, final)
+// NFL team defensive stats — yards allowed per game
+// Fallback for 2026-27 season predictions. Values are 2024-25 season actuals.
+// Update with verified 2025-26 final stats from NFL.com / Pro Football Reference.
 // Sources: NFL.com, Pro Football Reference, ESPN
-// Updated to reflect actual 2024 season results (not estimates)
 export const TEAM_STATS = {
   //          pass  rush  rec_wr rec_te rec_rb
   ARI: { pass_yds_allowed: 246, rush_yds_allowed: 124, rec_yds_allowed_wr: 163, rec_yds_allowed_te: 67, rec_yds_allowed_rb: 44 },
@@ -37,7 +38,7 @@ export const TEAM_STATS = {
   WAS: { pass_yds_allowed: 226, rush_yds_allowed: 109, rec_yds_allowed_wr: 150, rec_yds_allowed_te: 62, rec_yds_allowed_rb: 38 },
 };
 
-// 2024 season league averages
+// 2025-26 season league averages (based on 2024-25 actuals)
 export const NFL_LEAGUE_AVGS = {
   pass_yds_allowed:    228,
   rush_yds_allowed:    110,

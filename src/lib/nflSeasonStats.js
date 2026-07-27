@@ -9,7 +9,7 @@ const ESPN_IDS = {
   NYJ: 20, PHI: 21, PIT: 23, SEA: 26, SF:  25, TB:  27, TEN: 10, WAS: 28,
 };
 
-const CACHE_KEY   = 'nfl_live_stats_2026';
+const CACHE_KEY   = 'nfl_live_stats_2026_27'; // 2026-27 season live stats cache
 const CACHE_TTL   = 6 * 60 * 60 * 1000; // 6 hours
 
 // ─── Season detection ─────────────────────────────────────────────────────────

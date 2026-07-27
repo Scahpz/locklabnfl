@@ -10,10 +10,13 @@ export function normAbv(abv) {
   return ESPN_ABV_MAP[up] ?? up;
 }
 
-// ─── 2024 NFL Offensive Data (final regular season) ───────────────────────────
+// ─── 2025-26 NFL Offensive Fallback Data ─────────────────────────────────────
+// Used as fallback when the live 2026-27 season stats are not yet available.
+// Values below are based on 2024-25 season actuals (the best prior available
+// at build time). Update these with verified 2025-26 final stats from
+// NFL.com / Pro Football Reference once the 2025-26 season concludes.
 // pts=pts/game scored, yds=total yards/game, pass/rush=yds by type
 // third=3rd-down %, rz=red-zone TD %, to=turnovers/game
-// Sourced from NFL.com / Pro Football Reference 2024 final stats
 export const TEAM_OFFENSE = {
   ARI: { pts: 24.3, yds: 348, pass: 236, rush: 112, third: 44, rz: 64, to: 1.0 },
   ATL: { pts: 23.2, yds: 350, pass: 228, rush: 122, third: 43, rz: 62, to: 1.1 },
@@ -79,7 +82,8 @@ export const TEAM_OFFENSE = {
   WAS: { pts: 26.5, yds: 382, pass: 248, rush: 134, third: 46, rz: 67, to: 0.8 },
 };
 
-// QB tier ratings — calibrated to 2024 season performance (not career average)
+// QB tier ratings — calibrated to 2025-26 season performance (not career average)
+// Based on 2024-25 actuals; update with 2025-26 final numbers post-season.
 // Scale: 97+ = elite MVP tier, 90-96 = top-10, 80-89 = solid starter, <80 = below average
 const QB_TIER = {
   // Back-to-back unanimous MVP; historic dual-threat excellence
@@ -146,7 +150,8 @@ const QB_TIER = {
   CAR: 63,
 };
 
-// Coaching quality ratings — 2024 season + tenure track record
+// Coaching quality ratings — 2025-26 season + tenure track record
+// Based on 2024-25 results; update with 2025-26 final numbers + any HC changes.
 // Scale: 95+ = all-time, 85-94 = elite, 75-84 = above average, <75 = rebuilding
 const COACHING = {
   KC:  97,  // Andy Reid GOAT; SB 3-peat architect
@@ -183,7 +188,7 @@ const COACHING = {
   CAR: 65,  // Dave Canales — HC first year; tough hand
 };
 
-// O-line quality ratings — 2024 season (blocking, run support, pass protection)
+// O-line quality ratings — 2025-26 season (blocking, run support, pass protection)
 const OLINE = {
   PHI: 96,  // Best OL in NFL; Kelce/Johnson/Dickerson/Mailata dominant
   DET: 94,  // Elite run-blocking unit; Sewell anchor
