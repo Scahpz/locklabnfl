@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ChevronDown, ChevronUp, Check, TrendingUp } from 'lucide-react';
+import { ChevronDown, ChevronUp, Check, TrendingUp, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import TeamLogo from '@/components/common/TeamLogo';
 import { fmtOdds } from '@/lib/oddsData';
@@ -68,6 +68,22 @@ const riskStyles = {
   neutral: { idle: 'bg-secondary/50 border-transparent hover:border-primary/30 hover:bg-primary/5', text: 'text-foreground' },
   risky:   { idle: 'bg-red-500/10 border-red-500/20 hover:bg-red-500/20', text: 'text-red-400' },
 };
+
+// -- Win-probability helpers -----------------------------------------------
+function mlToRaw(ml) {
+  if (ml == null || isNaN(ml)) return null;
+  return ml < 0 ? Math.abs(ml) / (Math.abs(ml) + 100) : 100 / (ml + 100);
+}
+function removeVig(homeRaw, awayRaw) {
+  if (homeRaw == null || awayRaw == null) return null;
+  const total = homeRaw + awayRaw;
+  return total === 0 ? null : { home: homeRaw / total, away: awayRaw / total };
+}
+function spreadToHomeProb(spread) {
+  if (spread == null || isNaN(spread)) return null;
+  // logistic calibration: -3 ≈ 60%, -7 ≈ 73%, 0 = 50%
+  return 1 / (1 + Math.exp(spread / 7));
+}
 
 function OddsButton({ label, value, sub, legId, leg }) {
   const { addGameLeg, isGameLegSelected } = useParlay();
@@ -181,6 +197,29 @@ export default function GameOddsCard({ game }) {
   const totalOver = activeBook?.total_over_odds ?? game.total?.overOdds;
   const totalUnder = activeBook?.total_under_odds ?? game.total?.underOdds;
 
+  // Win probability model
+  const vigFree   = removeVig(mlToRaw(homeMl), mlToRaw(awayMl));
+  const mlHomeProb  = vigFree?.home ?? null;
+  const mlAwayProb  = vigFree?.away ?? null;
+  const spHomeProb  = spreadToHomeProb(homeSpread);
+  const spAwayProb  = spHomeProb != null ? 1 - spHomeProb : null;
+
+  // Upset alert: underdog's spread-implied prob > ML-implied by >8%
+  const upsetAlert = (() => {
+    if (mlHomeProb == null || spHomeProb == null) return null;
+    const homeFavored    = mlHomeProb > 0.5;
+    const udSpreadProb   = homeFavored ? spAwayProb  : spHomeProb;
+    const udMlProb       = homeFavored ? mlAwayProb  : mlHomeProb;
+    const udTeam         = homeFavored ? game.awayAbv : game.homeAbv;
+    const delta          = udSpreadProb - udMlProb;
+    return delta > 0.08 ? { team: udTeam, delta } : null;
+  })();
+
+  // Bar uses ML when available, falls back to spread-derived
+  const barAwayProb = mlAwayProb ?? spAwayProb;
+  const barHomeProb = mlHomeProb ?? spHomeProb;
+  const showWinBar  = barAwayProb != null && barHomeProb != null;
+
   return (
     <div className="rounded-xl border border-border bg-card overflow-hidden hover:border-primary/20 transition-all">
       {/* Header */}
@@ -202,6 +241,12 @@ export default function GameOddsCard({ game }) {
           {!game.is_preseason && game.week != null && (
             <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/20 uppercase tracking-wide">
               Week {game.week}
+            </span>
+          )}
+          {upsetAlert && (
+            <span className="flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/20 uppercase tracking-wide">
+              <Zap className="w-2.5 h-2.5" />
+              Upset Alert · {upsetAlert.team}
             </span>
           )}
         </div>
@@ -267,6 +312,30 @@ export default function GameOddsCard({ game }) {
                 </span>
               )}
             </div>
+          </div>
+        );
+      })()}
+
+      {/* Win Probability Bar */}
+      {showWinBar && (() => {
+        const awayPct = Math.round(barAwayProb * 100);
+        const homePct = 100 - awayPct;
+        return (
+          <div className="px-4 pb-2">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[10px] font-semibold text-blue-400">{game.awayAbv} {awayPct}%</span>
+              <span className="text-[9px] text-muted-foreground uppercase tracking-wide">Win Probability</span>
+              <span className="text-[10px] font-semibold text-green-400">{homePct}% {game.homeAbv}</span>
+            </div>
+            <div className="h-2 rounded-full overflow-hidden flex bg-secondary/50">
+              <div className="bg-blue-500 rounded-l-full transition-all" style={{ width: `${Math.max(awayPct, 8)}%` }} />
+              <div className="bg-green-500 flex-1 rounded-r-full transition-all" />
+            </div>
+            {upsetAlert && (
+              <p className="text-[9px] text-amber-400 text-center mt-1.5 font-medium">
+                Spread gives {upsetAlert.team} +{Math.round(upsetAlert.delta * 100)}% edge over their ML odds
+              </p>
+            )}
           </div>
         );
       })()}
