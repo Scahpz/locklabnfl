@@ -245,13 +245,32 @@ function SettingsModal({ settings, onSave, onClose }) {
 
 // ─── Player Rank Card ─────────────────────────────────────────────────────────
 
+// Returns true when a player shows breakout signals:
+// starter + L5 trending 12%+ above L10 + (soft matchup OR hot recent hit rate)
+function isBreakout(player, prop) {
+  if (!prop || (player.depth_chart_order ?? 99) > 1) return false;
+  const l5  = prop.avg_last_5  ?? prop.avg_last_10 ?? null;
+  const l10 = prop.avg_last_10 ?? null;
+  if (l5 == null || l10 == null || l10 === 0) return false;
+  const trendingUp   = l5 > l10 * 1.12;
+  const softMatchup  = (player.def_rank_vs_pos ?? 0) >= 25;
+  const hotStreak    = (prop.hit_rate_last_10 ?? 0) >= 65;
+  return trendingUp && (softMatchup || hotStreak);
+}
+
 function PlayerRankCard({ rank, player, prop, score, onCompare, onOpen }) {
   const propLabel = PROP_LABELS[prop.prop_type] ?? prop.prop_type;
+  const breakout  = isBreakout(player, prop);
 
   return (
     <div
       onClick={onOpen}
-      className="rounded-2xl border border-white/6 bg-[hsl(222,47%,9%)] p-4 flex items-center gap-4 hover:border-white/18 hover:bg-white/2 transition-colors cursor-pointer"
+      className={cn(
+        "rounded-2xl border p-4 flex items-center gap-4 hover:bg-white/2 transition-colors cursor-pointer",
+        breakout
+          ? "border-amber-500/30 bg-amber-500/5 hover:border-amber-500/50"
+          : "border-white/6 bg-[hsl(222,47%,9%)] hover:border-white/18",
+      )}
     >
       <div className="w-8 text-center flex-shrink-0">
         <span className={cn(
@@ -270,6 +289,11 @@ function PlayerRankCard({ rank, player, prop, score, onCompare, onOpen }) {
           <span className="text-[10px] bg-white/8 text-muted-foreground px-1.5 py-0.5 rounded font-medium">
             {player.position}
           </span>
+          {breakout && (
+            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 uppercase tracking-wide flex items-center gap-0.5">
+              <TrendingUp className="w-2.5 h-2.5" /> Breakout
+            </span>
+          )}
         </div>
         <div className="text-[11px] text-muted-foreground mt-0.5">
           {player.team} vs {player.opponent} · {propLabel} {prop.line}

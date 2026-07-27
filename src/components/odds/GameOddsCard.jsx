@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ChevronDown, ChevronUp, Check } from 'lucide-react';
+import { ChevronDown, ChevronUp, Check, TrendingUp } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import TeamLogo from '@/components/common/TeamLogo';
 import { fmtOdds } from '@/lib/oddsData';
@@ -239,6 +239,37 @@ export default function GameOddsCard({ game }) {
           isHome={true}
         />
       </div>
+
+      {/* Best-line banner — only when a better ML exists on another book */}
+      {game.allBooks?.length > 1 && (() => {
+        const books = game.allBooks;
+        const bestAway = books.filter(b => b.ml_away != null).sort((a, b) => b.ml_away - a.ml_away)[0];
+        const bestHome = books.filter(b => b.ml_home != null).sort((a, b) => b.ml_home - a.ml_home)[0];
+        const awayBetter = bestAway && bestAway.key !== activeBookKey && bestAway.ml_away > (activeBook?.ml_away ?? -Infinity);
+        const homeBetter = bestHome && bestHome.key !== activeBookKey && bestHome.ml_home > (activeBook?.ml_home ?? -Infinity);
+        if (!awayBetter && !homeBetter) return null;
+        return (
+          <div className="px-4 pb-2">
+            <div className="rounded-lg bg-emerald-500/8 border border-emerald-500/20 px-3 py-1.5 flex items-center gap-2 flex-wrap">
+              <TrendingUp className="w-3 h-3 text-emerald-400 flex-shrink-0" />
+              <span className="text-[10px] text-emerald-400 font-semibold">Better line:</span>
+              {awayBetter && (
+                <span className="text-[10px] text-foreground">
+                  {game.awayAbv} <span className="text-emerald-400 font-bold">{fmtOdds(bestAway.ml_away)}</span>
+                  <span className="text-muted-foreground"> @ {bestAway.title}</span>
+                </span>
+              )}
+              {awayBetter && homeBetter && <span className="text-muted-foreground text-[10px]">·</span>}
+              {homeBetter && (
+                <span className="text-[10px] text-foreground">
+                  {game.homeAbv} <span className="text-emerald-400 font-bold">{fmtOdds(bestHome.ml_home)}</span>
+                  <span className="text-muted-foreground"> @ {bestHome.title}</span>
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Total */}
       {totalLine != null && (
