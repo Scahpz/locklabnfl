@@ -14,40 +14,35 @@ function espnDateStr(d) {
   return d.toISOString().slice(0, 10).replace(/-/g, '');
 }
 
-// Tries multiple ESPN endpoints in sequence until we get games.
-// Order: current week → preseason → next 60-day window (early regular season lines).
+// Fetches both preseason (current) and upcoming regular-season Week 1 games in parallel,
+// merges them, and deduplicates by game id.
 async function fetchESPNGames() {
   async function tryUrl(url) {
     try {
       const res = await fetch(url);
-      if (!res.ok) return null;
+      if (!res.ok) return [];
       const data = await res.json();
-      const mapped = mapESPNToGames(data);
-      return mapped.length ? mapped : null;
-    } catch { return null; }
+      return mapESPNToGames(data);
+    } catch { return []; }
   }
 
-  // 1. Current week (works once the season is active)
-  const current = await tryUrl(ESPN_SCOREBOARD);
-  if (current) return current;
+  // Upcoming regular season year (July+ = this year, otherwise last year)
+  const now  = new Date();
+  const year = now.getMonth() >= 6 ? now.getFullYear() : now.getFullYear() - 1;
 
-  // 2. Preseason (NFL preseason typically starts early August)
-  const preseason = await tryUrl(`${ESPN_SCOREBOARD}?seasontype=1&limit=50`);
-  if (preseason) return preseason;
+  // Fetch preseason (current week) and Week 1 regular season simultaneously
+  const [currentGames, week1Games] = await Promise.all([
+    tryUrl(ESPN_SCOREBOARD),                                                    // whatever ESPN serves now (may be preseason)
+    tryUrl(`${ESPN_SCOREBOARD}?dates=${year}0901-${year}0930&limit=50`),       // Week 1 regular season
+  ]);
 
-  // 3. Next 60 days — catches early regular-season lines posted in the offseason
-  const today = new Date();
-  const start  = espnDateStr(today);
-  const end    = espnDateStr(new Date(today.getTime() + 60 * 24 * 60 * 60 * 1000));
-  const upcoming = await tryUrl(`${ESPN_SCOREBOARD}?dates=${start}-${end}&limit=50`);
-  if (upcoming) return upcoming;
-
-  // 4. Explicit regular season Week 1 for upcoming year
-  const year = today.getMonth() >= 6 ? today.getFullYear() : today.getFullYear() - 1; // July+ = upcoming season
-  const week1 = await tryUrl(`${ESPN_SCOREBOARD}?seasontype=2&week=1&year=${year}&limit=20`);
-  if (week1) return week1;
-
-  return [];
+  // Merge and deduplicate by game id
+  const seen = new Set();
+  return [...currentGames, ...week1Games].filter(g => {
+    if (seen.has(g.id)) return false;
+    seen.add(g.id);
+    return true;
+  });
 }
 
 // Maps ESPN scoreboard response to the shape GameOddsCard expects.
@@ -99,6 +94,11 @@ function mapESPNToGames(espn) {
       total_under_odds: totalUnderOdds,
     }] : [];
 
+    const seasonType = event.season?.type;         // 1 = preseason, 2 = regular
+    const seasonSlug = event.season?.slug ?? '';
+    const weekNum    = event.week?.number ?? null;
+    const isPreseason = seasonType === 1 || seasonSlug.toLowerCase().includes('pre');
+
     return [{
       id:            comp.id,
       commence_time: event.date,
@@ -108,6 +108,8 @@ function mapESPNToGames(espn) {
       spread:    { home: homeSpread, homeOdds: homeSpreadOdds, away: awaySpread, awayOdds: awaySpreadOdds },
       total:     { line: totalLine, overOdds: totalOverOdds, underOdds: totalUnderOdds },
       allBooks,
+      is_preseason:  isPreseason,
+      week:          weekNum,
     }];
   });
 }
@@ -231,13 +233,18 @@ export default function LiveOdds() {
   }, [loading]);
 
   const today = new Date().toLocaleDateString();
+  const preseasonCount = games.filter(g => g.is_preseason).length;
+  const regularCount   = games.filter(g => !g.is_preseason).length;
+  const todayCount     = games.filter(g => new Date(g.commence_time).toLocaleDateString() === today).length;
+
   const filtered = games.filter(g => {
     const gDate = new Date(g.commence_time).toLocaleDateString();
-    if (filter === 'today') return gDate === today;
-    if (filter === 'upcoming') return gDate !== today;
+    if (filter === 'preseason') return g.is_preseason;
+    if (filter === 'regular')   return !g.is_preseason;
+    if (filter === 'today')     return gDate === today;
+    if (filter === 'upcoming')  return gDate !== today;
     return true;
   });
-  const todayCount = games.filter(g => new Date(g.commence_time).toLocaleDateString() === today).length;
 
   return (
     <div className="space-y-6">
@@ -372,12 +379,13 @@ export default function LiveOdds() {
 
       {/* Filter tabs */}
       {games.length > 0 && (
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           {[
-            { key: 'all',      label: `All Games (${games.length})` },
-            { key: 'today',    label: `Today (${todayCount})` },
-            { key: 'upcoming', label: `Upcoming (${games.length - todayCount})` },
-          ].map(tab => (
+            { key: 'all',       label: `All (${games.length})` },
+            preseasonCount > 0 && { key: 'preseason', label: `Preseason (${preseasonCount})` },
+            regularCount   > 0 && { key: 'regular',   label: `Week 1 (${regularCount})` },
+            todayCount     > 0 && { key: 'today',      label: `Today (${todayCount})` },
+          ].filter(Boolean).map(tab => (
             <button key={tab.key} onClick={() => setFilter(tab.key)}
               className={cn(
                 "px-3 py-1.5 rounded-full text-xs font-medium transition-all",

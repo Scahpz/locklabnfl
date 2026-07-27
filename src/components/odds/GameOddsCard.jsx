@@ -194,6 +194,16 @@ export default function GameOddsCard({ game }) {
             {isToday ? 'TODAY' : isTomorrow ? 'TOMORROW' : dateStr}
           </span>
           <span className="text-xs text-muted-foreground">{tipoff}</span>
+          {game.is_preseason && (
+            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/20 uppercase tracking-wide">
+              Preseason
+            </span>
+          )}
+          {!game.is_preseason && game.week != null && (
+            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/20 uppercase tracking-wide">
+              Week {game.week}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {game.allBooks?.length > 0 ? (
