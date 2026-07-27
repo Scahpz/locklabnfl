@@ -539,3 +539,27 @@ export function rankWaiverWire(players, position = 'all', settings) {
     )
     .sort((a, b) => (b.score?.total ?? 0) - (a.score?.total ?? 0));
 }
+
+// ─── Model Confidence ─────────────────────────────────────────────────────────
+// Measures how many secondary criteria align with the verdict direction.
+// Returns 'high' | 'medium' | 'low'
+export function computeConfidence(score) {
+  if (!score?.criteria?.length) return null;
+  const proj = score.criteria.find(c => c.label === 'Projected Fantasy Points');
+  if (!proj || proj.score <= 5) return 'low';
+
+  const secondary = score.criteria.filter(
+    c => c.label !== 'Projected Fantasy Points' && !c.label.startsWith('Format Bonus')
+  );
+  if (!secondary.length) return 'medium';
+
+  const positiveSignals = secondary.filter(c => c.maxScore > 0 && c.score / c.maxScore >= 0.55).length;
+  const rawRatio = positiveSignals / secondary.length;
+
+  // For SIT verdicts, confidence comes from negative alignment
+  const alignedRatio = score.verdict === 'SIT' ? 1 - rawRatio : rawRatio;
+
+  if (alignedRatio >= 0.60) return 'high';
+  if (alignedRatio >= 0.38) return 'medium';
+  return 'low';
+}

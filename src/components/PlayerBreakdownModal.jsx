@@ -10,6 +10,7 @@ import {
   ResponsiveContainer, ReferenceLine,
 } from 'recharts';
 import { TEAM_STATS, NFL_LEAGUE_AVGS } from '@/lib/teamStats';
+import { computeConfidence } from '@/lib/fantasyScoring';
 import TeamLogo from '@/components/common/TeamLogo';
 import { cn } from '@/lib/utils';
 
@@ -143,38 +144,62 @@ function buildBullets(player, score, rank) {
   const { tier2, floor, ceiling, projection } = score;
   const pos = player.position;
 
+  // Rank secondary criteria by impact to pick the most meaningful factors
+  const secondary = (score.criteria ?? []).filter(
+    c => c.label !== 'Projected Fantasy Points' && !c.label.startsWith('Format Bonus') && c.maxScore > 0,
+  );
+  const ranked = secondary.map(c => ({ ...c, ratio: c.score / c.maxScore }));
+  const topPos = [...ranked].filter(c => c.ratio >= 0.65).sort((a, b) => b.ratio - a.ratio);
+  const topNeg = [...ranked].filter(c => c.ratio <= 0.32).sort((a, b) => a.ratio - b.ratio);
+
+  // ── Favorable bullets — pick from highest-ratio criteria ───────────────────
   if (rank != null && rank >= 21)
-    likes.push(`Soft matchup — ${player.opponent} ranks #${rank}/32 against ${pos}s (rank #32 = worst defense).`);
-  if (projection >= 12)
-    likes.push(`Projection of ${projection} FP is well above replacement level.`);
-  if (player.depth_chart_order === 1)
-    likes.push(`Confirmed starter with full expected workload.`);
-  if ((player.proj_rec ?? 0) >= 5 && pos !== 'QB')
+    likes.push(`Soft matchup — ${player.opponent} ranks #${rank}/32 against ${pos}s.`);
+  if (player.depth_chart_order === 1 && topPos.some(c => c.label === 'Starting Role'))
+    likes.push('Confirmed starter with full expected workload.');
+  for (const c of topPos) {
+    if (likes.length >= 3) break;
+    if (c.label === 'Game Total')
+      likes.push(`High-scoring game expected (${c.tip}) — elevated ceiling.`);
+    else if (c.label === 'Target Share' || c.label === 'Snap % / Workload')
+      likes.push(`Strong usage signal: ${c.tip}.`);
+    else if (c.label === 'Home/Away' && c.ratio > 0.5)
+      likes.push('Home field advantage.');
+  }
+  if (projection >= 12 && likes.length < 3)
+    likes.push(`Projection of ${projection} FP is above replacement level.`);
+  if ((player.proj_rec ?? 0) >= 5 && pos !== 'QB' && likes.length < 3)
     likes.push(`${Math.round((player.proj_rec ?? 0) * 10) / 10} projected receptions — high PPR floor.`);
-  if ((player.proj_rush_yd ?? 0) >= 70 && pos === 'RB')
+  if ((player.proj_rush_yd ?? 0) >= 70 && pos === 'RB' && likes.length < 3)
     likes.push(`${Math.round(player.proj_rush_yd)} projected rush yards — volume-based upside.`);
-  if ((player.proj_pass_yd ?? 0) >= 260 && pos === 'QB')
+  if ((player.proj_pass_yd ?? 0) >= 260 && pos === 'QB' && likes.length < 3)
     likes.push(`${Math.round(player.proj_pass_yd)} projected pass yards — elite QB volume.`);
-  if (ceiling - projection >= 8)
+  if (ceiling - projection >= 8 && likes.length < 3)
     likes.push(`Ceiling of ${ceiling} FP offers meaningful boom-week upside.`);
 
+  // ── Risk bullets — pick from lowest-ratio criteria ─────────────────────────
   if (rank != null && rank <= 12)
-    risks.push(`Tough matchup — ${player.opponent} ranks #${rank}/32 against ${pos}s (rank #1 = best defense).`);
-  const inj = (player.injury_status ?? 'healthy').toLowerCase();
-  if (inj.includes('questionable'))
-    risks.push(`Questionable injury tag — monitor the injury report through the week.`);
-  else if (inj.includes('doubtful'))
-    risks.push(`Doubtful designation — significant risk of being ruled out.`);
-  if ((player.depth_chart_order ?? 99) >= 2)
-    risks.push(`Not the primary option — upside contingent on starter availability.`);
-  if (tier2 < 8)
-    risks.push(`Below-average game environment caps the scoring ceiling.`);
-  if (floor < 5 && pos !== 'QB' && projection > 0)
+    risks.push(`Tough matchup — ${player.opponent} ranks #${rank}/32 against ${pos}s.`);
+  for (const c of topNeg) {
+    if (risks.length >= 2) break;
+    if (c.label === 'Injury Status') {
+      const inj = (player.injury_status ?? '').toLowerCase();
+      if (inj.includes('doubtful'))  risks.push('Doubtful designation — significant risk of being ruled out.');
+      else if (inj.includes('questionable')) risks.push('Questionable tag — monitor the injury report.');
+    } else if (c.label === 'Starting Role') {
+      risks.push('Depth chart concern: upside contingent on starter availability.');
+    } else if (c.label === 'Game Total') {
+      risks.push(`Low-scoring game expected (${c.tip}) — ceiling is capped.`);
+    }
+  }
+  if (tier2 < 8 && risks.length < 2)
+    risks.push('Below-average game environment caps the scoring ceiling.');
+  if (floor < 5 && pos !== 'QB' && projection > 0 && risks.length < 2)
     risks.push(`Floor of ${floor} FP leaves meaningful bust risk on a bad day.`);
 
   if (likes.length === 0) likes.push('Grade reflects all currently available projection data.');
   if (risks.length === 0) risks.push('No significant red flags detected in available data.');
-  return { likes: likes.slice(0, 5), risks: risks.slice(0, 4) };
+  return { likes: likes.slice(0, 3), risks: risks.slice(0, 2) };
 }
 
 // ─── Last-season fetch (2025) ─────────────────────────────────────────────────
@@ -603,6 +628,20 @@ export default function PlayerBreakdownModal({ entry, onClose }) {
                 <span className={cn('text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border', verdictCls)}>
                   {score.verdict}
                 </span>
+                {(() => {
+                  const conf = computeConfidence(score);
+                  if (!conf) return null;
+                  return (
+                    <span className={cn(
+                      'text-[9px] font-bold px-1.5 py-0.5 rounded-full border tracking-wider',
+                      conf === 'high'   ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400' :
+                      conf === 'medium' ? 'bg-amber-500/15 border-amber-500/30 text-amber-400' :
+                                          'bg-red-500/15 border-red-500/30 text-red-400',
+                    )}>
+                      {conf === 'high' ? 'HIGH' : conf === 'medium' ? 'MED' : 'LOW'} CONF
+                    </span>
+                  );
+                })()}
               </div>
               <div className="text-[11px] text-muted-foreground mt-0.5">
                 {player.team} vs {opponent}

@@ -3,7 +3,7 @@ import {
   Trophy, Users, TrendingUp, ChevronDown, X, Search, Plus,
   Settings, Shield, Zap, AlertTriangle, Link2, Loader2, RefreshCw, Wifi,
 } from 'lucide-react';
-import { fantasyScore, compareStartSit, rankPlayers, rankWaiverWire } from '@/lib/fantasyScoring';
+import { fantasyScore, compareStartSit, rankPlayers, rankWaiverWire, computeConfidence } from '@/lib/fantasyScoring';
 import { mockPlayers, isDemoMode } from '@/lib/mockData';
 import { getLeagueSettings, saveLeagueSettings, SCORING_FORMATS } from '@/lib/leagueSettings';
 import { fetchLivePlayers, clearLiveCache } from '@/lib/nflLiveData';
@@ -435,6 +435,20 @@ function PlayerRankCard({ rank, player, prop, score, onCompare, onOpen }) {
         <div className="text-lg font-bold text-foreground">{score.total}</div>
         <GradeBadge grade={score.grade} />
         <VerdictChip verdict={score.verdict} />
+        {(() => {
+          const conf = computeConfidence(score);
+          if (!conf) return null;
+          return (
+            <span className={cn(
+              'text-[9px] font-bold px-1.5 py-0.5 rounded-full border tracking-wider',
+              conf === 'high'   ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400' :
+              conf === 'medium' ? 'bg-amber-500/15 border-amber-500/30 text-amber-400' :
+                                  'bg-red-500/15 border-red-500/30 text-red-400',
+            )}>
+              {conf === 'high' ? 'HIGH' : conf === 'medium' ? 'MED' : 'LOW'}
+            </span>
+          );
+        })()}
       </div>
 
       <button

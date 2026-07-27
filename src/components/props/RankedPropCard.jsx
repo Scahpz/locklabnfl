@@ -81,6 +81,19 @@ export default function RankedPropCard({ prop, rank, aiVerdict, aiLoading, activ
   const isOverFavorable = evVerdict.direction === 'OVER';
   const hasBooks       = (baseProp.all_books?.length ?? 0) > 1;
 
+  // Top 2 factors by impact (weight × score) — the hidden complexity made visible
+  const topWhyFactors = React.useMemo(() => {
+    return (grade.criteria ?? [])
+      .filter(c => c.available !== false && !c.pending && c.weight > 0 && c.detail)
+      .map(c => ({
+        ...c,
+        impact: c.weight * (c.continuousScore != null ? c.continuousScore : c.pass ? 1 : 0),
+      }))
+      .filter(c => c.impact > 0)
+      .sort((a, b) => b.impact - a.impact)
+      .slice(0, 2);
+  }, [grade.criteria]);
+
   const activeBook      = selectedBook ? baseProp.all_books?.find(b => b.key === selectedBook) : platformBook;
   const displayOverOdds  = activeBook?.over_odds  ?? gradedProp.over_odds;
   const displayUnderOdds = activeBook?.under_odds ?? gradedProp.under_odds;
@@ -180,9 +193,22 @@ export default function RankedPropCard({ prop, rank, aiVerdict, aiLoading, activ
         {/* Verdict */}
         <div className="mb-3">
           <VerdictBadge evVerdict={evVerdict} loading={false} />
-          {grade.dataQuality === 'full' && aiVerdict?.reason && (
+          {/* Top 2 highest-impact factors — hidden complexity made visible */}
+          {topWhyFactors.length > 0 ? (
+            <div className="mt-2 space-y-1">
+              {topWhyFactors.map((factor, i) => (
+                <div key={i} className="flex items-start gap-1.5 text-[11px] text-muted-foreground/80 leading-snug">
+                  <span className={cn(
+                    'w-1.5 h-1.5 rounded-full mt-[3px] flex-shrink-0',
+                    factor.pass ? 'bg-primary/80' : 'bg-destructive/80'
+                  )} />
+                  {factor.detail}
+                </div>
+              ))}
+            </div>
+          ) : grade.dataQuality === 'full' && aiVerdict?.reason ? (
             <p className="text-[11px] text-muted-foreground/70 mt-2 leading-snug">{aiVerdict.reason}</p>
-          )}
+          ) : null}
         </div>
 
         {/* Line + Bet buttons */}
