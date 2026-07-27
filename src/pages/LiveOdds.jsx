@@ -62,7 +62,7 @@ function mapESPNToGames(espn) {
     const odds     = comp.odds?.[0] ?? null;
     const provider = odds?.provider?.name ?? 'DraftKings';
 
-    const toNum = str => str != null ? parseFloat(str) : null;
+    const toNum = str => { if (str == null) return null; const n = parseFloat(str); return isNaN(n) ? null : n; };
 
     // Moneylines: odds.moneyline.home/away.close.odds (string like "-198", "+164")
     const homeMl = toNum(odds?.moneyline?.home?.close?.odds);

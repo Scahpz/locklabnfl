@@ -130,7 +130,7 @@ function TeamRow({ game, teamAbv, ml, spread, spreadOdds, isHome }) {
             odds: ml,
           }}
         />
-        {spread != null && (
+        {spread != null && !isNaN(spread) && (
           <OddsButton
             label="Spread"
             value={spread > 0 ? `+${spread}` : `${spread}`}
