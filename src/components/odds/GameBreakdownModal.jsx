@@ -107,7 +107,7 @@ export default function GameBreakdownModal({ game, onClose }) {
     spreadPick, ouPick, confidence,
     ourSpread, bookSpread,
     homeOff, awayOff, homeDef, awayDef, homeQB, awayQB,
-    aiReasoningFactors, whatCouldChange,
+    aiReasoningFactors, whatCouldChange, upsetWatch,
   } = analysis;
 
   const homeRadar = useMemo(() => normalizeForRadar(hA), [hA]);
@@ -250,6 +250,106 @@ export default function GameBreakdownModal({ game, onClose }) {
             <SectionToggle title="AI Scouting Report" icon={Target}>
               <p className="text-[13px] text-foreground/90 leading-relaxed">{explanation}</p>
             </SectionToggle>
+
+            {/* ── Upset Watch ── */}
+            {upsetWatch && (
+              <SectionToggle
+                title={`🚨 ${upsetWatch.tier}: ${upsetWatch.underdog}`}
+                icon={AlertTriangle}
+                defaultOpen={true}
+              >
+                {/* Upset probability meter */}
+                <div className={cn(
+                  'rounded-lg border p-3 mb-3',
+                  upsetWatch.tierColor === 'red'    ? 'bg-red-500/8 border-red-500/20' :
+                  upsetWatch.tierColor === 'orange' ? 'bg-orange-500/8 border-orange-500/20' :
+                                                      'bg-amber-500/8 border-amber-500/20'
+                )}>
+                  <div className="flex items-center justify-between mb-2">
+                    <div>
+                      <span className={cn('text-sm font-black',
+                        upsetWatch.tierColor === 'red'    ? 'text-red-400' :
+                        upsetWatch.tierColor === 'orange' ? 'text-orange-400' : 'text-amber-400'
+                      )}>{upsetWatch.underdog} upset probability</span>
+                      {upsetWatch.udIsHome && (
+                        <span className="ml-2 text-[10px] bg-white/10 text-foreground px-1.5 py-0.5 rounded-full">Home Dog</span>
+                      )}
+                    </div>
+                    <span className={cn('text-2xl font-black',
+                      upsetWatch.tierColor === 'red'    ? 'text-red-400' :
+                      upsetWatch.tierColor === 'orange' ? 'text-orange-400' : 'text-amber-400'
+                    )}>{upsetWatch.udWinPct}%</span>
+                  </div>
+                  <div className="h-2.5 rounded-full bg-white/10 overflow-hidden">
+                    <div
+                      className={cn('h-full rounded-full transition-all',
+                        upsetWatch.tierColor === 'red' ? 'bg-red-500' :
+                        upsetWatch.tierColor === 'orange' ? 'bg-orange-500' : 'bg-amber-500'
+                      )}
+                      style={{ width: `${upsetWatch.udWinPct}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between mt-1">
+                    <span className="text-[10px] text-muted-foreground">{upsetWatch.underdog}</span>
+                    <span className="text-[10px] text-muted-foreground">{upsetWatch.favored}</span>
+                  </div>
+                </div>
+
+                {/* Why reasons */}
+                <div className="space-y-2 mb-3">
+                  {upsetWatch.reasons.map((r, i) => (
+                    <div key={i} className="flex items-start gap-2 text-[12px] text-foreground/85 leading-snug">
+                      <span className={cn('flex-shrink-0 font-black mt-0.5',
+                        upsetWatch.tierColor === 'red' ? 'text-red-400' :
+                        upsetWatch.tierColor === 'orange' ? 'text-orange-400' : 'text-amber-400'
+                      )}>›</span>
+                      {r}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Key factors grid */}
+                {upsetWatch.keyFactors.length > 0 && (
+                  <div className="grid grid-cols-2 gap-2 mb-3">
+                    {upsetWatch.keyFactors.map((f, i) => (
+                      <div key={i} className={cn(
+                        'rounded-lg border p-2',
+                        upsetWatch.tierColor === 'red'    ? 'bg-red-500/8 border-red-500/15' :
+                        upsetWatch.tierColor === 'orange' ? 'bg-orange-500/8 border-orange-500/15' :
+                                                            'bg-amber-500/8 border-amber-500/15'
+                      )}>
+                        <div className={cn('text-[10px] font-bold mb-0.5',
+                          upsetWatch.tierColor === 'red' ? 'text-red-400' :
+                          upsetWatch.tierColor === 'orange' ? 'text-orange-400' : 'text-amber-400'
+                        )}>{f.label}</div>
+                        <div className="text-[11px] text-foreground/80">{f.description}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Upset score bar */}
+                <div className="mb-2">
+                  <div className="flex justify-between mb-1">
+                    <span className="text-[10px] text-muted-foreground">Upset Confidence Score</span>
+                    <span className="text-[10px] font-bold text-foreground">{upsetWatch.upsetScore}/100</span>
+                  </div>
+                  <div className="h-1.5 rounded-full bg-white/8">
+                    <div
+                      className={cn('h-full rounded-full',
+                        upsetWatch.upsetScore >= 70 ? 'bg-red-500' :
+                        upsetWatch.upsetScore >= 50 ? 'bg-orange-500' : 'bg-amber-500'
+                      )}
+                      style={{ width: `${upsetWatch.upsetScore}%` }}
+                    />
+                  </div>
+                </div>
+
+                <p className="text-[10px] text-muted-foreground italic leading-snug">
+                  {upsetWatch.historicalNote}
+                </p>
+              </SectionToggle>
+            )}
 
             {/* ── Team Comparison ── */}
             <SectionToggle title="Team Comparison" icon={BarChart2}>

@@ -318,6 +318,132 @@ export function normalizeForRadar(rawAbv) {
   ];
 }
 
+// ─── Upset Watch Engine ───────────────────────────────────────────────────────
+// Returns null if the game isn't a viable upset candidate, otherwise a scored
+// breakdown explaining exactly why the underdog has a legitimate shot.
+function computeUpsetWatch({ hA, aA, homeScore, awayScore, sim, bookSpread,
+                             homeOff, awayOff, homeDef, awayDef }) {
+  const margin   = homeScore - awayScore;               // positive = home favored
+  const absMar   = Math.abs(margin);
+  const favored  = margin >= 0 ? hA : aA;
+  const underdog = favored === hA ? aA : hA;
+  const udIsHome = underdog === hA;
+
+  const udWinPct  = udIsHome ? sim.homeWinPct : sim.awayWinPct;
+  const udOff     = udIsHome ? homeOff  : awayOff;
+  const favOff    = udIsHome ? awayOff  : homeOff;
+  const udDef     = udIsHome ? homeDef  : awayDef;
+  const favDef    = udIsHome ? awayDef  : homeDef;
+
+  const udQB  = QB_TIER[normAbv(underdog)] ?? 75;
+  const favQB = QB_TIER[normAbv(favored)]  ?? 75;
+
+  // Must be a genuine underdog and have a real shot
+  if (absMar < 2)              return null;
+  if (udWinPct < 26 || udWinPct > 49) return null;
+
+  let score = 0;
+  const reasons = [];
+  const keyFactors = [];
+
+  // 1. How competitive is this in simulation?
+  if (udWinPct >= 42)      { score += 35; }
+  else if (udWinPct >= 36) { score += 22; }
+  else if (udWinPct >= 30) { score += 12; }
+  reasons.push(
+    `${underdog} wins ${udWinPct}% of simulated outcomes — the gap between these teams is smaller than the line suggests.`
+  );
+
+  // 2. Home underdog (strongest historical upset predictor)
+  if (udIsHome) {
+    score += 22;
+    reasons.push(
+      `${underdog} is a home underdog — historically, home 'dogs cover the spread at a significantly elevated rate (~52-55%).`
+    );
+    keyFactors.push({ label: 'Home Underdog', description: `${underdog} plays at home with crowd noise, familiarity, and travel disadvantage for ${favored}` });
+  }
+
+  // 3. Favorite has a soft pass defense
+  if (favDef?.pass_yds_allowed > NFL_LEAGUE_AVGS.pass_yds_allowed + 15) {
+    score += 18;
+    reasons.push(
+      `${favored}'s pass defense allows ${favDef.pass_yds_allowed} yds/G through the air — ${underdog}'s offense can exploit that weakness for chunk plays.`
+    );
+    keyFactors.push({ label: 'Soft Favorite Defense', description: `${favored} allows ${favDef.pass_yds_allowed} pass yds/G vs league avg ${NFL_LEAGUE_AVGS.pass_yds_allowed}` });
+  }
+
+  // 4. Favorite has a soft run defense
+  if (favDef?.rush_yds_allowed > NFL_LEAGUE_AVGS.rush_yds_allowed + 15) {
+    score += 12;
+    reasons.push(
+      `${favored} is also soft against the run (${favDef.rush_yds_allowed} rush yds/G allowed) — ${underdog} can control the clock and stay in this game.`
+    );
+    keyFactors.push({ label: 'Run Defense Vulnerability', description: `${favored} allows ${favDef.rush_yds_allowed} rush yds/G — clock-control upset route` });
+  }
+
+  // 5. Line value vs book (model projects closer game)
+  if (bookSpread != null) {
+    const bookMar = Math.abs(bookSpread);
+    const gap     = bookMar - absMar;
+    if (gap >= 2.5) {
+      score += 20;
+      reasons.push(
+        `The model projects a ${absMar.toFixed(1)}-point game vs the book's ${bookMar.toFixed(1)}-point spread — ${Math.round(gap)} points of model-implied value on ${underdog}.`
+      );
+      keyFactors.push({ label: 'Line Value Gap', description: `Book: −${bookMar.toFixed(1)} · Model: −${absMar.toFixed(1)} → ${Math.round(gap)} pts of edge` });
+    }
+  }
+
+  // 6. Underdog has a capable offense
+  if (udOff?.pts && udOff.pts > LEAGUE_OFFENSE_AVG.pts + 2) {
+    score += 12;
+    reasons.push(
+      `${underdog} averages ${udOff.pts} pts/G — an above-average offense capable of posting the kind of score needed to pull the upset.`
+    );
+    keyFactors.push({ label: `${underdog} Scoring Ability`, description: `${udOff.pts} pts/G average — not a push-over offense` });
+  }
+
+  // 7. QB tiers are closer than the line implies
+  if (favQB - udQB < 8) {
+    score += 10;
+    reasons.push(
+      `QB tiers are close (${underdog}: ${udQB} · ${favored}: ${favQB}) — the talent gap at the most impactful position is minimal.`
+    );
+    keyFactors.push({ label: 'Even QB Matchup', description: `${underdog} QB rated ${udQB} vs ${favored} QB rated ${favQB} — minimal edge` });
+  }
+
+  // 8. Underdog has strong defense
+  const avgPassAlwd = NFL_LEAGUE_AVGS.pass_yds_allowed;
+  if (udDef?.pass_yds_allowed && udDef.pass_yds_allowed < avgPassAlwd - 15) {
+    score += 10;
+    reasons.push(
+      `${underdog}'s defense is stingy (${udDef.pass_yds_allowed} pass yds/G allowed) — they can keep the favorite's offense in check.`
+    );
+    keyFactors.push({ label: `${underdog} Defense`, description: `Allows only ${udDef.pass_yds_allowed} pass yds/G — elite defensive unit` });
+  }
+
+  if (score < 30) return null;
+
+  // Upset tier label
+  const tier = score >= 70 ? 'Prime Upset'
+             : score >= 50 ? 'Upset Watch'
+             : 'Mild Upset Lean';
+
+  const tierColor = score >= 70 ? 'red' : score >= 50 ? 'orange' : 'amber';
+
+  return {
+    underdog, favored, udIsHome,
+    udWinPct,
+    upsetScore: Math.min(score, 100),
+    tier, tierColor,
+    reasons:    reasons.slice(0, 4),
+    keyFactors: keyFactors.slice(0, 4),
+    historicalNote: udIsHome
+      ? 'Home underdogs cover the spread roughly 52-55% of the time — one of the most reliable edges in NFL betting.'
+      : 'Road underdogs of 3-7 points cover at approximately 47%, slightly above the break-even threshold.',
+  };
+}
+
 // ─── Main export ──────────────────────────────────────────────────────────────
 export function analyzeGame(game) {
   const hA = normAbv(game.homeAbv);
@@ -340,6 +466,16 @@ export function analyzeGame(game) {
 
   const confidence = Math.round(clamp(58 + Math.abs(ourSpread) * 1.8, 55, 91));
 
+  const homeOff = TEAM_OFFENSE[hA] ?? null;
+  const awayOff = TEAM_OFFENSE[aA] ?? null;
+  const homeDef = TEAM_STATS[hA] ?? null;
+  const awayDef = TEAM_STATS[aA] ?? null;
+
+  const upsetWatch = computeUpsetWatch({
+    hA, aA, homeScore: hS, awayScore: aS, sim, bookSpread,
+    homeOff, awayOff, homeDef, awayDef,
+  });
+
   return {
     hA, aA,
     homeScore: hS, awayScore: aS,
@@ -347,12 +483,10 @@ export function analyzeGame(game) {
     sim, adv, posMaps, explanation,
     spreadPick, ouPick, confidence,
     ourSpread, bookSpread,
-    homeOff: TEAM_OFFENSE[hA] ?? null,
-    awayOff: TEAM_OFFENSE[aA] ?? null,
-    homeDef: TEAM_STATS[hA] ?? null,
-    awayDef: TEAM_STATS[aA] ?? null,
+    homeOff, awayOff, homeDef, awayDef,
     homeQB: QB_TIER[hA] ?? 75,
     awayQB: QB_TIER[aA] ?? 75,
+    upsetWatch,
     aiReasoningFactors: [
       { label: 'Quarterback Play',     pct: 22 },
       { label: 'Defense',              pct: 18 },
@@ -377,14 +511,17 @@ export function analyzeGame(game) {
 }
 
 export function getGameIndicators(analysis) {
-  const { confidence, sim, ourSpread, bookSpread } = analysis;
+  const { confidence, sim, ourSpread, bookSpread, upsetWatch } = analysis;
   const indicators = [];
+  if (upsetWatch?.upsetScore >= 50)
+                                    indicators.push({ icon: '🚨', label: upsetWatch.tier, color: upsetWatch.tierColor });
   if (confidence >= 83)             indicators.push({ icon: '⭐', label: 'AI Lock',     color: 'amber'   });
   else if (confidence >= 76)        indicators.push({ icon: '🔥', label: 'Best Bet',    color: 'orange'  });
   if (sim.overPct >= 65 || sim.underPct >= 65)
                                     indicators.push({ icon: '📈', label: 'Sharp Edge',  color: 'blue'    });
   if (bookSpread != null && Math.abs(ourSpread - bookSpread) >= 2.5)
                                     indicators.push({ icon: '💰', label: 'Value Pick',  color: 'emerald' });
-  if (confidence < 64)              indicators.push({ icon: '⚠️', label: 'Risky Bet',  color: 'red'     });
+  if (confidence < 64 && !upsetWatch)
+                                    indicators.push({ icon: '⚠️', label: 'Risky Bet',  color: 'red'     });
   return indicators.slice(0, 2);
 }
