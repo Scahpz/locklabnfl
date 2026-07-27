@@ -178,10 +178,12 @@ export default function Props() {
     const slowTimer = setTimeout(() => setSlowLoad(true), 10000);
 
     let gotData = false;
+    let fetchFailed = false;
     try {
       const data = await fetchLiveProps();
       gotData = applyData(data);
     } catch {
+      fetchFailed = true;
       if (!stale) setRawProps([]);
     } finally {
       clearTimeout(slowTimer);
@@ -190,9 +192,9 @@ export default function Props() {
       setRefreshing(false);
     }
 
-    // If fetch returned empty and there's no stale cache to fall back on,
-    // schedule an auto-retry — covers cold-start races and momentary scraper failures
-    if (!gotData && !getCachedProps()) {
+    // Only retry on actual fetch failures — not when backend cleanly returns empty
+    // (empty = offseason / no games today, not a server problem)
+    if (!gotData && !getCachedProps() && fetchFailed) {
       startRetryCountdown(25);
     }
   };

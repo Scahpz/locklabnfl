@@ -180,41 +180,42 @@ export default function LiveOdds() {
   };
 
   const load = useCallback(async () => {
-    if (!isBackendReachable()) {
-      setLoading(true);
-      setError(null);
-      try {
-        const mapped = await fetchESPNGames();
-        setGames(mapped);
-        setOddsSource(mapped.length ? 'odds_api' : null);
-        setLastUpdated(new Date());
-      } catch {
-        setGames([]);
-      } finally {
-        setLoading(false);
-      }
-      return;
-    }
     setLoading(true);
     setError(null);
     setCountdown(REFRESH_MS / 1000);
-    try {
-      const s = await fetch(`${NFL_API}/api/settings`).then(r => r.json()).catch(() => ({}));
-      const books = s.bookmakers || selectedBooks.join(',');
-      const hasKey = !!s.odds_api_key;
 
-      const res = await fetch(`${NFL_API}/api/odds/games?bookmakers=${encodeURIComponent(books)}`);
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || 'Failed to fetch');
+    // Try backend /api/odds/games first (returns real multi-book data when ODDS_API_KEY is set)
+    if (isBackendReachable()) {
+      try {
+        const s = await fetch(`${NFL_API}/api/settings`).then(r => r.json()).catch(() => ({}));
+        const books = s.bookmakers || selectedBooks.join(',');
+        const hasKey = !!s.odds_api_key;
+
+        const res = await fetch(`${NFL_API}/api/odds/games?bookmakers=${encodeURIComponent(books)}`);
+        if (res.ok) {
+          const gamesData = await res.json();
+          if (Array.isArray(gamesData) && gamesData.length > 0) {
+            setOddsSource(hasKey ? 'odds_api' : 'underdog');
+            setGames(gamesData);
+            setLastUpdated(new Date());
+            setLoading(false);
+            return;
+          }
+        }
+      } catch {
+        // fall through to ESPN
       }
-      const gamesData = await res.json();
+    }
 
-      setOddsSource(hasKey ? 'odds_api' : 'underdog');
-      setGames(Array.isArray(gamesData) ? gamesData : []);
+    // ESPN free fallback — always works, carries DraftKings lines
+    try {
+      const mapped = await fetchESPNGames();
+      setGames(mapped);
+      setOddsSource(mapped.length ? 'odds_api' : null);
       setLastUpdated(new Date());
-    } catch (e) {
-      setError(e.message || 'Failed to fetch');
+    } catch {
+      setGames([]);
+      setError('Failed to load odds');
     } finally {
       setLoading(false);
     }
