@@ -171,10 +171,10 @@ function TeamRow({ game, teamAbv, ml, spread, spreadOdds, isHome }) {
   );
 }
 
-export default function GameOddsCard({ game, onOpen }) {
+export default function GameOddsCard({ game, onOpen, liveStats = null }) {
   const [showBooks, setShowBooks] = useState(false);
   const [activeBookKey, setActiveBookKey] = useState(game.allBooks?.[0]?.key ?? null);
-  const analysis   = useMemo(() => analyzeGame(game), [game]);
+  const analysis   = useMemo(() => analyzeGame(game, liveStats), [game, liveStats]);
   const indicators = useMemo(() => getGameIndicators(analysis), [analysis]);
 
   const gameDate = new Date(game.commence_time);

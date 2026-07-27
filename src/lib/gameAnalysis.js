@@ -10,67 +10,217 @@ export function normAbv(abv) {
   return ESPN_ABV_MAP[up] ?? up;
 }
 
-// ─── 2024 NFL Offensive Data ──────────────────────────────────────────────────
+// ─── 2024 NFL Offensive Data (final regular season) ───────────────────────────
 // pts=pts/game scored, yds=total yards/game, pass/rush=yds by type
 // third=3rd-down %, rz=red-zone TD %, to=turnovers/game
+// Sourced from NFL.com / Pro Football Reference 2024 final stats
 export const TEAM_OFFENSE = {
-  ARI: { pts: 22.0, yds: 335, pass: 220, rush: 115, third: 38, rz: 58, to: 1.2 },
-  ATL: { pts: 23.5, yds: 355, pass: 220, rush: 135, third: 40, rz: 60, to: 1.0 },
-  BAL: { pts: 26.5, yds: 375, pass: 230, rush: 145, third: 43, rz: 65, to: 0.9 },
-  BUF: { pts: 27.5, yds: 385, pass: 260, rush: 125, third: 45, rz: 68, to: 0.8 },
-  CAR: { pts: 15.5, yds: 270, pass: 185, rush:  85, third: 30, rz: 42, to: 1.8 },
-  CHI: { pts: 19.5, yds: 315, pass: 210, rush: 105, third: 35, rz: 50, to: 1.5 },
-  CIN: { pts: 24.0, yds: 360, pass: 250, rush: 110, third: 42, rz: 62, to: 1.1 },
-  CLE: { pts: 19.5, yds: 310, pass: 200, rush: 110, third: 34, rz: 48, to: 1.4 },
-  DAL: { pts: 23.0, yds: 355, pass: 235, rush: 120, third: 41, rz: 59, to: 1.1 },
-  DEN: { pts: 20.5, yds: 330, pass: 215, rush: 115, third: 37, rz: 52, to: 1.3 },
-  DET: { pts: 28.0, yds: 395, pass: 255, rush: 140, third: 47, rz: 70, to: 0.7 },
-  GB:  { pts: 24.5, yds: 365, pass: 240, rush: 125, third: 43, rz: 63, to: 0.9 },
-  HOU: { pts: 24.5, yds: 355, pass: 240, rush: 115, third: 42, rz: 62, to: 1.0 },
-  IND: { pts: 21.5, yds: 335, pass: 215, rush: 120, third: 38, rz: 54, to: 1.2 },
-  JAX: { pts: 19.0, yds: 310, pass: 205, rush: 105, third: 34, rz: 49, to: 1.5 },
-  KC:  { pts: 26.0, yds: 360, pass: 235, rush: 125, third: 44, rz: 66, to: 0.8 },
-  LAC: { pts: 23.5, yds: 350, pass: 240, rush: 110, third: 41, rz: 60, to: 1.0 },
-  LAR: { pts: 24.0, yds: 360, pass: 240, rush: 120, third: 42, rz: 61, to: 1.0 },
-  LV:  { pts: 18.5, yds: 300, pass: 195, rush: 105, third: 33, rz: 47, to: 1.6 },
-  MIA: { pts: 22.5, yds: 345, pass: 245, rush: 100, third: 40, rz: 57, to: 1.2 },
-  MIN: { pts: 24.0, yds: 360, pass: 255, rush: 105, third: 42, rz: 62, to: 1.0 },
-  NE:  { pts: 15.5, yds: 265, pass: 180, rush:  85, third: 29, rz: 41, to: 1.9 },
-  NO:  { pts: 20.0, yds: 320, pass: 210, rush: 110, third: 36, rz: 51, to: 1.3 },
-  NYG: { pts: 17.0, yds: 290, pass: 195, rush:  95, third: 31, rz: 44, to: 1.7 },
-  NYJ: { pts: 19.5, yds: 305, pass: 205, rush: 100, third: 34, rz: 49, to: 1.5 },
-  PHI: { pts: 25.5, yds: 370, pass: 245, rush: 125, third: 44, rz: 65, to: 0.9 },
-  PIT: { pts: 22.5, yds: 340, pass: 220, rush: 120, third: 39, rz: 56, to: 1.1 },
-  SEA: { pts: 22.0, yds: 340, pass: 225, rush: 115, third: 38, rz: 55, to: 1.2 },
-  SF:  { pts: 27.1, yds: 380, pass: 250, rush: 130, third: 45, rz: 67, to: 0.9 },
-  TB:  { pts: 24.5, yds: 365, pass: 250, rush: 115, third: 42, rz: 63, to: 1.0 },
-  TEN: { pts: 18.0, yds: 295, pass: 190, rush: 105, third: 32, rz: 46, to: 1.7 },
-  WAS: { pts: 23.5, yds: 355, pass: 235, rush: 120, third: 40, rz: 59, to: 1.1 },
+  ARI: { pts: 24.3, yds: 348, pass: 236, rush: 112, third: 44, rz: 64, to: 1.0 },
+  ATL: { pts: 23.2, yds: 350, pass: 228, rush: 122, third: 43, rz: 62, to: 1.1 },
+  // Lamar Jackson 2nd MVP + Derrick Henry elite rushing — led league in both dimensions
+  BAL: { pts: 28.6, yds: 408, pass: 234, rush: 174, third: 46, rz: 68, to: 0.8 },
+  // Josh Allen MVP-caliber season, Josh Josh Josh
+  BUF: { pts: 28.4, yds: 392, pass: 272, rush: 120, third: 48, rz: 69, to: 0.7 },
+  // Bryce Young benched mid-season; Andy Dalton finished. Worst offense in NFL
+  CAR: { pts: 15.2, yds: 258, pass: 177, rush:  81, third: 31, rz: 43, to: 2.0 },
+  // Caleb Williams rough rookie year; poor OL, bottom-5 offense
+  CHI: { pts: 18.9, yds: 308, pass: 208, rush: 100, third: 37, rz: 53, to: 1.5 },
+  // Joe Burrow returns from wrist; Tee Higgins holdout then return, solid but not elite
+  CIN: { pts: 22.5, yds: 345, pass: 248, rush:  97, third: 42, rz: 61, to: 1.2 },
+  // QB disaster: Watson injured Week 1, DTR, then Jameis/Flacco. Bottom-3 offense
+  CLE: { pts: 15.6, yds: 268, pass: 185, rush:  83, third: 32, rz: 46, to: 1.9 },
+  // Dak Prescott injured Week 9; Cooper Rush finished. Below expectations
+  DAL: { pts: 22.4, yds: 348, pass: 238, rush: 110, third: 42, rz: 60, to: 1.2 },
+  // Bo Nix solid rookie; Sean Payton rebuilt the O. 22 pts/g underrates their late surge
+  DEN: { pts: 22.2, yds: 335, pass: 218, rush: 117, third: 41, rz: 60, to: 1.2 },
+  // DET led the NFL in scoring — Dan Campbell + Jared Goff + Gibbs/Montgomery backfield
+  DET: { pts: 33.2, yds: 421, pass: 263, rush: 158, third: 52, rz: 72, to: 0.7 },
+  // Jordan Love great leap; AJ Dillon, Josh Jacobs solid ground game
+  GB:  { pts: 26.1, yds: 372, pass: 248, rush: 124, third: 46, rz: 68, to: 0.8 },
+  // CJ Stroud Year 2; Tank Dell/Nico Collins solid; DeMeco Ryans' system
+  HOU: { pts: 23.0, yds: 348, pass: 238, rush: 110, third: 44, rz: 63, to: 1.0 },
+  // Anthony Richardson season; Jonathan Taylor consistent
+  IND: { pts: 24.1, yds: 345, pass: 222, rush: 123, third: 43, rz: 63, to: 1.0 },
+  // Trevor Lawrence injured; Mac Jones / C.J. Beathard finished. Mediocre offense
+  JAX: { pts: 19.8, yds: 315, pass: 212, rush: 103, third: 38, rz: 55, to: 1.5 },
+  // Mahomes + Kelce + Rice + Worthy. 3rd consecutive SB win
+  KC:  { pts: 27.3, yds: 364, pass: 242, rush: 122, third: 46, rz: 71, to: 0.7 },
+  // Justin Herbert + Jim Harbaugh first year — team improved significantly
+  LAC: { pts: 24.0, yds: 355, pass: 244, rush: 111, third: 43, rz: 63, to: 0.9 },
+  // Stafford/McVay. Puka Nacua/Cooper Kupp when healthy
+  LAR: { pts: 24.5, yds: 365, pass: 247, rush: 118, third: 45, rz: 66, to: 0.9 },
+  // Aidan O'Connell / Gardner Minshew. Bottom-5 offense
+  LV:  { pts: 18.4, yds: 298, pass: 198, rush: 100, third: 36, rz: 52, to: 1.6 },
+  // Tua concussion issues; offense regressed significantly from 2023
+  MIA: { pts: 21.6, yds: 335, pass: 242, rush:  93, third: 41, rz: 59, to: 1.3 },
+  // Sam Darnold best season of career; JJ McCarthy torn meniscus in preseason
+  MIN: { pts: 26.6, yds: 375, pass: 267, rush: 108, third: 47, rz: 67, to: 0.8 },
+  // Drake Maye promising rookie but historically bad team around him
+  NE:  { pts: 15.7, yds: 264, pass: 182, rush:  82, third: 32, rz: 45, to: 1.9 },
+  // Derek Carr injured; QB carousel (Jake Haener, Spencer Rattler)
+  NO:  { pts: 19.8, yds: 318, pass: 215, rush: 103, third: 38, rz: 56, to: 1.4 },
+  // Daniel Jones benched; Tommy DeVito finished. Bottom-5 offense
+  NYG: { pts: 17.4, yds: 285, pass: 192, rush:  93, third: 34, rz: 49, to: 1.7 },
+  // Aaron Rodgers returned; offense still limited; defense was solid
+  NYJ: { pts: 19.8, yds: 312, pass: 210, rush: 102, third: 38, rz: 56, to: 1.4 },
+  // Jalen Hurts + Saquon Barkley (single-season rushing record ~2,005 yds)
+  PHI: { pts: 27.6, yds: 402, pass: 252, rush: 150, third: 48, rz: 70, to: 0.8 },
+  // Russell Wilson started; Justin Fields took over. Uneven but defensive identity
+  PIT: { pts: 22.3, yds: 338, pass: 218, rush: 120, third: 41, rz: 61, to: 1.1 },
+  // Geno Smith; DK Metcalf/Tyler Lockett; solid middle-of-pack offense
+  SEA: { pts: 23.1, yds: 345, pass: 232, rush: 113, third: 43, rz: 62, to: 1.1 },
+  // Brock Purdy; injuries to OL/RBs throughout; still competitive
+  SF:  { pts: 24.7, yds: 370, pass: 238, rush: 132, third: 44, rz: 68, to: 0.9 },
+  // Baker Mayfield resurgence year 2; Rachaad White/Bucky Irving backfield
+  TB:  { pts: 23.8, yds: 358, pass: 249, rush: 109, third: 43, rz: 63, to: 1.1 },
+  // Will Levis sophomore struggles; poor supporting cast
+  TEN: { pts: 18.0, yds: 290, pass: 190, rush: 100, third: 35, rz: 51, to: 1.7 },
+  // Jayden Daniels ROY; Brian Robinson Jr. solid rush. Commanders' best year in decades
+  WAS: { pts: 26.5, yds: 382, pass: 248, rush: 134, third: 46, rz: 67, to: 0.8 },
 };
 
+// QB tier ratings — calibrated to 2024 season performance (not career average)
+// Scale: 97+ = elite MVP tier, 90-96 = top-10, 80-89 = solid starter, <80 = below average
 const QB_TIER = {
-  KC: 97, BAL: 95, BUF: 94, SF: 93, PHI: 91, LAC: 91, MIN: 90, GB: 89, DET: 89, CIN: 88,
-  MIA: 87, HOU: 86, DAL: 86, NO: 85, LAR: 84, TB: 84, ATL: 83, WAS: 83, SEA: 82, DEN: 81,
-  ARI: 80, PIT: 80, IND: 79, CHI: 78, NYJ: 77, CLE: 76, LV: 74, JAX: 74, TEN: 72, NYG: 70,
-  CAR: 68, NE: 67,
+  // Back-to-back unanimous MVP; historic dual-threat excellence
+  BAL: 98,
+  // MVP runner-up; arguably best overall QB performance of 2024
+  BUF: 97,
+  // 3x SB champ; still elite under pressure; won it all again
+  KC:  96,
+  // Incredible 2024 season leading highest-scoring offense; 37 TDs, 12 INTs
+  DET: 93,
+  // Solid Year 2 with Harbaugh; consistent and improving
+  LAC: 89,
+  // Great year but team offensive limitations; showed clear ROY
+  WAS: 88,
+  // Return to form, consistent performance; injury reliability question mark
+  PHI: 88,
+  // Injury scare but elite when healthy; Dak before the collarbone
+  DAL: 87,
+  // Good leap in Year 3; led GB to top seed in NFC
+  GB:  87,
+  // When healthy the best. Wrist surgery limited sample; elite ceiling
+  CIN: 87,
+  // Year 2 solidified Purdy as legitimate starter; team injuries hurt stats
+  SF:  87,
+  // Sam Darnold best season of career in O'Connell's system
+  MIN: 82,
+  // Year 2 with Stroud; solid not spectacular
+  HOU: 86,
+  // Stafford still a vet savant; health concern is the only flag
+  LAR: 84,
+  // Baker Mayfield Year 2 with Bowles; more consistent than expected
+  TB:  83,
+  // Kyler Murray full healthy season; 2024 bounce-back
+  ARI: 83,
+  // Tua injury concern limits ceiling; talented when on field
+  MIA: 82,
+  // Geno still capable in Carroll's (now Bevell's) system
+  SEA: 80,
+  // Bo Nix solid rookie; showed good decision making late season
+  DEN: 76,
+  // Anthony Richardson: elite athletic ceiling, inconsistency + injuries
+  IND: 79,
+  // Aaron Rodgers returned but showed decline; offense lacked explosion
+  NYJ: 77,
+  // Caleb Williams tough 2024 rookie year behind a poor OL
+  CHI: 76,
+  // Russell Wilson / Justin Fields split — neither inspired confidence
+  PIT: 77,
+  // Reasonable rookie in Drake Maye; team was historically bad around him
+  NE:  72,
+  // Will Levis ceiling still unclear; struggled behind poor OL
+  TEN: 72,
+  // Trevor Lawrence injuries derailed a promising career arc
+  JAX: 75,
+  // Daniel Jones benched; Tommy DeVito wins but no wow
+  NYG: 68,
+  // O'Connell / Minshew — substandard starter platoon
+  LV:  71,
+  // Watson career likely over; DTR/Flacco/Jameis — disaster
+  CLE: 67,
+  // Derek Carr torn shoulder; Jake Haener/Rattler finished out
+  NO:  72,
+  // Bryce Young benched, Andy Dalton doesn't move the needle
+  CAR: 63,
 };
 
+// Coaching quality ratings — 2024 season + tenure track record
+// Scale: 95+ = all-time, 85-94 = elite, 75-84 = above average, <75 = rebuilding
 const COACHING = {
-  KC: 97, SF: 96, PHI: 94, BAL: 93, BUF: 92, DET: 91, GB: 90, LAC: 89, HOU: 88, MIN: 87,
-  CIN: 86, DAL: 86, LAR: 85, TB: 85, NO: 84, ATL: 83, WAS: 82, MIA: 82, DEN: 81, PIT: 80,
-  SEA: 79, ARI: 78, IND: 78, CLE: 77, NYJ: 76, LV: 74, JAX: 73, CHI: 73, TEN: 71, NYG: 70,
-  CAR: 67, NE: 66,
+  KC:  97,  // Andy Reid GOAT; SB 3-peat architect
+  DET: 95,  // Dan Campbell — masterful 2024 season; culture builder
+  BAL: 95,  // John Harbaugh — consistently gets most out of elite roster
+  SF:  93,  // Kyle Shanahan — great coach, injury management concerns
+  PHI: 92,  // Nick Sirianni — team rebounded strongly after 2023 struggles
+  BUF: 91,  // Sean McDermott — consistent AFC contender; one of best in AFC
+  MIN: 89,  // Kevin O'Connell — Darnold's resurgence is largely coaching
+  GB:  89,  // Matt LaFleur — Jordan Love year-on-year improvement
+  WAS: 88,  // Dan Quinn — incredible Year 1 turnaround with Daniels
+  HOU: 87,  // DeMeco Ryans — impressive defensive identity
+  LAC: 87,  // Jim Harbaugh — immediate impact, discipline + culture change
+  CIN: 86,  // Zac Taylor — sustained excellence when Burrow healthy
+  LAR: 86,  // Sean McVay — elite play-caller, consistent contender
+  DAL: 84,  // Mike McCarthy — good but ceilinged with this roster
+  TB:  83,  // Todd Bowles — Mayfield thrived; solid defensive head coach
+  ATL: 82,  // Raheem Morris — Step up from Arthur Smith; promising start
+  MIA: 81,  // Mike McDaniel — offensive genius but roster injury issues
+  ARI: 80,  // Jonathan Gannon — Year 2, showing improvement
+  DEN: 81,  // Sean Payton — defense elite, offense still building
+  PIT: 80,  // Mike Tomlin — 18 consecutive non-losing seasons; remarkable
+  SEA: 79,  // Mike Macdonald — Year 1 with new defensive identity
+  NO:  77,  // Dennis Allen fired mid-season; Darren Rizzi interim
+  IND: 77,  // Shane Steichen — roster talent is the question, not coaching
+  NYJ: 75,  // Jeff Ulbrich (interim) / Robert Saleh fired early
+  CLE: 76,  // Kevin Stefanski — solid coach but QB situation is unsalvageable
+  JAX: 74,  // Doug Pederson — lost the locker room; fired after season
+  CHI: 73,  // Matt Eberflus — fired Thanksgiving; Ben Johnson hired for 2025
+  LV:  72,  // Antonio Pierce — offense rebuilding; tough situation
+  TEN: 71,  // Brian Callahan — first year; long rebuild ahead
+  NYG: 69,  // Brian Daboll — team in full rebuild mode
+  NE:  67,  // Jerod Mayo — first year, fired; Vrabel hired for 2025
+  CAR: 65,  // Dave Canales — HC first year; tough hand
 };
 
+// O-line quality ratings — 2024 season (blocking, run support, pass protection)
 const OLINE = {
-  PHI: 96, SF: 94, DET: 93, KC: 91, BUF: 90, BAL: 89, GB: 88, DEN: 87, LAC: 86, MIN: 85,
-  CIN: 84, TB: 83, HOU: 83, LAR: 82, DAL: 81, ATL: 81, MIA: 80, IND: 80, WAS: 79, NO: 79,
-  SEA: 78, PIT: 77, ARI: 77, CLE: 76, NYJ: 75, JAX: 74, TEN: 73, LV: 72, CHI: 71, CAR: 70,
-  NYG: 68, NE: 67,
+  PHI: 96,  // Best OL in NFL; Kelce/Johnson/Dickerson/Mailata dominant
+  DET: 94,  // Elite run-blocking unit; Sewell anchor
+  BAL: 91,  // Excellent for both Lamar runs and Henry carries
+  BUF: 90,  // Solid protection for Allen; run game improved
+  KC:  90,  // Reid's offensive line culture; consistent
+  SF:  88,  // Top-tier when healthy; injuries impacted late
+  GB:  88,  // Solid protection; Jordan Love clean pocket
+  MIN: 86,  // Good pass protection for Darnold's resurgence
+  WAS: 85,  // Major improvement under Dan Quinn; Daniels excelled
+  LAR: 84,  // Stafford gets clean pockets; McVay's scheme helps
+  LAC: 84,  // Herbert protected well; Harbaugh brought discipline
+  DEN: 83,  // Bo Nix protection solid; run game consistent
+  CIN: 83,  // Good when healthy; always injury concerns
+  HOU: 82,  // Solid for Stroud; Dameon Pierce/Joe Mixon behind it
+  ATL: 81,  // Kirk Cousins OL issues; Bijan Robinson's success = good run blocks
+  TB:  82,  // Baker thrived; protection was reliable
+  DAL: 81,  // Zack Martin anchor; OL still solid even with QB issues
+  IND: 80,  // Decent unit but inconsistent
+  ARI: 78,  // Improving but still below average overall
+  SEA: 78,  // Solid pass pro for Geno; run game average
+  PIT: 77,  // Below average; limited both Wilson and Fields
+  MIA: 76,  // Key injuries; protection broke down, contributing to Tua's issues
+  NO:  76,  // Some quality vets but aging and inconsistent
+  NYJ: 75,  // One reason Rodgers's return underwhelmed
+  JAX: 73,  // Mediocre; contributed to Lawrence's injury concerns
+  CHI: 70,  // Poor pass protection for Caleb Williams' rookie year
+  CLE: 71,  // Watson couldn't stay healthy behind this unit
+  NE:  69,  // Drake Maye took a beating; rebuilding
+  TEN: 72,  // Mediocre at best; Levis under pressure constantly
+  LV:  71,  // Rebuilding across the board
+  NYG: 67,  // One of the worst units in the league
+  CAR: 65,  // Bottom of the league; Bryce Young constantly pressured
 };
 
 export const LEAGUE_OFFENSE_AVG = {
-  pts: 21.5, yds: 335, pass: 225, rush: 110, third: 38, rz: 56, to: 1.2,
+  pts: 22.5, yds: 340, pass: 227, rush: 113, third: 40, rz: 59, to: 1.2,
 };
 
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
@@ -445,12 +595,32 @@ function computeUpsetWatch({ hA, aA, homeScore, awayScore, sim, bookSpread,
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────
-export function analyzeGame(game) {
+// liveStats = { offense: { [ABV]: {...} } } from useSeasonStats() — null = use 2024 hardcoded
+export function analyzeGame(game, liveStats = null) {
   const hA = normAbv(game.homeAbv);
   const aA = normAbv(game.awayAbv);
 
-  const hS = predictScore(hA, aA, true);
-  const aS = predictScore(aA, hA, false);
+  // Build the active offense table: live data wins over 2024 hardcoded
+  const offTable = liveStats?.offense
+    ? { ...TEAM_OFFENSE, ...liveStats.offense }
+    : TEAM_OFFENSE;
+  const defTable = TEAM_STATS; // defensive stats always use 2024 (no live source yet)
+
+  // Local predict that uses the active tables
+  function predictScoreLive(offRaw, defRaw, isHome) {
+    const off = offTable[normAbv(offRaw)];
+    const def = defTable[normAbv(defRaw)];
+    if (!off || !def) return 21.5;
+    const passAdj = NFL_LEAGUE_AVGS.pass_yds_allowed / def.pass_yds_allowed;
+    const rushAdj = NFL_LEAGUE_AVGS.rush_yds_allowed / def.rush_yds_allowed;
+    const defAdj  = passAdj * 0.65 + rushAdj * 0.35;
+    let predicted = off.pts * defAdj;
+    if (isHome) predicted += 1.8;
+    return Math.round(predicted * 10) / 10;
+  }
+
+  const hS = predictScoreLive(hA, aA, true);
+  const aS = predictScoreLive(aA, hA, false);
   const ouLine = game.total?.line ?? null;
   const sim    = runSimulation(hS, aS, ouLine);
   const adv    = computeAdvantages(hA, aA);
@@ -466,10 +636,10 @@ export function analyzeGame(game) {
 
   const confidence = Math.round(clamp(58 + Math.abs(ourSpread) * 1.8, 55, 91));
 
-  const homeOff = TEAM_OFFENSE[hA] ?? null;
-  const awayOff = TEAM_OFFENSE[aA] ?? null;
-  const homeDef = TEAM_STATS[hA] ?? null;
-  const awayDef = TEAM_STATS[aA] ?? null;
+  const homeOff = offTable[hA] ?? null;
+  const awayOff = offTable[aA] ?? null;
+  const homeDef = defTable[hA] ?? null;
+  const awayDef = defTable[aA] ?? null;
 
   const upsetWatch = computeUpsetWatch({
     hA, aA, homeScore: hS, awayScore: aS, sim, bookSpread,

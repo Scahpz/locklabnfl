@@ -99,8 +99,8 @@ const FACTOR_COLORS = [
 
 // ─── Main modal ───────────────────────────────────────────────────────────────
 
-export default function GameBreakdownModal({ game, onClose }) {
-  const analysis = useMemo(() => analyzeGame(game), [game]);
+export default function GameBreakdownModal({ game, onClose, liveStats = null }) {
+  const analysis = useMemo(() => analyzeGame(game, liveStats), [game, liveStats]);
   const {
     hA, aA, homeScore, awayScore, homeRating, awayRating,
     sim, adv, posMaps, explanation,

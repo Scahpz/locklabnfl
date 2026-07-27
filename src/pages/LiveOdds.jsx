@@ -3,6 +3,7 @@ import GameOddsCard from '@/components/odds/GameOddsCard';
 import GameBreakdownModal from '@/components/odds/GameBreakdownModal';
 import { RefreshCw, Activity, Clock, WifiOff, Key, Check, Zap, AlertTriangle, ChevronRight } from 'lucide-react';
 import { analyzeGame } from '@/lib/gameAnalysis';
+import { useSeasonStats } from '@/lib/nflSeasonStats';
 import TeamLogo from '@/components/common/TeamLogo';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -137,6 +138,7 @@ export default function LiveOdds() {
   const [countdown, setCountdown] = useState(REFRESH_MS / 1000);
   const [oddsSource, setOddsSource] = useState(null); // 'prizepicks' | 'odds_api' | 'season_avg'
   const [breakdownGame, setBreakdownGame] = useState(null);
+  const liveStats = useSeasonStats(); // null during off-season → uses 2024 fallback
 
   // Settings state
   const [settings, setSettings] = useState({ odds_api_key: '', bookmakers: 'draftkings,fanduel,betmgm,caesars,pointsbetus' });
@@ -245,11 +247,11 @@ export default function LiveOdds() {
   const upsetWatchGames = useMemo(() => {
     if (!games.length) return [];
     return games
-      .map(g => ({ game: g, analysis: analyzeGame(g) }))
+      .map(g => ({ game: g, analysis: analyzeGame(g, liveStats) }))
       .filter(({ analysis }) => analysis.upsetWatch != null && analysis.upsetWatch.upsetScore >= 30)
       .sort((a, b) => b.analysis.upsetWatch.upsetScore - a.analysis.upsetWatch.upsetScore)
       .slice(0, 2);
-  }, [games]);
+  }, [games, liveStats]);
 
   // Collect distinct week numbers from regular season games, sorted ascending
   const weekNumbers = [...new Set(
@@ -525,13 +527,13 @@ export default function LiveOdds() {
       {filtered.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {filtered.map(game => (
-            <GameOddsCard key={game.id} game={game} onOpen={setBreakdownGame} />
+            <GameOddsCard key={game.id} game={game} onOpen={setBreakdownGame} liveStats={liveStats} />
           ))}
         </div>
       )}
 
       {breakdownGame && (
-        <GameBreakdownModal game={breakdownGame} onClose={() => setBreakdownGame(null)} />
+        <GameBreakdownModal game={breakdownGame} onClose={() => setBreakdownGame(null)} liveStats={liveStats} />
       )}
 
       {lastUpdated && (
