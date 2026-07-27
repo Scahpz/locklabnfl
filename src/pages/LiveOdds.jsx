@@ -234,15 +234,22 @@ export default function LiveOdds() {
 
   const today = new Date().toLocaleDateString();
   const preseasonCount = games.filter(g => g.is_preseason).length;
-  const regularCount   = games.filter(g => !g.is_preseason).length;
   const todayCount     = games.filter(g => new Date(g.commence_time).toLocaleDateString() === today).length;
+
+  // Collect distinct week numbers from regular season games, sorted ascending
+  const weekNumbers = [...new Set(
+    games.filter(g => !g.is_preseason && g.week != null).map(g => g.week)
+  )].sort((a, b) => a - b);
 
   const filtered = games.filter(g => {
     const gDate = new Date(g.commence_time).toLocaleDateString();
     if (filter === 'preseason') return g.is_preseason;
-    if (filter === 'regular')   return !g.is_preseason;
-    if (filter === 'today')     return gDate === today;
-    if (filter === 'upcoming')  return gDate !== today;
+    if (filter.startsWith('week_')) {
+      const wk = parseInt(filter.split('_')[1], 10);
+      return !g.is_preseason && g.week === wk;
+    }
+    if (filter === 'today')    return gDate === today;
+    if (filter === 'upcoming') return gDate !== today;
     return true;
   });
 
@@ -381,10 +388,13 @@ export default function LiveOdds() {
       {games.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5">
           {[
-            { key: 'all',       label: `All (${games.length})` },
+            { key: 'all',      label: `All (${games.length})` },
             preseasonCount > 0 && { key: 'preseason', label: `Preseason (${preseasonCount})` },
-            regularCount   > 0 && { key: 'regular',   label: `Week 1 (${regularCount})` },
-            todayCount     > 0 && { key: 'today',      label: `Today (${todayCount})` },
+            ...weekNumbers.map(w => ({
+              key:   `week_${w}`,
+              label: `Week ${w} (${games.filter(g => !g.is_preseason && g.week === w).length})`,
+            })),
+            todayCount > 0 && { key: 'today', label: `Today (${todayCount})` },
           ].filter(Boolean).map(tab => (
             <button key={tab.key} onClick={() => setFilter(tab.key)}
               className={cn(

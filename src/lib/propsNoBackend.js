@@ -229,9 +229,23 @@ export async function fetchPropsNoBackend() {
 
   if (!props.length) return null;
 
+  // Build games_summary from the props so the Props page game filter shows matchup buttons
+  const seenGames = new Map();
+  props.forEach(p => {
+    const away = (p.away || '').toUpperCase();
+    const home = (p.home || '').toUpperCase();
+    if (!away || !home) return;
+    const key = `${away}@${home}`;
+    if (!seenGames.has(key)) {
+      seenGames.set(key, { home: p.home, away: p.away, scheduled_at: p.scheduled_at });
+    }
+  });
+  const games_summary = Array.from(seenGames.values())
+    .sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at));
+
   return {
     game_date: new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }),
-    games_summary: [],
+    games_summary,
     props,
   };
 }
