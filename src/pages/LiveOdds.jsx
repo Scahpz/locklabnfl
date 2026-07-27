@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import GameOddsCard from '@/components/odds/GameOddsCard';
+import GameBreakdownModal from '@/components/odds/GameBreakdownModal';
 import { RefreshCw, Activity, Clock, WifiOff, Key, Check, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -133,6 +134,7 @@ export default function LiveOdds() {
   const [filter, setFilter] = useState('all');
   const [countdown, setCountdown] = useState(REFRESH_MS / 1000);
   const [oddsSource, setOddsSource] = useState(null); // 'prizepicks' | 'odds_api' | 'season_avg'
+  const [breakdownGame, setBreakdownGame] = useState(null);
 
   // Settings state
   const [settings, setSettings] = useState({ odds_api_key: '', bookmakers: 'draftkings,fanduel,betmgm,caesars,pointsbetus' });
@@ -426,8 +428,14 @@ export default function LiveOdds() {
 
       {filtered.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {filtered.map(game => <GameOddsCard key={game.id} game={game} />)}
+          {filtered.map(game => (
+            <GameOddsCard key={game.id} game={game} onOpen={setBreakdownGame} />
+          ))}
         </div>
+      )}
+
+      {breakdownGame && (
+        <GameBreakdownModal game={breakdownGame} onClose={() => setBreakdownGame(null)} />
       )}
 
       {lastUpdated && (

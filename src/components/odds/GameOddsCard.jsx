@@ -1,9 +1,10 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { ChevronDown, ChevronUp, Check, TrendingUp, Zap } from 'lucide-react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { ChevronDown, ChevronUp, Check, TrendingUp, Zap, ChevronRight, BarChart2 as BarChart2Icon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import TeamLogo from '@/components/common/TeamLogo';
 import { fmtOdds } from '@/lib/oddsData';
 import { useParlay } from '@/lib/ParlayContext';
+import { analyzeGame, getGameIndicators } from '@/lib/gameAnalysis';
 
 function BookDropdown({ books, activeKey, onSelect }) {
   const [open, setOpen] = useState(false);
@@ -170,9 +171,11 @@ function TeamRow({ game, teamAbv, ml, spread, spreadOdds, isHome }) {
   );
 }
 
-export default function GameOddsCard({ game }) {
+export default function GameOddsCard({ game, onOpen }) {
   const [showBooks, setShowBooks] = useState(false);
   const [activeBookKey, setActiveBookKey] = useState(game.allBooks?.[0]?.key ?? null);
+  const analysis   = useMemo(() => analyzeGame(game), [game]);
+  const indicators = useMemo(() => getGameIndicators(analysis), [analysis]);
 
   const gameDate = new Date(game.commence_time);
   const tipoff = gameDate.toLocaleTimeString('en-US', {
@@ -249,6 +252,19 @@ export default function GameOddsCard({ game }) {
               Upset Alert · {upsetAlert.team}
             </span>
           )}
+          {indicators.map(ind => (
+            <span key={ind.label} className={cn(
+              'text-[9px] font-bold px-1.5 py-0.5 rounded-full border uppercase tracking-wide',
+              ind.color === 'amber'   ? 'bg-amber-500/15 border-amber-500/20 text-amber-400' :
+              ind.color === 'orange'  ? 'bg-orange-500/15 border-orange-500/20 text-orange-400' :
+              ind.color === 'emerald' ? 'bg-emerald-500/15 border-emerald-500/20 text-emerald-400' :
+              ind.color === 'blue'    ? 'bg-blue-500/15 border-blue-500/20 text-blue-400' :
+              ind.color === 'red'     ? 'bg-red-500/15 border-red-500/20 text-red-400' :
+              'bg-secondary text-muted-foreground border-border'
+            )}>
+              {ind.icon} {ind.label}
+            </span>
+          ))}
         </div>
         <div className="flex items-center gap-2">
           {game.allBooks?.length > 0 ? (
@@ -336,6 +352,18 @@ export default function GameOddsCard({ game }) {
                 Spread gives {upsetAlert.team} +{Math.round(upsetAlert.delta * 100)}% edge over their ML odds
               </p>
             )}
+            {/* AI prediction summary strip */}
+            <div className="flex items-center justify-between mt-2 pt-2 border-t border-white/6">
+              <span className="text-[10px] text-muted-foreground">
+                AI Pick: <span className="text-primary font-bold">{analysis.spreadPick} −{Math.abs(analysis.ourSpread).toFixed(1)}</span>
+              </span>
+              <span className="text-[10px] text-muted-foreground">
+                Total: <span className={cn('font-bold', analysis.ouPick === 'OVER' ? 'text-emerald-400' : 'text-red-400')}>{analysis.ouPick}</span>
+              </span>
+              <span className="text-[10px] text-muted-foreground">
+                Conf: <span className="text-foreground font-bold">{analysis.confidence}%</span>
+              </span>
+            </div>
           </div>
         );
       })()}
@@ -350,6 +378,20 @@ export default function GameOddsCard({ game }) {
             <span className="text-destructive">U {fmtOdds(totalUnder)}</span>
           </div>
           <div className="flex-1 border-t border-border/50" />
+        </div>
+      )}
+
+      {/* Scouting Report button */}
+      {onOpen && (
+        <div className="border-t border-border">
+          <button
+            onClick={() => onOpen(game)}
+            className="w-full flex items-center justify-center gap-1.5 py-2.5 text-[11px] font-semibold text-primary hover:text-primary/80 hover:bg-primary/5 transition-colors"
+          >
+            <BarChart2Icon className="w-3.5 h-3.5" />
+            Full Scouting Report &amp; Breakdown
+            <ChevronRight className="w-3 h-3" />
+          </button>
         </div>
       )}
 
