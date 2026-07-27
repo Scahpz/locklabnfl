@@ -243,7 +243,104 @@ function SettingsModal({ settings, onSave, onClose }) {
   );
 }
 
+// ─── Top Matchups Row ─────────────────────────────────────────────────────────
+
+function TopMatchupsRow({ rankings, onOpen }) {
+  const picks = useMemo(() =>
+    rankings
+      .filter(({ player, score }) =>
+        (player.def_rank_vs_pos ?? 0) >= 21 &&
+        score.verdict !== 'SIT' &&
+        (player.depth_chart_order ?? 99) <= 1,
+      )
+      .sort((a, b) =>
+        (b.player.def_rank_vs_pos ?? 0) - (a.player.def_rank_vs_pos ?? 0) ||
+        b.score.projection - a.score.projection,
+      )
+      .slice(0, 7),
+  [rankings]);
+
+  if (picks.length < 2) return null;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <Shield className="w-3.5 h-3.5 text-emerald-400" />
+        <span className="text-xs font-semibold text-foreground">Top Matchups This Week</span>
+        <span className="text-[10px] text-muted-foreground/60">starters vs soft defenses</span>
+      </div>
+      <div
+        className="flex gap-2 overflow-x-auto pb-1"
+        style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+      >
+        {picks.map(({ player, prop, score }) => {
+          const mg      = matchupGrade(player.def_rank_vs_pos);
+          const reasons = getMatchupReasons(player, prop);
+          return (
+            <button
+              key={player.id}
+              onClick={() => onOpen({ player, prop, score })}
+              className="flex-shrink-0 w-[148px] rounded-xl border border-white/8 bg-[hsl(222,47%,9%)] hover:border-primary/30 hover:bg-white/4 transition-all p-3 text-left"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <TeamLogo team={player.team} className="w-6 h-6 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <div className="text-[11px] font-bold text-foreground truncate">
+                      {player.player_name.split(' ').slice(-1)[0]}
+                    </div>
+                    <div className="text-[9px] text-muted-foreground">{player.position}</div>
+                  </div>
+                </div>
+                {mg && <span className={cn('text-base font-black flex-shrink-0', mg.color)}>{mg.letter}</span>}
+              </div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[9px] text-muted-foreground">vs {player.opponent} #{player.def_rank_vs_pos}</span>
+                <VerdictChip verdict={score.verdict} />
+              </div>
+              {reasons.length > 0 && (
+                <div className="text-[9px] text-muted-foreground/70 leading-tight mt-1">
+                  {reasons.join(' · ')}
+                </div>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── Player Rank Card ─────────────────────────────────────────────────────────
+
+// A-F matchup grade based on defensive rank vs this position
+// rank 25-32 = soft = A, rank 1-8 = elite = F
+function matchupGrade(rank) {
+  if (rank == null || rank === 0) return null;
+  if (rank >= 25) return { letter: 'A', color: 'text-emerald-400', bg: 'bg-emerald-500/15 border-emerald-500/30' };
+  if (rank >= 17) return { letter: 'B', color: 'text-sky-400',     bg: 'bg-sky-500/15 border-sky-500/30'       };
+  if (rank >= 11) return { letter: 'C', color: 'text-amber-400',   bg: 'bg-amber-500/15 border-amber-500/30'   };
+  if (rank >= 5)  return { letter: 'D', color: 'text-orange-400',  bg: 'bg-orange-500/15 border-orange-500/30' };
+  return              { letter: 'F', color: 'text-red-400',     bg: 'bg-red-500/15 border-red-500/30'       };
+}
+
+// Up to 2 short reasons explaining the matchup / trend signal
+function getMatchupReasons(player, prop) {
+  const reasons = [];
+  const rank = player.def_rank_vs_pos ?? 0;
+  if (rank >= 25)                  reasons.push(`#${rank}/32 vs ${player.position}s (soft)`);
+  else if (rank > 0 && rank <= 8)  reasons.push(`#${rank}/32 vs ${player.position}s (tough)`);
+  if (prop) {
+    const l5  = prop.avg_last_5  ?? null;
+    const l10 = prop.avg_last_10 ?? null;
+    if (l5 != null && l10 != null && l10 > 0) {
+      if (l5 > l10 * 1.10)      reasons.push('L5 trending up');
+      else if (l5 < l10 * 0.88) reasons.push('L5 trending down');
+    }
+    if ((prop.hit_rate_last_10 ?? 0) >= 65) reasons.push(`${prop.hit_rate_last_10}% L10 hit`);
+  }
+  return reasons.slice(0, 2);
+}
 
 // Returns true when a player shows breakout signals:
 // starter + L5 trending 12%+ above L10 + (soft matchup OR hot recent hit rate)
@@ -289,6 +386,15 @@ function PlayerRankCard({ rank, player, prop, score, onCompare, onOpen }) {
           <span className="text-[10px] bg-white/8 text-muted-foreground px-1.5 py-0.5 rounded font-medium">
             {player.position}
           </span>
+          {(() => {
+            const mg = matchupGrade(player.def_rank_vs_pos);
+            if (!mg) return null;
+            return (
+              <span className={cn('text-[9px] font-bold px-1.5 py-0.5 rounded-md border', mg.bg, mg.color)}>
+                vs {mg.letter}
+              </span>
+            );
+          })()}
           {breakout && (
             <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 uppercase tracking-wide flex items-center gap-0.5">
               <TrendingUp className="w-2.5 h-2.5" /> Breakout
@@ -298,6 +404,19 @@ function PlayerRankCard({ rank, player, prop, score, onCompare, onOpen }) {
         <div className="text-[11px] text-muted-foreground mt-0.5">
           {player.team} vs {player.opponent} · {propLabel} {prop.line}
         </div>
+        {(() => {
+          const reasons = getMatchupReasons(player, prop);
+          if (!reasons.length) return null;
+          return (
+            <div className="flex gap-1.5 flex-wrap mt-1">
+              {reasons.map((r, i) => (
+                <span key={i} className="text-[9px] text-muted-foreground bg-white/4 border border-white/8 px-1.5 py-0.5 rounded">
+                  {r}
+                </span>
+              ))}
+            </div>
+          );
+        })()}
         <div className="mt-2"><ScoreBar total={score.total} /></div>
         <div className="flex items-center gap-3 mt-1.5">
           <span className="text-[10px] text-muted-foreground">
@@ -1086,6 +1205,13 @@ export default function StartSit() {
               </span>
               <span className="text-muted-foreground/50">· {filteredRankings.length} players · {scoringLabel}</span>
             </div>
+
+            {!liveStatus.loading && (
+              <TopMatchupsRow
+                rankings={filteredRankings}
+                onOpen={(entry) => setBreakdownEntry(entry)}
+              />
+            )}
 
             {liveStatus.loading ? (
               <div className="space-y-2">

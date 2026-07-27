@@ -867,14 +867,214 @@ export default function PlayerBreakdownModal({ entry, onClose }) {
               </Section>
             )}
 
-            {/* Betting Context stub */}
+            {/* Scheme Matchup */}
+            {TEAM_STATS[opponent] && (() => {
+              const stats    = TEAM_STATS[opponent];
+              const wrYds    = stats.rec_yds_allowed_wr;
+              const teYds    = stats.rec_yds_allowed_te;
+              const passYds  = stats.pass_yds_allowed;
+              const rushYds  = stats.rush_yds_allowed;
+              const wrAvg    = NFL_LEAGUE_AVGS.rec_yds_allowed_wr  || 1;
+              const teAvg    = NFL_LEAGUE_AVGS.rec_yds_allowed_te  || 1;
+              const passAvg  = NFL_LEAGUE_AVGS.pass_yds_allowed    || 1;
+              const rushAvg  = NFL_LEAGUE_AVGS.rush_yds_allowed    || 1;
+              const wrRatio  = wrYds   ? wrYds   / wrAvg   : 1;
+              const teRatio  = teYds   ? teYds   / teAvg   : 1;
+              const passRatio= passYds ? passYds / passAvg : 1;
+              const rushRatio= rushYds ? rushYds / rushAvg : 1;
+
+              let tendency = 'Balanced';
+              let tendencyCls = 'text-muted-foreground';
+              if      (wrRatio  > 1.15 && teRatio < 1.05)  { tendency = 'WR-Friendly';      tendencyCls = 'text-sky-400';     }
+              else if (teRatio  > 1.15 && wrRatio < 1.05)  { tendency = 'TE-Friendly';       tendencyCls = 'text-purple-400';  }
+              else if (passRatio > 1.12)                    { tendency = 'Pass-Permissive';   tendencyCls = 'text-emerald-400'; }
+              else if (passRatio < 0.88)                    { tendency = 'Pass-Stingy';       tendencyCls = 'text-red-400';     }
+              else if (rushRatio > 1.12)                    { tendency = 'Run-Yielding';      tendencyCls = 'text-amber-400';   }
+
+              const pct = (ratio) => `${ratio >= 1 ? '+' : ''}${Math.round((ratio - 1) * 100)}%`;
+
+              const posInsight = {
+                WR: wrYds  ? (wrRatio  > 1.10 ? `WRs avg ${wrYds} Rec Yds/G vs ${opponent} (${pct(wrRatio)} above avg) — favorable coverage.`
+                                               : wrRatio < 0.90 ? `WRs avg only ${wrYds} Rec Yds/G vs ${opponent} (${pct(wrRatio)} below avg) — tight coverage.`
+                                               : `WR production vs ${opponent} is near league average — no strong edge.`)
+                           : null,
+                TE: teYds  ? (teRatio  > 1.10 ? `TEs avg ${teYds} Rec Yds/G vs ${opponent} (${pct(teRatio)} above avg) — seam routes have upside.`
+                                               : teRatio < 0.90 ? `TEs avg only ${teYds} Rec Yds/G vs ${opponent} (${pct(teRatio)} below avg) — tight on crossing routes.`
+                                               : `TE production vs ${opponent} is near league average.`)
+                           : null,
+                RB: rushYds? (rushRatio > 1.10 ? `${opponent} allows ${rushYds} rush Yds/G (${pct(rushRatio)} above avg) — run game has upside.`
+                                               : rushRatio < 0.90 ? `${opponent} limits rushing to ${rushYds} Yds/G (${pct(rushRatio)} below avg) — stout vs the run.`
+                                               : `Run defense vs ${opponent} is near league average.`)
+                           : null,
+                QB: passYds? (passRatio > 1.10 ? `${opponent} gives up ${passYds} pass Yds/G (${pct(passRatio)} above avg) — soft secondary benefits the passing game.`
+                                               : passRatio < 0.90 ? `${opponent} limits passing to ${passYds} Yds/G (${pct(passRatio)} below avg) — tough secondary to crack.`
+                                               : `Pass defense vs ${opponent} is near league average.`)
+                           : null,
+              }[pos] ?? null;
+
+              return (
+                <Section title="Scheme Matchup" icon={Zap} defaultOpen={false}>
+                  <div className="space-y-3">
+                    <div className="rounded-xl bg-white/3 border border-white/8 px-4 py-3 flex items-center justify-between">
+                      <div>
+                        <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Defensive Tendency</div>
+                        <div className={cn('text-base font-bold mt-0.5', tendencyCls)}>{tendency}</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-[10px] text-muted-foreground">vs {pos}s rank</div>
+                        <div className={cn('text-base font-bold mt-0.5', matchupColor(rank))}>
+                          {rank != null ? `#${rank}/32` : '—'}
+                        </div>
+                      </div>
+                    </div>
+
+                    {posInsight && (
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">{posInsight}</p>
+                    )}
+
+                    {(pos === 'WR' || pos === 'TE') && wrYds != null && teYds != null && (
+                      <div className="grid grid-cols-2 gap-2">
+                        {[
+                          { label: 'WR Yds Allowed/G', val: wrYds, avg: wrAvg, ratio: wrRatio },
+                          { label: 'TE Yds Allowed/G', val: teYds, avg: teAvg, ratio: teRatio },
+                        ].map(({ label, val, avg, ratio }) => (
+                          <div key={label} className={cn('rounded-xl border px-3 py-2.5 text-center',
+                            ratio > 1.10 ? 'bg-emerald-500/8 border-emerald-500/20' : 'bg-white/3 border-white/8',
+                          )}>
+                            <div className="text-[9px] text-muted-foreground">{label}</div>
+                            <div className={cn('text-sm font-bold mt-0.5',
+                              ratio > 1.10 ? 'text-emerald-400' : ratio < 0.90 ? 'text-red-400' : 'text-foreground',
+                            )}>{val}</div>
+                            <div className="text-[9px] text-muted-foreground">avg: {avg}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {pos === 'RB' && rushYds != null && (
+                      <div className="grid grid-cols-2 gap-2">
+                        {[
+                          { label: 'Rush Yds Allowed/G', val: rushYds, avg: rushAvg, ratio: rushRatio },
+                          { label: 'Pass Yds Allowed/G', val: passYds, avg: passAvg, ratio: passRatio },
+                        ].filter(d => d.val != null).map(({ label, val, avg, ratio }) => (
+                          <div key={label} className={cn('rounded-xl border px-3 py-2.5 text-center',
+                            ratio > 1.10 ? 'bg-emerald-500/8 border-emerald-500/20' : 'bg-white/3 border-white/8',
+                          )}>
+                            <div className="text-[9px] text-muted-foreground">{label}</div>
+                            <div className={cn('text-sm font-bold mt-0.5',
+                              ratio > 1.10 ? 'text-emerald-400' : ratio < 0.90 ? 'text-red-400' : 'text-foreground',
+                            )}>{val}</div>
+                            <div className="text-[9px] text-muted-foreground">avg: {avg}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <p className="text-[10px] text-muted-foreground">
+                      Coverage tendency approximated from positional yards allowed. Real play-by-play coverage data requires a paid charting source (PFF/SIS).
+                    </p>
+                  </div>
+                </Section>
+              );
+            })()}
+
+            {/* Betting Context */}
             <Section title="Betting Context" icon={Target} defaultOpen={false}>
-              <div className="rounded-xl bg-white/3 border border-white/8 px-4 py-5 flex flex-col items-center gap-2">
-                <Target className="w-5 h-5 text-muted-foreground/40" />
-                <p className="text-[11px] text-muted-foreground text-center">
-                  Odds data unavailable. Live lines, spreads, and player props will appear here once a sportsbook feed is connected.
-                </p>
-              </div>
+              {prop?.line != null ? (
+                <div className="space-y-3">
+                  {/* Prop line + hit rate header */}
+                  <div className="rounded-xl border border-white/10 bg-white/3 px-4 py-3 flex items-center justify-between">
+                    <div>
+                      <div className="text-[10px] text-muted-foreground uppercase tracking-wider">{propLabel || 'Prop'} Line</div>
+                      <div className="text-2xl font-bold text-foreground mt-0.5">{prop.line}</div>
+                    </div>
+                    {prop.hit_rate_last_10 != null && (
+                      <div className="text-right">
+                        <div className="text-[10px] text-muted-foreground uppercase tracking-wider">L10 Hit Rate</div>
+                        <div className={cn('text-2xl font-bold mt-0.5',
+                          prop.hit_rate_last_10 >= 65 ? 'text-emerald-400'
+                          : prop.hit_rate_last_10 >= 45 ? 'text-amber-400' : 'text-red-400',
+                        )}>{prop.hit_rate_last_10}%</div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* L5 vs L10 */}
+                  {prop.avg_last_5 != null && prop.avg_last_10 != null && (
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { label: 'L5 Avg', val: prop.avg_last_5 },
+                        { label: 'L10 Avg', val: prop.avg_last_10 },
+                      ].map(({ label, val }) => (
+                        <div key={label} className="rounded-xl bg-white/3 border border-white/8 px-3 py-2.5 text-center">
+                          <div className="text-[10px] text-muted-foreground">{label}</div>
+                          <div className="text-lg font-bold text-foreground mt-0.5">{Math.round(val * 10) / 10}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Model lean */}
+                  {(() => {
+                    const avg  = prop.avg_last_5 ?? prop.avg_last_10;
+                    const hr   = prop.hit_rate_last_10 ?? 50;
+                    if (avg == null) return null;
+                    const edge = avg - prop.line;
+                    const pick = (edge > 0 && hr >= 55) ? 'OVER' : (edge < 0 && hr <= 45) ? 'UNDER' : null;
+                    if (!pick) return null;
+                    const trending = prop.avg_last_5 != null && prop.avg_last_10 != null && prop.avg_last_5 > prop.avg_last_10 * 1.05;
+                    return (
+                      <div className={cn('rounded-xl border px-3 py-2.5 flex items-center gap-2',
+                        pick === 'OVER' ? 'bg-emerald-500/10 border-emerald-500/25' : 'bg-amber-500/10 border-amber-500/25',
+                      )}>
+                        <TrendingUp className={cn('w-3.5 h-3.5 flex-shrink-0',
+                          pick === 'OVER' ? 'text-emerald-400' : 'text-amber-400',
+                        )} />
+                        <div>
+                          <div className={cn('text-[11px] font-bold',
+                            pick === 'OVER' ? 'text-emerald-400' : 'text-amber-400',
+                          )}>
+                            Model leans {pick} {prop.line}
+                          </div>
+                          <div className="text-[10px] text-muted-foreground">
+                            {avg.toFixed(1)} avg L{prop.avg_last_5 != null ? '5' : '10'} vs {prop.line} line
+                            {trending ? ' · trending up' : ''}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Over/Under odds */}
+                  {(prop.over_odds != null || prop.under_odds != null) && (
+                    <div className="flex gap-2">
+                      {prop.over_odds != null && (
+                        <div className="flex-1 rounded-xl bg-emerald-500/8 border border-emerald-500/20 px-3 py-2 text-center">
+                          <div className="text-[10px] text-muted-foreground">Over</div>
+                          <div className="text-sm font-bold text-emerald-400">
+                            {prop.over_odds > 0 ? '+' : ''}{prop.over_odds}
+                          </div>
+                        </div>
+                      )}
+                      {prop.under_odds != null && (
+                        <div className="flex-1 rounded-xl bg-red-500/8 border border-red-500/20 px-3 py-2 text-center">
+                          <div className="text-[10px] text-muted-foreground">Under</div>
+                          <div className="text-sm font-bold text-red-400">
+                            {prop.under_odds > 0 ? '+' : ''}{prop.under_odds}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="rounded-xl bg-white/3 border border-white/8 px-4 py-5 flex flex-col items-center gap-2">
+                  <Target className="w-5 h-5 text-muted-foreground/40" />
+                  <p className="text-[11px] text-muted-foreground text-center">
+                    Odds data unavailable. Live lines, spreads, and player props will appear here once a sportsbook feed is connected.
+                  </p>
+                </div>
+              )}
             </Section>
 
             <div className="h-3" />
