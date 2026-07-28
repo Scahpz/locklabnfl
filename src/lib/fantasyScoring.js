@@ -458,7 +458,11 @@ const PRIMARY_PROP_TYPE = {
 function scorePosition(players, position, s) {
   const scale  = (s.leagueSize ?? 12) / 12;
   const startN = Math.round(STARTER_COUNTS[position] * scale);
-  const flexN  = Math.round(FLEX_COUNTS[position]    * scale);
+  let   flexN  = Math.round(FLEX_COUNTS[position]    * scale);
+  // QBs can only occupy FLEX slots when the league explicitly enables it.
+  if (position === 'QB' && !s.superflex && s.flexType !== 'RB/WR/TE/QB') {
+    flexN = 0;
+  }
 
   const scored = players
     .filter(p => p.position === position)
@@ -488,7 +492,7 @@ function scorePosition(players, position, s) {
   return scored.map((entry, idx) => {
     const rank    = idx + 1;
     const verdict = rank <= startN ? 'START' : rank <= startN + flexN ? 'FLEX' : 'SIT';
-    return { ...entry, score: { ...entry.score, verdict } };
+    return { ...entry, posRank: rank, score: { ...entry.score, verdict } };
   });
 }
 

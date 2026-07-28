@@ -1055,13 +1055,18 @@ export default function PlayerBreakdownModal({ entry, onClose }) {
 
                   {/* Model lean */}
                   {(() => {
-                    const avg  = prop.avg_last_5 ?? prop.avg_last_10;
+                    // Use the Sleeper projection as the primary source; fall back to
+                    // synthetic historical averages only when projection is absent.
+                    const avg  = prop.projection ?? prop.avg_last_5 ?? prop.avg_last_10;
                     const hr   = prop.hit_rate_last_10 ?? 50;
                     if (avg == null) return null;
                     const edge = avg - prop.line;
                     const pick = (edge > 0 && hr >= 55) ? 'OVER' : (edge < 0 && hr <= 45) ? 'UNDER' : null;
                     if (!pick) return null;
                     const trending = prop.avg_last_5 != null && prop.avg_last_10 != null && prop.avg_last_5 > prop.avg_last_10 * 1.05;
+                    const avgLabel = prop.projection != null ? 'model proj'
+                      : prop.avg_last_5  != null ? 'avg L5'
+                      : 'avg L10';
                     return (
                       <div className={cn('rounded-xl border px-3 py-2.5 flex items-center gap-2',
                         pick === 'OVER' ? 'bg-emerald-500/10 border-emerald-500/25' : 'bg-amber-500/10 border-amber-500/25',
@@ -1076,7 +1081,7 @@ export default function PlayerBreakdownModal({ entry, onClose }) {
                             Model leans {pick} {prop.line}
                           </div>
                           <div className="text-[10px] text-muted-foreground">
-                            {avg.toFixed(1)} avg L{prop.avg_last_5 != null ? '5' : '10'} vs {prop.line} line
+                            {avg.toFixed(1)} {avgLabel} vs {prop.line} line
                             {trending ? ' · trending up' : ''}
                           </div>
                         </div>

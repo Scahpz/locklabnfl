@@ -87,33 +87,40 @@ function buildPropsFromProjections(position, proj, gameTotal, isHome) {
     ? parseFloat(Math.min(rush_yd / 130, 0.75).toFixed(3))
     : null;
 
+  // Helper: override projection with the actual Sleeper stat so that the lean
+  // calculation in PlayerBreakdownModal has a single, consistent number.
+  function push(base, rawStat) {
+    base.projection = Math.round(rawStat);
+    props.push(base);
+  }
+
   if (position === 'QB') {
     if (pass_yd && pass_yd > 10) {
-      props.push(makeProp('passing_yards', pass_yd * 0.88, pass_yd * 0.28, gameTotal, isHome));
+      push(makeProp('passing_yards', pass_yd * 0.88, pass_yd * 0.28, gameTotal, isHome), pass_yd);
     }
     if (rush_yd && rush_yd > 4) {
-      props.push(makeProp('rushing_yards', rush_yd * 0.85, rush_yd * 0.50, gameTotal, isHome));
+      push(makeProp('rushing_yards', rush_yd * 0.85, rush_yd * 0.50, gameTotal, isHome), rush_yd);
     }
   } else if (position === 'RB') {
     if (rush_yd && rush_yd > 0) {
-      props.push({ ...makeProp('rushing_yards', rush_yd * 0.85, rush_yd * 0.45, gameTotal, isHome), snap_pct: estSnapPct, target_share: estTargetShare });
+      push({ ...makeProp('rushing_yards', rush_yd * 0.85, rush_yd * 0.45, gameTotal, isHome), snap_pct: estSnapPct, target_share: estTargetShare }, rush_yd);
     }
     if (rec && rec > 0) {
-      props.push({ ...makeProp('receptions', rec * 0.85, rec * 0.55, gameTotal, isHome), snap_pct: estSnapPct, target_share: estTargetShare });
+      push({ ...makeProp('receptions', rec * 0.85, rec * 0.55, gameTotal, isHome), snap_pct: estSnapPct, target_share: estTargetShare }, rec);
     }
   } else if (position === 'WR') {
     if (rec_yd && rec_yd > 0) {
-      props.push({ ...makeProp('receiving_yards', rec_yd * 0.85, rec_yd * 0.45, gameTotal, isHome), target_share: estTargetShare });
+      push({ ...makeProp('receiving_yards', rec_yd * 0.85, rec_yd * 0.45, gameTotal, isHome), target_share: estTargetShare }, rec_yd);
     }
     if (rec && rec > 0) {
-      props.push({ ...makeProp('receptions', rec * 0.85, rec * 0.55, gameTotal, isHome), target_share: estTargetShare });
+      push({ ...makeProp('receptions', rec * 0.85, rec * 0.55, gameTotal, isHome), target_share: estTargetShare }, rec);
     }
   } else if (position === 'TE') {
     if (rec_yd && rec_yd > 0) {
-      props.push({ ...makeProp('receiving_yards', rec_yd * 0.85, rec_yd * 0.50, gameTotal, isHome), target_share: estTargetShare });
+      push({ ...makeProp('receiving_yards', rec_yd * 0.85, rec_yd * 0.50, gameTotal, isHome), target_share: estTargetShare }, rec_yd);
     }
     if (rec && rec > 0) {
-      props.push({ ...makeProp('receptions', rec * 0.85, rec * 0.55, gameTotal, isHome), target_share: estTargetShare });
+      push({ ...makeProp('receptions', rec * 0.85, rec * 0.55, gameTotal, isHome), target_share: estTargetShare }, rec);
     }
   }
 
@@ -138,23 +145,47 @@ async function fetchSleeperProjections(season, week) {
   }
 }
 
+// Fetch the schedule — always prefers the upcoming regular-season week over preseason.
+// Returns a synthetic object: { events, seasonYear, weekNum }
 async function fetchESPNSchedule() {
-  try {
-    const res = await fetch(
-      'https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard',
-    );
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
+  const year = new Date().getFullYear();
+  async function tryFetch(url) {
+    try {
+      const r = await fetch(url, { signal: AbortSignal.timeout(6000) });
+      return r.ok ? r.json() : null;
+    } catch { return null; }
   }
+
+  const [current, regSeason] = await Promise.all([
+    tryFetch('https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard'),
+    tryFetch(
+      `https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard` +
+      `?dates=${year}0901-${year}1231&limit=200`,
+    ),
+  ]);
+
+  // Merge events, deduplicate by id, drop preseason (seasonType 1)
+  const seen = new Set();
+  const events = [...(regSeason?.events ?? []), ...(current?.events ?? [])]
+    .filter(ev => {
+      if (ev.season?.type === 1) return false; // preseason
+      if (seen.has(ev.id)) return false;
+      seen.add(ev.id);
+      return true;
+    });
+
+  // Use season year from regular-season response; week from first event if available
+  const seasonYear = regSeason?.season?.year ?? current?.season?.year ?? year;
+  const weekNum    = regSeason?.week?.number ?? current?.week?.number  ?? 1;
+
+  return { events, seasonYear, weekNum };
 }
 
-function buildScheduleMaps(espnData) {
+function buildScheduleMaps({ events = [] } = {}) {
   const teamToOpp   = {};
   const teamToTotal = {};
   const teamIsHome  = {};
-  for (const event of espnData?.events ?? []) {
+  for (const event of events) {
     const comp = event.competitions?.[0];
     if (!comp) continue;
     const home = comp.competitors?.find(c => c.homeAway === 'home');
@@ -255,8 +286,8 @@ export async function fetchLivePlayers() {
   }
 
   const espnData    = espnResult.status === 'fulfilled' ? espnResult.value : null;
-  const season      = espnData?.season?.year ?? new Date().getFullYear();
-  const weekNum     = espnData?.week?.number ?? 1;
+  const season      = espnData?.seasonYear ?? new Date().getFullYear();
+  const weekNum     = espnData?.weekNum    ?? 1;
   const schedMaps   = buildScheduleMaps(espnData);
   const hasSchedule = Object.keys(schedMaps.teamToOpp).length > 0;
 

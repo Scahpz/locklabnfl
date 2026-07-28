@@ -18,8 +18,8 @@ function espnDateStr(d) {
   return d.toISOString().slice(0, 10).replace(/-/g, '');
 }
 
-// Fetches both preseason (current) and upcoming regular-season Week 1 games in parallel,
-// merges them, and deduplicates by game id.
+// Fetches the upcoming regular-season schedule; falls back to current scoreboard.
+// Preseason games are filtered out — only regular-season matchups are shown.
 async function fetchESPNGames() {
   async function tryUrl(url) {
     try {
@@ -34,15 +34,16 @@ async function fetchESPNGames() {
   const now  = new Date();
   const year = now.getMonth() >= 6 ? now.getFullYear() : now.getFullYear() - 1;
 
-  // Fetch preseason (current week) and Week 1 regular season simultaneously
-  const [currentGames, week1Games] = await Promise.all([
-    tryUrl(ESPN_SCOREBOARD),                                                    // whatever ESPN serves now (may be preseason)
-    tryUrl(`${ESPN_SCOREBOARD}?dates=${year}0901-${year}0930&limit=50`),       // Week 1 regular season
+  // Fetch full regular season + current scoreboard simultaneously
+  const [currentGames, regSeasonGames] = await Promise.all([
+    tryUrl(ESPN_SCOREBOARD),                                                      // live scoreboard (may be preseason)
+    tryUrl(`${ESPN_SCOREBOARD}?dates=${year}0901-${year}1231&limit=200`),        // full regular season
   ]);
 
-  // Merge and deduplicate by game id
+  // Merge (prefer regular season), deduplicate, exclude preseason entirely
   const seen = new Set();
-  return [...currentGames, ...week1Games].filter(g => {
+  return [...regSeasonGames, ...currentGames].filter(g => {
+    if (g.is_preseason) return false;
     if (seen.has(g.id)) return false;
     seen.add(g.id);
     return true;
@@ -239,9 +240,8 @@ export default function LiveOdds() {
     return () => clearInterval(tick);
   }, [loading]);
 
-  const today = new Date().toLocaleDateString();
-  const preseasonCount = games.filter(g => g.is_preseason).length;
-  const todayCount     = games.filter(g => new Date(g.commence_time).toLocaleDateString() === today).length;
+  const today      = new Date().toLocaleDateString();
+  const todayCount = games.filter(g => new Date(g.commence_time).toLocaleDateString() === today).length;
 
   // Identify top 1-2 upset watch candidates across all loaded games
   const upsetWatchGames = useMemo(() => {
@@ -260,14 +260,13 @@ export default function LiveOdds() {
 
   const filtered = games.filter(g => {
     const gDate = new Date(g.commence_time).toLocaleDateString();
-    if (filter === 'preseason') return g.is_preseason;
     if (filter.startsWith('week_')) {
       const wk = parseInt(filter.split('_')[1], 10);
-      return !g.is_preseason && g.week === wk;
+      return g.week === wk;
     }
     if (filter === 'today')    return gDate === today;
     if (filter === 'upcoming') return gDate !== today;
-    return true;
+    return true; // 'all' — preseason already excluded by fetchESPNGames
   });
 
   return (
@@ -405,11 +404,10 @@ export default function LiveOdds() {
       {games.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5">
           {[
-            { key: 'all',      label: `All (${games.length})` },
-            preseasonCount > 0 && { key: 'preseason', label: `Preseason (${preseasonCount})` },
+            { key: 'all',   label: `All (${games.length})` },
             ...weekNumbers.map(w => ({
               key:   `week_${w}`,
-              label: `Week ${w} (${games.filter(g => !g.is_preseason && g.week === w).length})`,
+              label: `Week ${w} (${games.filter(g => g.week === w).length})`,
             })),
             todayCount > 0 && { key: 'today', label: `Today (${todayCount})` },
           ].filter(Boolean).map(tab => (

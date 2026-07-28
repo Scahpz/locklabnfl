@@ -355,7 +355,7 @@ function isBreakout(player, prop) {
   return trendingUp && (softMatchup || hotStreak);
 }
 
-function PlayerRankCard({ rank, player, prop, score, onCompare, onOpen }) {
+function PlayerRankCard({ rank, posRank, player, prop, score, onCompare, onOpen }) {
   const propLabel = PROP_LABELS[prop.prop_type] ?? prop.prop_type;
   const breakout  = isBreakout(player, prop);
 
@@ -403,6 +403,11 @@ function PlayerRankCard({ rank, player, prop, score, onCompare, onOpen }) {
         </div>
         <div className="text-[11px] text-muted-foreground mt-0.5">
           {player.team} vs {player.opponent} · {propLabel} {prop.line}
+          {posRank != null && (
+            <span className="ml-1 text-muted-foreground/60">
+              · {player.position} #{posRank}
+            </span>
+          )}
         </div>
         {(() => {
           const reasons = getMatchupReasons(player, prop);
@@ -1104,7 +1109,7 @@ export default function StartSit() {
               )}
             >
               <Shield className="w-3.5 h-3.5" />
-              Waiver Wire
+              Streaming &amp; Value
             </button>
           </div>
 
@@ -1235,10 +1240,11 @@ export default function StartSit() {
               </div>
             ) : (
               <div className="space-y-2">
-                {filteredRankings.map(({ player, prop, score }, idx) => (
+                {filteredRankings.map(({ player, prop, score, posRank }, idx) => (
                   <PlayerRankCard
                     key={player.id}
                     rank={idx + 1}
+                    posRank={posRank}
                     player={player}
                     prop={prop}
                     score={score}
@@ -1256,7 +1262,7 @@ export default function StartSit() {
           </>
         )}
 
-        {/* ── Waiver Wire ── */}
+        {/* ── Streaming & Value ── */}
         {rankTab === 'waiver' && (
           <>
             <div className="flex gap-4 text-xs text-muted-foreground items-center">
@@ -1275,12 +1281,12 @@ export default function StartSit() {
                   {waiverRankings.filter(r => r.waiverPriority === 'low').length}
                 </span> Low
               </span>
-              <span className="text-muted-foreground/50">· {waiverRankings.length} available · {scoringLabel}</span>
+              <span className="text-muted-foreground/50">· {waiverRankings.length} targets · {scoringLabel}</span>
             </div>
 
             <div className="rounded-xl bg-blue-500/8 border border-blue-500/15 px-3 py-2 text-[11px] text-blue-300 flex items-center gap-2">
               <Shield className="w-3.5 h-3.5 flex-shrink-0" />
-              Waiver scores include opportunity boosts for priority and injury upside on top of base fantasy rating.
+              Streaming &amp; value targets ranked by projected opportunity and matchup — check your league before adding.
             </div>
 
             <div className="space-y-2">
@@ -1299,7 +1305,7 @@ export default function StartSit() {
               ))}
               {waiverRankings.length === 0 && (
                 <div className="text-center text-muted-foreground text-sm py-12">
-                  No waiver players for this position
+                  No streaming targets for this position
                 </div>
               )}
             </div>
