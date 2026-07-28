@@ -1,7 +1,7 @@
 // Fetches live NFL roster (Sleeper API) + per-player projections + schedule/totals (ESPN).
 // Returns a player array with real projected FP attached, compatible with fantasyScore().
 
-const CACHE_KEY = 'locklab_nfl_live_v5';  // v5: whole-number yard lines
+const CACHE_KEY = 'locklab_nfl_live_v6';  // v6: K/DEF support + preseason fix
 const CACHE_TTL = 4 * 60 * 60 * 1000;    // 4h
 
 const ESPN_NORM = { WSH: 'WAS' };
@@ -12,7 +12,7 @@ const BAD_STATUS = new Set([
   'Physically Unable to Perform', 'Inactive',
 ]);
 
-const POSITIONS = new Set(['QB', 'RB', 'WR', 'TE']);
+const POSITIONS = new Set(['QB', 'RB', 'WR', 'TE', 'K', 'DEF']);
 
 const INT_TYPES = new Set(['passing_tds', 'rushing_tds', 'receiving_tds', 'receptions']);
 
@@ -33,6 +33,12 @@ const POS_DEFAULTS = {
   TE: [
     { prop_type: 'receiving_yards', line: 35.5, variance: 20 },
     { prop_type: 'receptions',      line: 3.5,  variance: 1.5 },
+  ],
+  K: [
+    { prop_type: 'field_goal_attempts', line: 2.5, variance: 1.0 },
+  ],
+  DEF: [
+    { prop_type: 'points_allowed', line: 20.5, variance: 8 },
   ],
 };
 
@@ -122,6 +128,14 @@ function buildPropsFromProjections(position, proj, gameTotal, isHome) {
     if (rec && rec > 0) {
       push({ ...makeProp('receptions', rec * 0.85, rec * 0.55, gameTotal, isHome), target_share: estTargetShare }, rec);
     }
+  } else if (position === 'K') {
+    const fgAtt = proj?.fg_att ?? 0;
+    if (fgAtt > 0) {
+      push(makeProp('field_goal_attempts', fgAtt, fgAtt * 0.4, gameTotal, isHome), fgAtt);
+    }
+  } else if (position === 'DEF') {
+    const ptsAllow = proj?.pts_allow ?? proj?.pts_allow_0 ?? 20.5;
+    push(makeProp('points_allowed', ptsAllow, 8, gameTotal, isHome), ptsAllow);
   }
 
   return props;
@@ -164,11 +178,13 @@ async function fetchESPNSchedule() {
     ),
   ]);
 
-  // Merge events, deduplicate by id, drop preseason (seasonType 1)
+  // Merge events, deduplicate by id, drop preseason (type 1 OR slug contains 'pre')
   const seen = new Set();
   const events = [...(regSeason?.events ?? []), ...(current?.events ?? [])]
     .filter(ev => {
-      if (ev.season?.type === 1) return false; // preseason
+      const t    = ev.season?.type;
+      const slug = (ev.season?.slug ?? '').toLowerCase();
+      if (t === 1 || slug.includes('pre')) return false; // preseason
       if (seen.has(ev.id)) return false;
       seen.add(ev.id);
       return true;
@@ -225,7 +241,7 @@ function buildPlayers(sleeperRaw, projections, { teamToOpp, teamToTotal, teamIsH
 
     // Generate props from real projected stats; fall back to position averages
     let props;
-    if (proj && (proj.pass_yd || proj.rush_yd || proj.rec_yd || proj.rec)) {
+    if (proj && (proj.pass_yd || proj.rush_yd || proj.rec_yd || proj.rec || proj.fg_att || proj.pts_allow != null)) {
       props = buildPropsFromProjections(p.position, proj, gameTotal, isHome);
     }
     if (!props || props.length === 0) {
@@ -258,7 +274,7 @@ function buildPlayers(sleeperRaw, projections, { teamToOpp, teamToTotal, teamIsH
     });
   }
 
-  const posOrder = { QB: 0, RB: 1, WR: 2, TE: 3 };
+  const posOrder = { QB: 0, RB: 1, WR: 2, TE: 3, K: 4, DEF: 5 };
   players.sort((a, b) => {
     if (a.is_starter !== b.is_starter) return a.is_starter ? -1 : 1;
     if (a.depth_chart_order !== b.depth_chart_order) return a.depth_chart_order - b.depth_chart_order;
@@ -310,5 +326,6 @@ export function clearLiveCache() {
     localStorage.removeItem(CACHE_KEY);
     localStorage.removeItem('locklab_nfl_live_v3');
     localStorage.removeItem('locklab_nfl_live_v4');
+    localStorage.removeItem('locklab_nfl_live_v5');
   } catch {}
 }

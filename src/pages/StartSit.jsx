@@ -24,7 +24,7 @@ const PROP_LABELS = {
   fantasy_points:  'Fantasy Pts',
 };
 
-const POSITIONS = ['QB', 'RB', 'WR', 'TE'];
+const POSITIONS = ['QB', 'RB', 'WR', 'TE', 'K', 'D/ST'];
 
 // ─── Shared UI primitives ─────────────────────────────────────────────────────
 
@@ -851,9 +851,12 @@ export default function StartSit() {
     setTeamFilter(null);
   }
 
+  // Map the UI position label to the Sleeper position code used in player data
+  const apiPosition = position === 'D/ST' ? 'DEF' : position;
+
   const rankings = useMemo(
-    () => liveStatus.loading ? [] : rankPlayers(activePlayers, position, settings),
-    [activePlayers, position, settings, liveStatus.loading],
+    () => liveStatus.loading ? [] : rankPlayers(activePlayers, apiPosition, settings),
+    [activePlayers, apiPosition, settings, liveStatus.loading],
   );
 
   const availableGames = useMemo(() => {
@@ -933,9 +936,11 @@ export default function StartSit() {
       });
   }, [activePlayers]);
 
+  const apiWaiverPosition = waiverPosition === 'D/ST' ? 'DEF' : waiverPosition;
+
   const waiverRankings = useMemo(
-    () => rankWaiverWire(waiverCandidates, waiverPosition, settings),
-    [waiverCandidates, waiverPosition, settings],
+    () => rankWaiverWire(waiverCandidates, apiWaiverPosition, settings),
+    [waiverCandidates, apiWaiverPosition, settings],
   );
 
   const scoreA = useMemo(
@@ -1109,7 +1114,7 @@ export default function StartSit() {
               )}
             >
               <Shield className="w-3.5 h-3.5" />
-              Streaming &amp; Value
+              Waiver Wire
             </button>
           </div>
 
@@ -1262,7 +1267,7 @@ export default function StartSit() {
           </>
         )}
 
-        {/* ── Streaming & Value ── */}
+        {/* ── Waiver Wire ── */}
         {rankTab === 'waiver' && (
           <>
             <div className="flex gap-4 text-xs text-muted-foreground items-center">
@@ -1281,12 +1286,12 @@ export default function StartSit() {
                   {waiverRankings.filter(r => r.waiverPriority === 'low').length}
                 </span> Low
               </span>
-              <span className="text-muted-foreground/50">· {waiverRankings.length} targets · {scoringLabel}</span>
+              <span className="text-muted-foreground/50">· {waiverRankings.length} available · {scoringLabel}</span>
             </div>
 
             <div className="rounded-xl bg-blue-500/8 border border-blue-500/15 px-3 py-2 text-[11px] text-blue-300 flex items-center gap-2">
               <Shield className="w-3.5 h-3.5 flex-shrink-0" />
-              Streaming &amp; value targets ranked by projected opportunity and matchup — check your league before adding.
+              Waiver wire targets ranked by projected value and matchup — verify availability in your league.
             </div>
 
             <div className="space-y-2">
@@ -1305,7 +1310,7 @@ export default function StartSit() {
               ))}
               {waiverRankings.length === 0 && (
                 <div className="text-center text-muted-foreground text-sm py-12">
-                  No streaming targets for this position
+                  No waiver wire players for this position
                 </div>
               )}
             </div>

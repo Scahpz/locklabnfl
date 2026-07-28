@@ -135,7 +135,7 @@ export default function LiveOdds() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
-  const [filter, setFilter] = useState('all');
+  const [filter, setFilter] = useState('week_1');
   const [countdown, setCountdown] = useState(REFRESH_MS / 1000);
   const [oddsSource, setOddsSource] = useState(null); // 'prizepicks' | 'odds_api' | 'season_avg'
   const [breakdownGame, setBreakdownGame] = useState(null);
@@ -243,20 +243,18 @@ export default function LiveOdds() {
   const today      = new Date().toLocaleDateString();
   const todayCount = games.filter(g => new Date(g.commence_time).toLocaleDateString() === today).length;
 
-  // Identify top 1-2 upset watch candidates across all loaded games
-  const upsetWatchGames = useMemo(() => {
-    if (!games.length) return [];
-    return games
-      .map(g => ({ game: g, analysis: analyzeGame(g, liveStats) }))
-      .filter(({ analysis }) => analysis.upsetWatch != null && analysis.upsetWatch.upsetScore >= 30)
-      .sort((a, b) => b.analysis.upsetWatch.upsetScore - a.analysis.upsetWatch.upsetScore)
-      .slice(0, 2);
-  }, [games, liveStats]);
-
   // Collect distinct week numbers from regular season games, sorted ascending
   const weekNumbers = [...new Set(
-    games.filter(g => !g.is_preseason && g.week != null).map(g => g.week)
+    games.filter(g => g.week != null).map(g => g.week)
   )].sort((a, b) => a - b);
+
+  // Auto-select the first available week whenever games load and the current filter
+  // points to a week that doesn't exist in the data (e.g. initial 'week_1' before fetch)
+  useEffect(() => {
+    if (!weekNumbers.length) return;
+    const currentWeekExists = weekNumbers.some(w => `week_${w}` === filter);
+    if (!currentWeekExists) setFilter(`week_${weekNumbers[0]}`);
+  }, [weekNumbers.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filtered = games.filter(g => {
     const gDate = new Date(g.commence_time).toLocaleDateString();
@@ -266,8 +264,18 @@ export default function LiveOdds() {
     }
     if (filter === 'today')    return gDate === today;
     if (filter === 'upcoming') return gDate !== today;
-    return true; // 'all' — preseason already excluded by fetchESPNGames
+    return true;
   });
+
+  // Upset picks are scoped to the currently visible week so each tab has its own banner
+  const upsetWatchGames = useMemo(() => {
+    if (!filtered.length) return [];
+    return filtered
+      .map(g => ({ game: g, analysis: analyzeGame(g, liveStats) }))
+      .filter(({ analysis }) => analysis.upsetWatch != null && analysis.upsetWatch.upsetScore >= 30)
+      .sort((a, b) => b.analysis.upsetWatch.upsetScore - a.analysis.upsetWatch.upsetScore)
+      .slice(0, 2);
+  }, [filtered, liveStats]);
 
   return (
     <div className="space-y-6">
@@ -404,7 +412,6 @@ export default function LiveOdds() {
       {games.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5">
           {[
-            { key: 'all',   label: `All (${games.length})` },
             ...weekNumbers.map(w => ({
               key:   `week_${w}`,
               label: `Week ${w} (${games.filter(g => g.week === w).length})`,

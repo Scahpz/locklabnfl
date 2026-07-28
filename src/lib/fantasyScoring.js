@@ -6,6 +6,7 @@ import { getLeagueSettings } from '@/lib/leagueSettings';
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 
 function getDefStatKey(propType, position) {
+  if (position === 'K' || position === 'DEF') return null; // no yards-allowed stat for K/DST
   if (propType === 'passing_yards' || propType === 'passing_tds') return 'pass_yds_allowed';
   if (propType === 'rushing_yards' || propType === 'rushing_tds') return 'rush_yds_allowed';
   if (position === 'TE') return 'rec_yds_allowed_te';
@@ -41,20 +42,15 @@ function matchupRatingLabel(tier2Score) {
 // ─── Positional constants ─────────────────────────────────────────────────────
 
 // "Elite week" ceiling per position (not theoretical max, just a great week)
-const POS_TOP_FP = { QB: 28, RB: 22, WR: 20, TE: 16 };
+const POS_TOP_FP = { QB: 28, RB: 22, WR: 20, TE: 16, K: 13, DEF: 18 };
 
 // Replacement-level FP — the floor of a waiver-wire starter in a 12-team league.
-// PAR = projFP - replacementFP. Cross-position comparisons are fair because
-// a TE who is 8 pts above replacement is worth more than an RB 8 pts above replacement
-// uses the same tier1 scale.
-const REPLACEMENT_LEVEL = { QB: 12, RB: 4, WR: 5, TE: 2 };
+const REPLACEMENT_LEVEL = { QB: 12, RB: 4, WR: 5, TE: 2, K: 3, DEF: 4 };
 
 // Roster-slot based START/FLEX thresholds for a 12-team 1QB/2RB/2WR/1TE/1FLEX league.
 // Scaled proportionally by s.leagueSize at runtime.
-// START = players expected to start leaguewide each week.
-// FLEX  = borderline / streaming tier below that.
-const STARTER_COUNTS = { QB: 13, RB: 26, WR: 26, TE: 13 };
-const FLEX_COUNTS    = { QB: 9,  RB: 18, WR: 18, TE: 7  };
+const STARTER_COUNTS = { QB: 13, RB: 26, WR: 26, TE: 13, K: 12, DEF: 12 };
+const FLEX_COUNTS    = { QB: 9,  RB: 18, WR: 18, TE: 7,  K: 4,  DEF: 5  };
 
 // ─── Dynamic variance ─────────────────────────────────────────────────────────
 // Coefficient of variation (std / mean) for floor/ceiling spread.
@@ -163,12 +159,14 @@ export function fantasyScore(player, prop, settings) {
   // ── TIER 2 – Matchup (20 pts) ─────────────────────────────────────────────
 
   const defStatKey   = getDefStatKey(propType, position);
-  const teamDefStats = TEAM_STATS[opponent] ?? null;
+  const teamDefStats = (defStatKey && opponent) ? TEAM_STATS[opponent] ?? null : null;
   const oppStat      = teamDefStats ? teamDefStats[defStatKey] : null;
-  const leagueAvg    = NFL_LEAGUE_AVGS[defStatKey] ?? 100;
+  const leagueAvg    = defStatKey ? NFL_LEAGUE_AVGS[defStatKey] ?? 100 : 100;
 
   let defScore = 0.5 * 12;
-  let defTip   = 'Defense data unavailable — neutral';
+  let defTip   = position === 'K' || position === 'DEF'
+    ? 'Matchup N/A — scored on projected FP'
+    : 'Defense data unavailable — neutral';
   if (oppStat != null) {
     defScore = clamp(0.5 + (oppStat - leagueAvg) / leagueAvg * 2, 0, 1) * 12;
     defTip   = `${opponent} allows ${oppStat} (avg ${leagueAvg})`;
@@ -445,10 +443,12 @@ export function compareStartSit(playerA, propA, playerB, propB, settings) {
 // ─── Rankings ─────────────────────────────────────────────────────────────────
 
 const PRIMARY_PROP_TYPE = {
-  QB: 'passing_yards',
-  RB: 'rushing_yards',
-  WR: 'receiving_yards',
-  TE: 'receiving_yards',
+  QB:  'passing_yards',
+  RB:  'rushing_yards',
+  WR:  'receiving_yards',
+  TE:  'receiving_yards',
+  K:   'field_goal_attempts',
+  DEF: 'points_allowed',
 };
 
 // Score all players at one position, sort by total, then assign START/FLEX/SIT
@@ -502,7 +502,7 @@ export function rankPlayers(players, position = 'all', settings) {
   // For "All" tab: explicitly run per-position and merge.
   // This guarantees the same code path as each individual position tab —
   // same prop selection, same PAR normalization, same results.
-  const positions = position === 'all' ? ['QB', 'RB', 'WR', 'TE'] : [position];
+  const positions = position === 'all' ? ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'] : [position];
 
   return positions
     .flatMap(pos => scorePosition(players, pos, s))
@@ -511,7 +511,7 @@ export function rankPlayers(players, position = 'all', settings) {
 
 export function rankWaiverWire(players, position = 'all', settings) {
   const s = settings || getLeagueSettings();
-  const positions = position === 'all' ? ['QB', 'RB', 'WR', 'TE'] : [position];
+  const positions = position === 'all' ? ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'] : [position];
 
   return positions
     .flatMap(pos =>
