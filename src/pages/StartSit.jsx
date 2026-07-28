@@ -24,7 +24,7 @@ const PROP_LABELS = {
   fantasy_points:  'Fantasy Pts',
 };
 
-const POSITIONS = ['all', 'QB', 'RB', 'WR', 'TE'];
+const POSITIONS = ['QB', 'RB', 'WR', 'TE'];
 
 // ─── Shared UI primitives ─────────────────────────────────────────────────────
 
@@ -741,7 +741,7 @@ function PlayerPickerModal({ players: allPlayers, onSelect, onClose, excludePlay
         </div>
 
         <div className="flex gap-1 p-3 border-b border-white/6 flex-shrink-0">
-          {POSITIONS.map(pos => (
+          {['all', ...POSITIONS].map(pos => (
             <button
               key={pos}
               onClick={() => setPosFilter(pos)}
@@ -806,8 +806,8 @@ export default function StartSit() {
   const [settings, setSettings]                   = useState(() => getLeagueSettings());
   const [showSettings, setShowSettings]           = useState(false);
   const [rankTab, setRankTab]                     = useState('rankings');
-  const [position, setPosition]                   = useState('all');
-  const [waiverPosition, setWaiverPosition]       = useState('all');
+  const [position, setPosition]                   = useState('QB');
+  const [waiverPosition, setWaiverPosition]       = useState('QB');
   const [compareA, setCompareA]                   = useState(null);
   const [compareB, setCompareB]                   = useState(null);
   const [propA, setPropA]                         = useState(null);
@@ -1125,7 +1125,7 @@ export default function StartSit() {
                     : 'text-muted-foreground hover:text-foreground hover:bg-white/5 border border-transparent',
                 )}
               >
-                {pos === 'all' ? 'All' : pos}
+                {pos}
               </button>
             ))}
           </div>
