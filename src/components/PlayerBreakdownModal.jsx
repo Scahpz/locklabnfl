@@ -340,7 +340,7 @@ function LSChartTooltip({ active, payload, pos }) {
 
 // ─── Season Stats section ─────────────────────────────────────────────────────
 
-function SeasonStatsSection({ lsLog, onRetryLS, pos, score }) {
+function SeasonStatsSection({ lsLog, onRetryLS, pos, score, opponent = '—' }) {
   const [seasonFilter, setSeasonFilter] = useState('last');
   const [gameFilter,   setGameFilter]   = useState('L10');
 
@@ -525,6 +525,67 @@ function SeasonStatsSection({ lsLog, onRetryLS, pos, score }) {
           <p className="text-[10px] text-muted-foreground">
             Real 2025 half-PPR stats · Source: Sleeper · Def rank = current season · Hover for game details
           </p>
+
+          {/* Avg stats line */}
+          {(() => {
+            const hasPass = slice.some(g => g.passYd != null);
+            const hasRush = slice.some(g => g.rushYd != null);
+            const hasRec  = slice.some(g => g.recYd  != null);
+            const avgStat = key => { const vals = slice.map(g => g[key]).filter(v => v != null); return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length * 10) / 10 : null; };
+            const stats = [
+              hasPass && { label: 'Pass Yds', value: avgStat('passYd') },
+              hasPass && { label: 'Pass TDs',  value: avgStat('passTd') },
+              hasRush && { label: 'Rush Yds', value: avgStat('rushYd') },
+              hasRec  && { label: 'Rec',       value: avgStat('rec')   },
+              hasRec  && { label: 'Rec Yds',  value: avgStat('recYd')  },
+              hasRec  && { label: 'Rec TDs',   value: avgStat('recTd') },
+            ].filter(s => s && s.value != null);
+            if (!stats.length) return null;
+            return (
+              <div className="pt-2 border-t border-white/6">
+                <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1.5">Avg Stats Line ({gameFilter})</div>
+                <div className="flex flex-wrap gap-4">
+                  {stats.map(s => (
+                    <div key={s.label} className="text-center">
+                      <div className="text-sm font-bold text-foreground">{s.value}</div>
+                      <div className="text-[9px] text-muted-foreground">{s.label}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* vs. current opponent */}
+          {opponent && opponent !== 'TBD' && opponent !== '—' && (() => {
+            const vsGames = lsLog.filter(g => g.opponent === opponent).slice(-3);
+            const vsAvg   = vsGames.length ? Math.round(vsGames.reduce((a, g) => a + g.fp, 0) / vsGames.length * 10) / 10 : null;
+            return (
+              <div className="pt-2 border-t border-white/6">
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="text-[10px] text-muted-foreground uppercase tracking-wider">vs {opponent} · 2025</div>
+                  {vsAvg != null && <div className="text-[10px] font-semibold text-primary">{vsAvg} FP avg</div>}
+                </div>
+                {vsGames.length === 0 ? (
+                  <p className="text-[11px] text-muted-foreground">No meetings vs {opponent} in 2025.</p>
+                ) : (
+                  <div className="space-y-1">
+                    {vsGames.map(g => (
+                      <div key={g.week} className="flex items-center justify-between text-[11px] px-2 py-1.5 rounded-lg bg-white/3">
+                        <span className="text-muted-foreground">Wk {g.week}</span>
+                        <div className="flex gap-2 text-[10px] text-muted-foreground">
+                          {g.passYd != null && <span>{g.passYd} PaYd{g.passTd ? ` ${g.passTd}TD` : ''}</span>}
+                          {g.rushYd != null && g.rushYd > 0 && <span>{g.rushYd} RuYd</span>}
+                          {g.recYd  != null && <span>{g.rec != null ? `${g.rec}rec ` : ''}{g.recYd} RcYd{g.recTd ? ` ${g.recTd}TD` : ''}</span>}
+                        </div>
+                        <span className={cn('font-bold', g.fp >= 20 ? 'text-emerald-400' : g.fp >= 12 ? 'text-amber-400' : 'text-foreground')}>{g.fp} FP</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </>
       )}
     </div>
@@ -726,6 +787,7 @@ export default function PlayerBreakdownModal({ entry, onClose }) {
                 onRetryLS={() => setLsLog(null)}
                 pos={pos}
                 score={score}
+                opponent={opponent}
               />
             </Section>
 

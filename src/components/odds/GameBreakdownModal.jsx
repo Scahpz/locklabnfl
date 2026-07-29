@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X, Shield, Target, BarChart2, Zap, AlertTriangle,
@@ -12,6 +12,69 @@ import { analyzeGame, normalizeForRadar, TEAM_OFFENSE, LEAGUE_OFFENSE_AVG } from
 import { TEAM_STATS, NFL_LEAGUE_AVGS } from '@/lib/teamStats';
 import TeamLogo from '@/components/common/TeamLogo';
 import { cn } from '@/lib/utils';
+
+// ─── Season history (2025 regular season) ─────────────────────────────────────
+
+const HIST_CACHE_KEY = 'locklab_nfl_hist_2025';
+
+async function fetchSeasonHistory() {
+  try {
+    const cached = sessionStorage.getItem(HIST_CACHE_KEY);
+    if (cached) return JSON.parse(cached);
+  } catch {}
+  try {
+    const res = await fetch(
+      'https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard' +
+      '?dates=20250901-20260115&limit=300&seasontype=2'
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const ABV = { WSH: 'WAS', JAC: 'JAX' };
+    const games = (data.events ?? []).flatMap(ev => {
+      const comp = ev.competitions?.[0];
+      if (!comp?.status?.type?.completed) return [];
+      const home = comp.competitors?.find(c => c.homeAway === 'home');
+      const away = comp.competitors?.find(c => c.homeAway === 'away');
+      if (!home || !away) return [];
+      const hA  = ABV[home.team.abbreviation] ?? home.team.abbreviation;
+      const aA  = ABV[away.team.abbreviation] ?? away.team.abbreviation;
+      const hPts = parseInt(home.score, 10);
+      const aPts = parseInt(away.score, 10);
+      if (isNaN(hPts) || isNaN(aPts)) return [];
+      return [{ hA, aA, hPts, aPts, date: ev.date, week: ev.week?.number ?? null }];
+    });
+    try { sessionStorage.setItem(HIST_CACHE_KEY, JSON.stringify(games)); } catch {}
+    return games;
+  } catch { return null; }
+}
+
+function buildTeamHistory(games, teamA, teamB) {
+  if (!games?.length) return null;
+  const byDate = (a, b) => new Date(a.date) - new Date(b.date);
+  const aGames  = games.filter(g => g.hA === teamA || g.aA === teamA).sort(byDate);
+  const bGames  = games.filter(g => g.hA === teamB || g.aA === teamB).sort(byDate);
+  const h2hGames = games.filter(g =>
+    (g.hA === teamA && g.aA === teamB) || (g.hA === teamB && g.aA === teamA)
+  ).sort(byDate);
+
+  function rec(list, team) {
+    let w = 0, l = 0, pf = 0, pa = 0;
+    for (const g of list) {
+      const my = g.hA === team ? g.hPts : g.aPts;
+      const op = g.hA === team ? g.aPts : g.hPts;
+      pf += my; pa += op;
+      if (my > op) w++; else l++;
+    }
+    return { w, l, n: list.length, pf: list.length ? Math.round(pf / list.length) : 0, pa: list.length ? Math.round(pa / list.length) : 0 };
+  }
+
+  return {
+    [teamA]: { season: rec(aGames, teamA), last3: rec(aGames.slice(-3), teamA), last5: rec(aGames.slice(-5), teamA), last10: rec(aGames.slice(-10), teamA), h2h: rec(h2hGames, teamA) },
+    [teamB]: { season: rec(bGames, teamB), last3: rec(bGames.slice(-3), teamB), last5: rec(bGames.slice(-5), teamB), last10: rec(bGames.slice(-10), teamB), h2h: rec(h2hGames, teamB) },
+    h2hGames,
+    avgH2HTotal: h2hGames.length ? Math.round(h2hGames.reduce((s, g) => s + g.hPts + g.aPts, 0) / h2hGames.length) : null,
+  };
+}
 
 // ─── Mini helpers ─────────────────────────────────────────────────────────────
 
@@ -140,6 +203,11 @@ export default function GameBreakdownModal({ game, onClose, liveStats = null }) 
   const riskLevel = confidence >= 75 ? { label: 'Low', color: 'emerald' }
                   : confidence >= 63 ? { label: 'Medium', color: 'amber' }
                   : { label: 'High', color: 'red' };
+
+  const [hist, setHist] = useState(null);
+  useEffect(() => {
+    fetchSeasonHistory().then(games => setHist(games ? buildTeamHistory(games, aA, hA) : null));
+  }, [aA, hA]);
 
   return (
     <AnimatePresence>
@@ -287,6 +355,95 @@ export default function GameBreakdownModal({ game, onClose, liveStats = null }) 
             <SectionToggle title="AI Scouting Report" icon={Target}>
               <p className="text-[13px] text-foreground/90 leading-relaxed">{explanation}</p>
             </SectionToggle>
+
+            {/* ── 2025 Season History ── */}
+            {hist && (
+              <SectionToggle title="2025 Season History" icon={BarChart2} defaultOpen={false}>
+                <div className="space-y-3">
+                  {/* Season records */}
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    {[aA, null, hA].map((team, i) => {
+                      if (!team) return (
+                        <div key="mid" className="flex flex-col items-center justify-center">
+                          <span className="text-[9px] text-muted-foreground uppercase tracking-wider">2025 Record</span>
+                        </div>
+                      );
+                      const s = hist[team]?.season ?? { w: 0, l: 0, pf: 0, pa: 0 };
+                      return (
+                        <div key={team} className="rounded-xl bg-white/4 border border-white/8 p-2.5">
+                          <TeamLogo team={team} className="w-7 h-7 mx-auto mb-1" />
+                          <div className="text-[10px] text-muted-foreground">{team}</div>
+                          <div className="text-base font-black text-foreground">{s.w}-{s.l}</div>
+                          <div className="text-[9px] text-muted-foreground">{s.pf} PF / {s.pa} PA</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Recent form table */}
+                  <div className="rounded-xl bg-white/3 border border-white/8 overflow-hidden">
+                    <div className="grid grid-cols-5 text-[9px] text-muted-foreground uppercase tracking-wider px-3 py-2 bg-white/3 border-b border-white/8">
+                      <span className="col-span-2 text-left">{aA}</span>
+                      <span className="text-center">Period</span>
+                      <span className="col-span-2 text-right">{hA}</span>
+                    </div>
+                    {[
+                      { label: 'Last 3',  aR: hist[aA]?.last3,  hR: hist[hA]?.last3  },
+                      { label: 'Last 5',  aR: hist[aA]?.last5,  hR: hist[hA]?.last5  },
+                      { label: 'Last 10', aR: hist[aA]?.last10, hR: hist[hA]?.last10 },
+                      { label: 'H2H',     aR: hist[aA]?.h2h,    hR: hist[hA]?.h2h    },
+                    ].map(({ label, aR, hR }) => {
+                      if (!aR || !hR) return null;
+                      return (
+                        <div key={label} className="grid grid-cols-5 px-3 py-2 border-b border-white/5 last:border-0">
+                          <span className={cn('col-span-2 text-left text-[11px] font-bold', aR.w > aR.l ? 'text-emerald-400' : 'text-foreground')}>{aR.w}-{aR.l}</span>
+                          <span className="text-center text-[9px] text-muted-foreground">{label}</span>
+                          <span className={cn('col-span-2 text-right text-[11px] font-bold', hR.w > hR.l ? 'text-emerald-400' : 'text-foreground')}>{hR.w}-{hR.l}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Avg points + H2H total */}
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="rounded-xl bg-white/3 border border-white/8 p-2.5">
+                      <div className="text-base font-black text-foreground">{hist[aA]?.season?.pf ?? '—'}</div>
+                      <div className="text-[9px] text-muted-foreground">{aA} Avg PF/G</div>
+                    </div>
+                    <div className="rounded-xl bg-white/3 border border-white/8 p-2.5">
+                      <div className="text-base font-black text-primary">{hist.avgH2HTotal ?? '—'}</div>
+                      <div className="text-[9px] text-muted-foreground">H2H Avg Total</div>
+                    </div>
+                    <div className="rounded-xl bg-white/3 border border-white/8 p-2.5">
+                      <div className="text-base font-black text-foreground">{hist[hA]?.season?.pf ?? '—'}</div>
+                      <div className="text-[9px] text-muted-foreground">{hA} Avg PF/G</div>
+                    </div>
+                  </div>
+
+                  {/* Last 3 H2H matchups */}
+                  {hist.h2hGames?.length > 0 && (
+                    <div>
+                      <div className="text-[9px] text-muted-foreground uppercase tracking-wider mb-1.5">Recent Matchups ({aA} @ {hA})</div>
+                      <div className="space-y-1">
+                        {hist.h2hGames.slice(-3).reverse().map((g, i) => {
+                          const aIsHome = g.hA === aA;
+                          const aPts = aIsHome ? g.hPts : g.aPts;
+                          const hPts = aIsHome ? g.aPts : g.hPts;
+                          return (
+                            <div key={i} className="flex items-center justify-between text-[11px] px-3 py-1.5 rounded-lg bg-white/3">
+                              <span className={cn('font-bold', aPts > hPts ? 'text-emerald-400' : 'text-foreground')}>{aA} {aPts}</span>
+                              <span className="text-[9px] text-muted-foreground">{g.week ? `Wk ${g.week}` : new Date(g.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                              <span className={cn('font-bold', hPts > aPts ? 'text-emerald-400' : 'text-foreground')}>{hA} {hPts}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  <p className="text-[9px] text-muted-foreground">Source: ESPN · 2025 NFL regular season · H2H = direct matchups only</p>
+                </div>
+              </SectionToggle>
+            )}
 
             {/* ── Upset Watch ── */}
             {upsetWatch && (

@@ -1,7 +1,7 @@
 // Fetches live NFL roster (Sleeper API) + per-player projections + schedule/totals (ESPN).
 // Returns a player array with real projected FP attached, compatible with fantasyScore().
 
-const CACHE_KEY = 'locklab_nfl_live_v6';  // v6: K/DEF support + preseason fix
+const CACHE_KEY = 'locklab_nfl_live_v7';  // v7: estimated FP for preseason (no Sleeper projections)
 const CACHE_TTL = 4 * 60 * 60 * 1000;    // 4h
 
 const ESPN_NORM = { WSH: 'WAS' };
@@ -224,6 +224,17 @@ function buildScheduleMaps({ events = [] } = {}) {
   return { teamToOpp, teamToTotal, teamIsHome };
 }
 
+// Estimate PPR fantasy points from default props when no Sleeper projection exists.
+// Keeps players visible in preseason rankings even without week-specific data.
+function estimateFPPPR(props) {
+  const passing   = props.find(p => p.prop_type === 'passing_yards')?.projection    ?? 0;
+  const rushing   = props.find(p => p.prop_type === 'rushing_yards')?.projection    ?? 0;
+  const receiving = props.find(p => p.prop_type === 'receiving_yards')?.projection  ?? 0;
+  const rec       = props.find(p => p.prop_type === 'receptions')?.projection       ?? 0;
+  const fgAtt     = props.find(p => p.prop_type === 'field_goal_attempts')?.projection ?? 0;
+  return parseFloat((passing * 0.04 + rushing * 0.1 + receiving * 0.1 + rec * 1.0 + fgAtt * 2).toFixed(1));
+}
+
 function buildPlayers(sleeperRaw, projections, { teamToOpp, teamToTotal, teamIsHome }) {
   const players = [];
 
@@ -277,10 +288,11 @@ function buildPlayers(sleeperRaw, projections, { teamToOpp, teamToTotal, teamIsH
       depth_chart_order:  p.depth_chart_order ?? 99,
       injury_status:      injStatus,
       injury_note:        injNote,
-      // Real Sleeper per-player projections (null if not found)
-      proj_pts_ppr:       proj?.pts_ppr       ?? null,
-      proj_pts_half_ppr:  proj?.pts_half_ppr  ?? null,
-      proj_pts_std:       proj?.pts_std       ?? null,
+      // Real Sleeper per-player projections; fall back to prop-derived estimate
+      // when Sleeper has no data (preseason) so scorePosition doesn't drop the player.
+      proj_pts_ppr:       proj?.pts_ppr       ?? (proj === null && props.length > 0 ? estimateFPPPR(props) : null),
+      proj_pts_half_ppr:  proj?.pts_half_ppr  ?? (proj === null && props.length > 0 ? estimateFPPPR(props) : null),
+      proj_pts_std:       proj?.pts_std       ?? (proj === null && props.length > 0 ? estimateFPPPR(props) : null),
       proj_rec:           proj?.rec           ?? null,
       proj_pass_td:       proj?.pass_td       ?? null,
       proj_rush_yd:       proj?.rush_yd       ?? null,
@@ -343,5 +355,6 @@ export function clearLiveCache() {
     localStorage.removeItem('locklab_nfl_live_v3');
     localStorage.removeItem('locklab_nfl_live_v4');
     localStorage.removeItem('locklab_nfl_live_v5');
+    localStorage.removeItem('locklab_nfl_live_v6');
   } catch {}
 }
