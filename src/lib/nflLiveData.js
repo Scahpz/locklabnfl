@@ -174,13 +174,13 @@ async function fetchESPNSchedule() {
     tryFetch('https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard'),
     tryFetch(
       `https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard` +
-      `?dates=${year}0901-${year}1231&limit=200`,
+      `?dates=${year}0901-${year + 1}0115&limit=300`,
     ),
   ]);
 
   // Merge events, deduplicate by id, drop preseason (type 1 OR slug contains 'pre')
   const seen = new Set();
-  const events = [...(regSeason?.events ?? []), ...(current?.events ?? [])]
+  const allRegular = [...(regSeason?.events ?? []), ...(current?.events ?? [])]
     .filter(ev => {
       const t    = ev.season?.type;
       const slug = (ev.season?.slug ?? '').toLowerCase();
@@ -189,6 +189,13 @@ async function fetchESPNSchedule() {
       seen.add(ev.id);
       return true;
     });
+
+  // Filter to the earliest week so buildScheduleMaps maps Week 1 opponents only
+  const minWeek = allRegular.reduce((m, ev) => {
+    const w = ev.week?.number;
+    return (w != null && w < m) ? w : m;
+  }, Infinity);
+  const events = minWeek === Infinity ? allRegular : allRegular.filter(ev => ev.week?.number === minWeek);
 
   // Use season year from regular-season response; week from first event if available
   const seasonYear = regSeason?.season?.year ?? current?.season?.year ?? year;
@@ -239,15 +246,24 @@ function buildPlayers(sleeperRaw, projections, { teamToOpp, teamToTotal, teamIsH
     // Real Sleeper projection for this player this week
     const proj = projections?.[id] ?? null;
 
-    // Generate props from real projected stats; fall back to position averages
+    // Generate props from real projected stats; fall back to position averages only
+    // when Sleeper has no projection at all (proj === null). If Sleeper has a
+    // projection entry but all stats are zero (backup QB, taxi-squad player),
+    // leave props empty so they're excluded from waiver wire rankings.
     let props;
     if (proj && (proj.pass_yd || proj.rush_yd || proj.rec_yd || proj.rec || proj.fg_att || proj.pts_allow != null)) {
       props = buildPropsFromProjections(p.position, proj, gameTotal, isHome);
     }
     if (!props || props.length === 0) {
-      props = (POS_DEFAULTS[p.position] ?? []).map(({ prop_type, line, variance }) =>
-        makeProp(prop_type, line, variance, gameTotal, isHome),
-      );
+      if (proj === null) {
+        // No Sleeper data at all — use position defaults so the player still appears in rankings
+        props = (POS_DEFAULTS[p.position] ?? []).map(({ prop_type, line, variance }) =>
+          makeProp(prop_type, line, variance, gameTotal, isHome),
+        );
+      } else {
+        // Sleeper has this player but projected zero volume — skip; don't fabricate a 246-yd line
+        props = [];
+      }
     }
 
     players.push({

@@ -340,7 +340,7 @@ export default function GameOddsCard({ game, onOpen, liveStats = null }) {
           <div className="px-4 pb-2">
             <div className="flex items-center justify-between mb-1">
               <span className="text-[10px] font-semibold text-blue-400">{game.awayAbv} {awayPct}%</span>
-              <span className="text-[9px] text-muted-foreground uppercase tracking-wide">Win Probability</span>
+              <span className="text-[9px] text-muted-foreground uppercase tracking-wide">Market Win %</span>
               <span className="text-[10px] font-semibold text-green-400">{homePct}% {game.homeAbv}</span>
             </div>
             <div className="h-2 rounded-full overflow-hidden flex bg-secondary/50">
@@ -355,7 +355,7 @@ export default function GameOddsCard({ game, onOpen, liveStats = null }) {
             {/* AI prediction summary strip */}
             <div className="flex items-center justify-between mt-2 pt-2 border-t border-white/6">
               <span className="text-[10px] text-muted-foreground">
-                AI Pick: <span className="text-primary font-bold">{analysis.spreadPick} −{Math.abs(analysis.ourSpread).toFixed(1)}</span>
+                AI Pick: <span className="text-primary font-bold">{analysis.spreadPick} {analysis.ourSpread > 0 ? '-' : '+'}{Math.abs(analysis.ourSpread).toFixed(1)}</span>
               </span>
               <span className="text-[10px] text-muted-foreground">
                 Total: <span className={cn('font-bold', analysis.ouPick === 'OVER' ? 'text-emerald-400' : 'text-red-400')}>{analysis.ouPick}</span>

@@ -230,20 +230,38 @@ function predictScore(offRaw, defRaw, isHome) {
   return Math.round(predicted * 10) / 10;
 }
 
-function randNorm(mean, sd) {
+// Seeded PRNG (Mulberry32) — same game always produces the same simulation result
+function mulberry32(seed) {
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x6D2B79F5) >>> 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function hashStr(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
+function randNorm(mean, sd, rng) {
   let u, v;
-  do { u = Math.random(); } while (u === 0);
-  do { v = Math.random(); } while (v === 0);
+  do { u = rng(); } while (u === 0);
+  do { v = rng(); } while (v === 0);
   return mean + Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v) * sd;
 }
 
-export function runSimulation(homeScore, awayScore, ouLine, n = 5000) {
+export function runSimulation(homeScore, awayScore, ouLine, n = 5000, seed = 42) {
+  const rng = mulberry32(seed);
   const SD = 10.5;
   let hw = 0, aw = 0, hc = 0, ac = 0, ov = 0, un = 0;
   const spread = homeScore - awayScore;
   for (let i = 0; i < n; i++) {
-    const hs = Math.max(0, randNorm(homeScore, SD));
-    const as = Math.max(0, randNorm(awayScore, SD));
+    const hs = Math.max(0, randNorm(homeScore, SD, rng));
+    const as = Math.max(0, randNorm(awayScore, SD, rng));
     const m  = hs - as;
     if (m > 0) hw++; else aw++;
     if (m > -spread) hc++; else ac++;
@@ -449,12 +467,30 @@ export function normalizeForRadar(rawAbv) {
 // breakdown explaining exactly why the underdog has a legitimate shot.
 function computeUpsetWatch({ hA, aA, homeScore, awayScore, sim, bookSpread,
                              homeOff, awayOff, homeDef, awayDef }) {
-  const margin   = homeScore - awayScore;               // positive = home favored
-  const absMar   = Math.abs(margin);
-  const favored  = margin >= 0 ? hA : aA;
-  const underdog = favored === hA ? aA : hA;
-  const udIsHome = underdog === hA;
+  // Use the MARKET spread to identify the true underdog — this is what makes
+  // an upset meaningful (market is wrong, not just the model self-disagreeing).
+  // bookSpread = game.spread.home: negative = home is book favorite.
+  let favored, underdog, udIsHome, absMar;
+  if (bookSpread != null) {
+    absMar    = Math.abs(bookSpread);
+    // Negative home spread → home team is book favorite
+    if (bookSpread <= 0) {
+      favored = hA; underdog = aA; udIsHome = false;
+    } else {
+      favored = aA; underdog = hA; udIsHome = true;
+    }
+  } else {
+    // No book data → fall back to model margin
+    const margin = homeScore - awayScore;
+    absMar = Math.abs(margin);
+    if (margin >= 0) {
+      favored = hA; underdog = aA; udIsHome = false;
+    } else {
+      favored = aA; underdog = hA; udIsHome = true;
+    }
+  }
 
+  // Win probability for the MARKET underdog from the simulation
   const udWinPct  = udIsHome ? sim.homeWinPct : sim.awayWinPct;
   const udOff     = udIsHome ? homeOff  : awayOff;
   const favOff    = udIsHome ? awayOff  : homeOff;
@@ -464,9 +500,9 @@ function computeUpsetWatch({ hA, aA, homeScore, awayScore, sim, bookSpread,
   const udQB  = QB_TIER[normAbv(underdog)] ?? 75;
   const favQB = QB_TIER[normAbv(favored)]  ?? 75;
 
-  // Must be a genuine underdog and have a real shot
-  if (absMar < 2)              return null;
-  if (udWinPct < 26 || udWinPct > 49) return null;
+  // Must be a genuine underdog (spread at least 2 pts) with a real shot
+  if (absMar < 2)    return null;
+  if (udWinPct < 26) return null; // model agrees it's a blowout — no upset case
 
   let score = 0;
   const reasons = [];
@@ -548,6 +584,9 @@ function computeUpsetWatch({ hA, aA, homeScore, awayScore, sim, bookSpread,
     keyFactors.push({ label: `${underdog} Defense`, description: `Allows only ${udDef.pass_yds_allowed} pass yds/G — elite defensive unit` });
   }
 
+  // Model-projected upset (market underdog is model favorite) gets an automatic boost
+  if (udWinPct > 50) score = Math.max(score, 55);
+
   if (score < 30) return null;
 
   // Upset tier label
@@ -598,7 +637,7 @@ export function analyzeGame(game, liveStats = null) {
   const hS = predictScoreLive(hA, aA, true);
   const aS = predictScoreLive(aA, hA, false);
   const ouLine = game.total?.line ?? null;
-  const sim    = runSimulation(hS, aS, ouLine);
+  const sim    = runSimulation(hS, aS, ouLine, 5000, hashStr(game.id ?? (hA + aA)));
   const adv    = computeAdvantages(hA, aA);
   const posMaps = positionMatchups(hA, aA);
   const explanation = generateExplanation(hA, aA, hS, aS, sim, adv);
@@ -663,9 +702,9 @@ export function getGameIndicators(analysis) {
                                     indicators.push({ icon: '🚨', label: upsetWatch.tier, color: upsetWatch.tierColor });
   if (confidence >= 83)             indicators.push({ icon: '⭐', label: 'AI Lock',     color: 'amber'   });
   else if (confidence >= 76)        indicators.push({ icon: '🔥', label: 'Best Bet',    color: 'orange'  });
-  if (sim.overPct >= 65 || sim.underPct >= 65)
+  if (sim.overPct >= 72 || sim.underPct >= 72)
                                     indicators.push({ icon: '📈', label: 'Sharp Edge',  color: 'blue'    });
-  if (bookSpread != null && Math.abs(ourSpread - bookSpread) >= 2.5)
+  if (bookSpread != null && Math.abs(ourSpread - bookSpread) >= 5)
                                     indicators.push({ icon: '💰', label: 'Value Pick',  color: 'emerald' });
   if (confidence < 64 && !upsetWatch)
                                     indicators.push({ icon: '⚠️', label: 'Risky Bet',  color: 'red'     });

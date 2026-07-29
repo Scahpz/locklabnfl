@@ -402,7 +402,7 @@ function PlayerRankCard({ rank, posRank, player, prop, score, onCompare, onOpen 
           )}
         </div>
         <div className="text-[11px] text-muted-foreground mt-0.5">
-          {player.team} vs {player.opponent} · {propLabel} {prop.line}
+          {player.team} {prop?.is_home ? 'vs' : '@'} {player.opponent} · {propLabel} {prop.line}
           {posRank != null && (
             <span className="ml-1 text-muted-foreground/60">
               · {player.position} #{posRank}
@@ -505,7 +505,7 @@ function WaiverCard({ rank, player, prop, score, waiverReason, injuryUpside, isH
             )}
           </div>
           <div className="text-[11px] text-muted-foreground mt-0.5">
-            {player.team} vs {player.opponent}{prop ? ` · ${propLabel} ${prop.line}` : ''}
+            {player.team} {prop?.is_home ? 'vs' : '@'} {player.opponent}{prop ? ` · ${propLabel} ${prop.line}` : ''}
           </div>
         </div>
 
@@ -903,8 +903,9 @@ export default function StartSit() {
       .filter(p =>
         // Require real Sleeper projection data (no offseason placeholders)
         p.proj_pts_ppr != null &&
-        // Exclude clearly startable players projecting 12+ FP — they belong in rankings
-        p.proj_pts_ppr >= 0.5 && p.proj_pts_ppr < 12,
+        // Exclude starters and startable players projecting 9+ FP — they belong in rankings
+        (p.depth_chart_order ?? 99) > 1 &&
+        p.proj_pts_ppr >= 0.5 && p.proj_pts_ppr < 9,
       )
       .map(p => {
         const starter = starterMap[`${p.team}_${p.position}`];

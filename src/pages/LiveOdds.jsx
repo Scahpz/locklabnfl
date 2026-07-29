@@ -37,7 +37,7 @@ async function fetchESPNGames() {
   // Fetch full regular season + current scoreboard simultaneously
   const [currentGames, regSeasonGames] = await Promise.all([
     tryUrl(ESPN_SCOREBOARD),                                                      // live scoreboard (may be preseason)
-    tryUrl(`${ESPN_SCOREBOARD}?dates=${year}0901-${year}1231&limit=200`),        // full regular season
+    tryUrl(`${ESPN_SCOREBOARD}?dates=${year}0901-${year + 1}0115&limit=300`),     // full regular season
   ]);
 
   // Merge (prefer regular season), deduplicate, exclude preseason entirely
@@ -62,8 +62,9 @@ function mapESPNToGames(espn) {
     const away = comp.competitors?.find(c => c.homeAway === 'away');
     if (!home?.team?.abbreviation || !away?.team?.abbreviation) return [];
 
-    const homeAbv  = home.team.abbreviation;
-    const awayAbv  = away.team.abbreviation;
+    const ABVMAP = { WSH: 'WAS', JAC: 'JAX' };
+    const homeAbv  = ABVMAP[home.team.abbreviation] ?? home.team.abbreviation;
+    const awayAbv  = ABVMAP[away.team.abbreviation] ?? away.team.abbreviation;
     const odds     = comp.odds?.[0] ?? null;
     const provider = odds?.provider?.name ?? 'DraftKings';
 

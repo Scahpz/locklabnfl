@@ -127,6 +127,13 @@ export default function GameBreakdownModal({ game, onClose, liveStats = null }) 
     hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York',
   }) + ' ET';
 
+  // Market win % (devigged moneyline)
+  const mktHomeRaw = (() => { const ml = game.moneyline?.home; if (ml == null) return null; return ml < 0 ? Math.abs(ml) / (Math.abs(ml) + 100) : 100 / (ml + 100); })();
+  const mktAwayRaw = (() => { const ml = game.moneyline?.away; if (ml == null) return null; return ml < 0 ? Math.abs(ml) / (Math.abs(ml) + 100) : 100 / (ml + 100); })();
+  const mktTotal = (mktHomeRaw ?? 0) + (mktAwayRaw ?? 0);
+  const mktHomePct = (mktHomeRaw != null && mktTotal > 0) ? Math.round(mktHomeRaw / mktTotal * 100) : null;
+  const mktAwayPct = mktHomePct != null ? 100 - mktHomePct : null;
+
   const favored  = homeScore >= awayScore ? hA : aA;
   const winPct   = homeScore >= awayScore ? sim.homeWinPct : sim.awayWinPct;
   const margin   = Math.abs(homeScore - awayScore).toFixed(1);
@@ -213,10 +220,40 @@ export default function GameBreakdownModal({ game, onClose, liveStats = null }) 
                 </div>
                 <div className="flex justify-between mt-1">
                   <span className="text-[10px] text-blue-400 font-semibold">{aA} {sim.awayWinPct}%</span>
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Win Probability</span>
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Model Win %</span>
                   <span className="text-[10px] text-emerald-400 font-semibold">{sim.homeWinPct}% {hA}</span>
                 </div>
               </div>
+              {/* Market vs Model edge row */}
+              {mktHomePct != null && (
+                <div className="mt-2 pt-2 border-t border-white/6 grid grid-cols-3 gap-1 text-center">
+                  <div>
+                    <div className="text-[9px] text-muted-foreground uppercase tracking-wide mb-0.5">Market</div>
+                    <div className="text-[11px] font-bold text-foreground">{aA} {mktAwayPct}% / {hA} {mktHomePct}%</div>
+                  </div>
+                  <div>
+                    <div className="text-[9px] text-muted-foreground uppercase tracking-wide mb-0.5">Model</div>
+                    <div className="text-[11px] font-bold text-foreground">{aA} {sim.awayWinPct}% / {hA} {sim.homeWinPct}%</div>
+                  </div>
+                  <div>
+                    {(() => {
+                      const homeEdge = sim.homeWinPct - mktHomePct;
+                      const awayEdge = sim.awayWinPct - mktAwayPct;
+                      const edgeTeam = Math.abs(homeEdge) >= Math.abs(awayEdge) ? hA : aA;
+                      const edgeVal  = Math.abs(homeEdge) >= Math.abs(awayEdge) ? homeEdge : awayEdge;
+                      const edgeCls  = edgeVal > 0 ? 'text-emerald-400' : 'text-red-400';
+                      return (
+                        <>
+                          <div className="text-[9px] text-muted-foreground uppercase tracking-wide mb-0.5">Edge</div>
+                          <div className={cn('text-[11px] font-bold', edgeCls)}>
+                            {edgeVal > 0 ? '+' : ''}{edgeVal}% {edgeTeam}
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
+              )}
               <ConfMeta confidence={confidence} />
             </div>
 
@@ -224,7 +261,7 @@ export default function GameBreakdownModal({ game, onClose, liveStats = null }) 
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {[
                 { label: 'AI Winner',       value: favored,                            sub: `${winPct}% probability`,    color: 'primary' },
-                { label: 'Spread Pick',      value: `${spreadPick} -${Math.abs(ourSpread).toFixed(1)}`, sub: 'model projection', color: 'sky' },
+                { label: 'Spread Pick',      value: `${spreadPick} ${ourSpread > 0 ? '-' : '+'}${Math.abs(ourSpread).toFixed(1)}`, sub: 'model projection', color: 'sky' },
                 { label: 'Total',           value: ouPick,                             sub: `${(homeScore + awayScore).toFixed(1)} projected`, color: ouPick === 'OVER' ? 'emerald' : 'red' },
                 { label: 'Cover Prob',      value: `${favored === hA ? sim.homeCoverPct : sim.awayCoverPct}%`, sub: `${favored} covers`,  color: 'amber' },
                 { label: 'Confidence',      value: `${confidence}%`,                   sub: riskLevel.label + ' risk',   color: riskLevel.color },
