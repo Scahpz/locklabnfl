@@ -634,15 +634,36 @@ export function analyzeGame(game, liveStats = null) {
     return Math.round(predicted * 10) / 10;
   }
 
-  const hS = predictScoreLive(hA, aA, true);
-  const aS = predictScoreLive(aA, hA, false);
-  const ouLine = game.total?.line ?? null;
+  // Raw model scores from 2026 team projections × defensive adjustments
+  let hS = predictScoreLive(hA, aA, true);
+  let aS = predictScoreLive(aA, hA, false);
+
+  // Anchor model to market consensus when ESPN spread/total are available.
+  // bookSpread = home spread line: negative = home favored (e.g. -7 means home -7).
+  // Market-implied scores: mktHome = (total - bookSpread) / 2, mktAway = (total + bookSpread) / 2.
+  // Blend 55% market / 45% model so predictions stay realistic while showing model edge.
+  const bookSpread = game.spread?.home ?? null;
+  const ouLine     = game.total?.line   ?? null;
+  if (bookSpread != null && ouLine != null) {
+    const mktHome = (ouLine - bookSpread) / 2;
+    const mktAway = (ouLine + bookSpread) / 2;
+    hS = Math.round((0.45 * hS + 0.55 * mktHome) * 10) / 10;
+    aS = Math.round((0.45 * aS + 0.55 * mktAway) * 10) / 10;
+  } else if (bookSpread != null) {
+    // No total available — blend spreads only, preserve total
+    const mktMargin    = -bookSpread; // home margin implied by book (home -7 → mktMargin = +7)
+    const modelMargin  = hS - aS;
+    const blendMargin  = 0.45 * modelMargin + 0.55 * mktMargin;
+    const total        = hS + aS;
+    hS = Math.round(((total + blendMargin) / 2) * 10) / 10;
+    aS = Math.round(((total - blendMargin) / 2) * 10) / 10;
+  }
+
   const sim    = runSimulation(hS, aS, ouLine, 5000, hashStr(game.id ?? (hA + aA)));
   const adv    = computeAdvantages(hA, aA);
   const posMaps = positionMatchups(hA, aA);
   const explanation = generateExplanation(hA, aA, hS, aS, sim, adv);
 
-  const bookSpread = game.spread?.home ?? null;
   const ourSpread  = hS - aS;
   const spreadPick = ourSpread > 0 ? hA : aA;
   const ouPick     = ouLine != null

@@ -257,7 +257,9 @@ export default function LiveOdds() {
     if (!currentWeekExists) setFilter(`week_${weekNumbers[0]}`);
   }, [weekNumbers.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const filtered = games.filter(g => {
+  // Memoized so the countdown tick (every second) doesn't create a new array
+  // reference and retrigger analyzeGame for every visible game unnecessarily.
+  const filtered = useMemo(() => games.filter(g => {
     const gDate = new Date(g.commence_time).toLocaleDateString();
     if (filter.startsWith('week_')) {
       const wk = parseInt(filter.split('_')[1], 10);
@@ -266,7 +268,7 @@ export default function LiveOdds() {
     if (filter === 'today')    return gDate === today;
     if (filter === 'upcoming') return gDate !== today;
     return true;
-  });
+  }), [games, filter, today]);
 
   // Upset picks are scoped to the currently visible week so each tab has its own banner
   const upsetWatchGames = useMemo(() => {
