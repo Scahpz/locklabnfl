@@ -1,7 +1,7 @@
 // Fetches live NFL roster (Sleeper API) + per-player projections + schedule/totals (ESPN).
 // Returns a player array with real projected FP attached, compatible with fantasyScore().
 
-const CACHE_KEY = 'locklab_nfl_live_v7';  // v7: estimated FP for preseason (no Sleeper projections)
+const CACHE_KEY = 'locklab_nfl_live_v8';  // v8: POS_DEFAULTS fallback for all zero-stat players
 const CACHE_TTL = 4 * 60 * 60 * 1000;    // 4h
 
 const ESPN_NORM = { WSH: 'WAS' };
@@ -257,24 +257,17 @@ function buildPlayers(sleeperRaw, projections, { teamToOpp, teamToTotal, teamIsH
     // Real Sleeper projection for this player this week
     const proj = projections?.[id] ?? null;
 
-    // Generate props from real projected stats; fall back to position averages only
-    // when Sleeper has no projection at all (proj === null). If Sleeper has a
-    // projection entry but all stats are zero (backup QB, taxi-squad player),
-    // leave props empty so they're excluded from waiver wire rankings.
+    // Generate props from real projected stats; fall back to position averages
+    // whenever real data is absent or zero (preseason, zero-volume projection).
     let props;
     if (proj && (proj.pass_yd || proj.rush_yd || proj.rec_yd || proj.rec || proj.fg_att || proj.pts_allow != null)) {
       props = buildPropsFromProjections(p.position, proj, gameTotal, isHome);
     }
     if (!props || props.length === 0) {
-      if (proj === null) {
-        // No Sleeper data at all — use position defaults so the player still appears in rankings
-        props = (POS_DEFAULTS[p.position] ?? []).map(({ prop_type, line, variance }) =>
-          makeProp(prop_type, line, variance, gameTotal, isHome),
-        );
-      } else {
-        // Sleeper has this player but projected zero volume — skip; don't fabricate a 246-yd line
-        props = [];
-      }
+      // No real projection data — use position defaults so the player still appears in rankings
+      props = (POS_DEFAULTS[p.position] ?? []).map(({ prop_type, line, variance }) =>
+        makeProp(prop_type, line, variance, gameTotal, isHome),
+      );
     }
 
     players.push({
@@ -290,9 +283,9 @@ function buildPlayers(sleeperRaw, projections, { teamToOpp, teamToTotal, teamIsH
       injury_note:        injNote,
       // Real Sleeper per-player projections; fall back to prop-derived estimate
       // when Sleeper has no data (preseason) so scorePosition doesn't drop the player.
-      proj_pts_ppr:       proj?.pts_ppr       ?? (proj === null && props.length > 0 ? estimateFPPPR(props) : null),
-      proj_pts_half_ppr:  proj?.pts_half_ppr  ?? (proj === null && props.length > 0 ? estimateFPPPR(props) : null),
-      proj_pts_std:       proj?.pts_std       ?? (proj === null && props.length > 0 ? estimateFPPPR(props) : null),
+      proj_pts_ppr:       proj?.pts_ppr       ?? (props.length > 0 ? estimateFPPPR(props) : null),
+      proj_pts_half_ppr:  proj?.pts_half_ppr  ?? (props.length > 0 ? estimateFPPPR(props) : null),
+      proj_pts_std:       proj?.pts_std       ?? (props.length > 0 ? estimateFPPPR(props) : null),
       proj_rec:           proj?.rec           ?? null,
       proj_pass_td:       proj?.pass_td       ?? null,
       proj_rush_yd:       proj?.rush_yd       ?? null,
@@ -356,5 +349,6 @@ export function clearLiveCache() {
     localStorage.removeItem('locklab_nfl_live_v4');
     localStorage.removeItem('locklab_nfl_live_v5');
     localStorage.removeItem('locklab_nfl_live_v6');
+    localStorage.removeItem('locklab_nfl_live_v7');
   } catch {}
 }

@@ -41,12 +41,18 @@ async function fetchESPNGames() {
 
   // Merge (prefer regular season), deduplicate, exclude preseason entirely
   const seen = new Set();
-  return [...regSeasonGames, ...currentGames].filter(g => {
+  const allRegular = [...regSeasonGames, ...currentGames].filter(g => {
     if (g.is_preseason) return false;
     if (seen.has(g.id)) return false;
     seen.add(g.id);
     return true;
   });
+
+  // Only show the earliest (current) week — don't display the full 18-week schedule
+  const weeks = allRegular.map(g => g.week).filter(w => w != null);
+  if (weeks.length === 0) return allRegular;
+  const minWeek = Math.min(...weeks);
+  return allRegular.filter(g => g.week === minWeek || g.week == null);
 }
 
 // Maps ESPN scoreboard response to the shape GameOddsCard expects.
