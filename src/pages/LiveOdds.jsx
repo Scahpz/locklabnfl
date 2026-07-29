@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import GameOddsCard from '@/components/odds/GameOddsCard';
 import GameBreakdownModal from '@/components/odds/GameBreakdownModal';
-import { RefreshCw, Activity, Clock, WifiOff, Key, Check, Zap, AlertTriangle, ChevronRight } from 'lucide-react';
-import { analyzeGame } from '@/lib/gameAnalysis';
+import { RefreshCw, Activity, Clock, WifiOff, Key, Check, Zap } from 'lucide-react';
 import { useSeasonStats } from '@/lib/nflSeasonStats';
 import TeamLogo from '@/components/common/TeamLogo';
 import { cn } from '@/lib/utils';
@@ -270,15 +269,6 @@ export default function LiveOdds() {
     return true;
   }), [games, filter, today]);
 
-  // Upset picks are scoped to the currently visible week so each tab has its own banner
-  const upsetWatchGames = useMemo(() => {
-    if (!filtered.length) return [];
-    return filtered
-      .map(g => ({ game: g, analysis: analyzeGame(g, liveStats) }))
-      .filter(({ analysis }) => analysis.upsetWatch != null && analysis.upsetWatch.upsetScore >= 30)
-      .sort((a, b) => b.analysis.upsetWatch.upsetScore - a.analysis.upsetWatch.upsetScore)
-      .slice(0, 2);
-  }, [filtered, liveStats]);
 
   return (
     <div className="space-y-6">
@@ -429,90 +419,6 @@ export default function LiveOdds() {
               {tab.label}
             </button>
           ))}
-        </div>
-      )}
-
-      {/* Upset Watch of the Week banner */}
-      {upsetWatchGames.length > 0 && !loading && (
-        <div className="rounded-xl border border-orange-500/25 bg-orange-500/5 p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <AlertTriangle className="w-4 h-4 text-orange-400" />
-            <h3 className="text-sm font-bold text-foreground">Upset Watch</h3>
-            <span className="text-[10px] text-muted-foreground ml-1">
-              — {upsetWatchGames.length === 1 ? '1 game' : `${upsetWatchGames.length} games`} the model flags as genuine upset risks this week
-            </span>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {upsetWatchGames.map(({ game, analysis }) => {
-              const uw = analysis.upsetWatch;
-              const udIsHome = uw.underdog === analysis.hA;
-              const udTeamAbv = udIsHome ? game.homeAbv : game.awayAbv;
-              const favTeamAbv = udIsHome ? game.awayAbv : game.homeAbv;
-              return (
-                <button
-                  key={game.id}
-                  onClick={() => setBreakdownGame(game)}
-                  className="rounded-lg bg-white/4 border border-orange-500/20 p-3 text-left hover:border-orange-500/40 hover:bg-white/6 transition-all group"
-                >
-                  <div className="flex items-center gap-2 mb-2">
-                    <TeamLogo team={udTeamAbv} className="w-8 h-8" />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className={cn(
-                          'text-xs font-black',
-                          uw.tierColor === 'red' ? 'text-red-400' :
-                          uw.tierColor === 'orange' ? 'text-orange-400' : 'text-amber-400'
-                        )}>🚨 {uw.underdog}</span>
-                        <span className="text-[10px] text-muted-foreground">vs {uw.favored}</span>
-                        {uw.udIsHome && (
-                          <span className="text-[9px] bg-white/10 text-foreground px-1 py-0.5 rounded-full">Home Dog</span>
-                        )}
-                      </div>
-                      <div className="text-[10px] text-muted-foreground">
-                        {uw.udWinPct}% win probability · Score {uw.upsetScore}/100
-                      </div>
-                    </div>
-                    <div className="flex-shrink-0">
-                      <TeamLogo team={favTeamAbv} className="w-6 h-6 opacity-50" />
-                    </div>
-                  </div>
-
-                  {/* Upset probability bar */}
-                  <div className="h-1.5 rounded-full bg-white/8 mb-2 overflow-hidden">
-                    <div
-                      className={cn('h-full rounded-full',
-                        uw.tierColor === 'red' ? 'bg-red-500' :
-                        uw.tierColor === 'orange' ? 'bg-orange-500' : 'bg-amber-500'
-                      )}
-                      style={{ width: `${uw.udWinPct}%` }}
-                    />
-                  </div>
-
-                  <p className="text-[11px] text-foreground/80 leading-snug mb-2">
-                    {uw.reasons[0]}
-                  </p>
-
-                  {/* Key factors inline */}
-                  <div className="flex flex-wrap gap-1 mb-2">
-                    {uw.keyFactors.slice(0, 3).map((f, i) => (
-                      <span key={i} className={cn(
-                        'text-[9px] font-medium px-1.5 py-0.5 rounded-full border',
-                        uw.tierColor === 'red'    ? 'bg-red-500/15 border-red-500/20 text-red-400' :
-                        uw.tierColor === 'orange' ? 'bg-orange-500/15 border-orange-500/20 text-orange-400' :
-                                                    'bg-amber-500/15 border-amber-500/20 text-amber-400'
-                      )}>
-                        {f.label}
-                      </span>
-                    ))}
-                  </div>
-
-                  <span className="text-[10px] text-primary group-hover:text-primary/80 flex items-center gap-1 transition-colors">
-                    Full Upset Analysis <ChevronRight className="w-3 h-3" />
-                  </span>
-                </button>
-              );
-            })}
-          </div>
         </div>
       )}
 
