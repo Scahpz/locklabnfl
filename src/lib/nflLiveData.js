@@ -1,7 +1,7 @@
 // Fetches live NFL roster (Sleeper API) + per-player projections + schedule/totals (ESPN).
 // Returns a player array with real projected FP attached, compatible with fantasyScore().
 
-const CACHE_KEY = 'locklab_nfl_live_v8';  // v8: POS_DEFAULTS fallback for all zero-stat players
+const CACHE_KEY = 'locklab_nfl_live_v9';  // v9: depth cap + has_real_projection flag
 const CACHE_TTL = 4 * 60 * 60 * 1000;    // 4h
 
 const ESPN_NORM = { WSH: 'WAS' };
@@ -12,7 +12,11 @@ const BAD_STATUS = new Set([
   'Physically Unable to Perform', 'Inactive',
 ]);
 
-const POSITIONS = new Set(['QB', 'RB', 'WR', 'TE', 'K', 'DEF']);
+const POSITIONS = new Set(['QB', 'RB', 'WR', 'TE', 'DEF']);
+
+// Max depth-chart slot to include per position — keeps the list to active-roster players
+// and avoids UDFA / camp bodies with no real fantasy value.
+const MAX_DEPTH = { QB: 3, RB: 4, WR: 5, TE: 3, DEF: 1 };
 
 const INT_TYPES = new Set(['passing_tds', 'rushing_tds', 'receiving_tds', 'receptions']);
 
@@ -243,6 +247,9 @@ function buildPlayers(sleeperRaw, projections, { teamToOpp, teamToTotal, teamIsH
     if (!p.team || !p.full_name) continue;
     if (p.active === false) continue;
     if (BAD_STATUS.has(p.status ?? '')) continue;
+    // Exclude camp bodies / UDFAs beyond reasonable roster depth
+    const maxDepth = MAX_DEPTH[p.position] ?? 3;
+    if ((p.depth_chart_order ?? 99) > maxDepth) continue;
 
     const team      = p.team;
     const opponent  = teamToOpp[team] ?? 'TBD';
@@ -257,45 +264,58 @@ function buildPlayers(sleeperRaw, projections, { teamToOpp, teamToTotal, teamIsH
     // Real Sleeper projection for this player this week
     const proj = projections?.[id] ?? null;
 
-    // Generate props from real projected stats; fall back to position averages
-    // whenever real data is absent or zero (preseason, zero-volume projection).
+    // A player has "real" projection data when Sleeper has actual stats — not just a
+    // zero-filled entry (common before week 1 opens). DEF uses pts_ppr directly.
+    const hasRealData = proj != null && Boolean(
+      proj.pass_yd || proj.rush_yd || proj.rec_yd || proj.rec ||
+      proj.fg_att  || proj.pts_allow != null ||
+      (proj.pts_ppr != null && proj.pts_ppr > 0),
+    );
+
+    // Props: built from real stats when available, otherwise POS_DEFAULTS so the
+    // player still renders a meaningful stat line in the UI.
     let props;
-    if (proj && (proj.pass_yd || proj.rush_yd || proj.rec_yd || proj.rec || proj.fg_att || proj.pts_allow != null)) {
+    if (hasRealData) {
       props = buildPropsFromProjections(p.position, proj, gameTotal, isHome);
     }
     if (!props || props.length === 0) {
-      // No real projection data — use position defaults so the player still appears in rankings
       props = (POS_DEFAULTS[p.position] ?? []).map(({ prop_type, line, variance }) =>
         makeProp(prop_type, line, variance, gameTotal, isHome),
       );
     }
 
+    // proj_pts_ppr: use real Sleeper FP when available; null otherwise.
+    // Deliberatley NOT estimating FP from POS_DEFAULTS so that fantasyScoring
+    // can detect no-real-data players and rank them below players with actual projections.
+    const projPPR      = hasRealData ? (proj?.pts_ppr      ?? estimateFPPPR(props)) : null;
+    const projHalfPPR  = hasRealData ? (proj?.pts_half_ppr ?? projPPR)              : null;
+    const projStd      = hasRealData ? (proj?.pts_std      ?? projPPR)              : null;
+
     players.push({
       id,
-      player_name:        p.full_name,
+      player_name:         p.full_name,
       team,
       opponent,
-      position:           p.position,
-      photo_url:          '',
-      is_starter:         p.depth_chart_order === 1,
-      depth_chart_order:  p.depth_chart_order ?? 99,
-      injury_status:      injStatus,
-      injury_note:        injNote,
-      // Real Sleeper per-player projections; fall back to prop-derived estimate
-      // when Sleeper has no data (preseason) so scorePosition doesn't drop the player.
-      proj_pts_ppr:       proj?.pts_ppr       ?? (props.length > 0 ? estimateFPPPR(props) : null),
-      proj_pts_half_ppr:  proj?.pts_half_ppr  ?? (props.length > 0 ? estimateFPPPR(props) : null),
-      proj_pts_std:       proj?.pts_std       ?? (props.length > 0 ? estimateFPPPR(props) : null),
-      proj_rec:           proj?.rec           ?? null,
-      proj_pass_td:       proj?.pass_td       ?? null,
-      proj_rush_yd:       proj?.rush_yd       ?? null,
-      proj_rec_yd:        proj?.rec_yd        ?? null,
-      proj_pass_yd:       proj?.pass_yd       ?? null,
+      position:            p.position,
+      photo_url:           '',
+      is_starter:          p.depth_chart_order === 1,
+      depth_chart_order:   p.depth_chart_order ?? 99,
+      injury_status:       injStatus,
+      injury_note:         injNote,
+      has_real_projection: hasRealData,
+      proj_pts_ppr:        projPPR,
+      proj_pts_half_ppr:   projHalfPPR,
+      proj_pts_std:        projStd,
+      proj_rec:            proj?.rec      ?? null,
+      proj_pass_td:        proj?.pass_td  ?? null,
+      proj_rush_yd:        proj?.rush_yd  ?? null,
+      proj_rec_yd:         proj?.rec_yd   ?? null,
+      proj_pass_yd:        proj?.pass_yd  ?? null,
       props,
     });
   }
 
-  const posOrder = { QB: 0, RB: 1, WR: 2, TE: 3, K: 4, DEF: 5 };
+  const posOrder = { QB: 0, RB: 1, WR: 2, TE: 3, DEF: 4 };
   players.sort((a, b) => {
     if (a.is_starter !== b.is_starter) return a.is_starter ? -1 : 1;
     if (a.depth_chart_order !== b.depth_chart_order) return a.depth_chart_order - b.depth_chart_order;
@@ -350,5 +370,6 @@ export function clearLiveCache() {
     localStorage.removeItem('locklab_nfl_live_v5');
     localStorage.removeItem('locklab_nfl_live_v6');
     localStorage.removeItem('locklab_nfl_live_v7');
+    localStorage.removeItem('locklab_nfl_live_v8');
   } catch {}
 }

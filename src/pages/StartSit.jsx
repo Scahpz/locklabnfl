@@ -24,7 +24,7 @@ const PROP_LABELS = {
   fantasy_points:  'Fantasy Pts',
 };
 
-const POSITIONS = ['QB', 'RB', 'WR', 'TE', 'K', 'D/ST'];
+const POSITIONS = ['QB', 'RB', 'WR', 'TE', 'D/ST'];
 
 // ─── Shared UI primitives ─────────────────────────────────────────────────────
 
@@ -705,6 +705,7 @@ function PlayerPickerModal({ players: allPlayers, onSelect, onClose, excludePlay
   const [posFilter, setPosFilter] = useState('all');
 
   const players = useMemo(() => {
+    const s = settings || getLeagueSettings();
     return (allPlayers ?? mockPlayers)
       .filter(p => p.id !== excludePlayerId)
       .filter(p => posFilter === 'all' || p.position === posFilter)
@@ -712,8 +713,15 @@ function PlayerPickerModal({ players: allPlayers, onSelect, onClose, excludePlay
         !search.trim() ||
         p.player_name.toLowerCase().includes(search.toLowerCase()) ||
         p.team.toLowerCase().includes(search.toLowerCase())
-      );
-  }, [search, posFilter, excludePlayerId]);
+      )
+      .map(p => {
+        const primaryProp = (p.props ?? [])[0];
+        const sc = primaryProp ? fantasyScore(p, primaryProp, s) : null;
+        return { player: p, score: sc };
+      })
+      .sort((a, b) => (b.score?.total ?? 0) - (a.score?.total ?? 0))
+      .map(({ player }) => player);
+  }, [search, posFilter, excludePlayerId, allPlayers, settings]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -859,6 +867,12 @@ export default function StartSit() {
     [activePlayers, apiPosition, settings, liveStatus.loading],
   );
 
+  // All-position rankings used to look up rank-based verdicts for H2H comparison.
+  const allRankings = useMemo(
+    () => liveStatus.loading ? [] : rankPlayers(activePlayers, 'all', settings),
+    [activePlayers, settings, liveStatus.loading],
+  );
+
   const availableGames = useMemo(() => {
     const seen = new Set();
     const games = [];
@@ -901,9 +915,10 @@ export default function StartSit() {
     }
     return activePlayers
       .filter(p =>
-        // Require real Sleeper projection data (no offseason placeholders)
+        // Only real Sleeper data — no preseason placeholders
+        p.has_real_projection === true &&
         p.proj_pts_ppr != null &&
-        // Exclude starters and startable players projecting 9+ FP — they belong in rankings
+        // Exclude depth-1 starters; they belong in the rankings tab
         (p.depth_chart_order ?? 99) > 1 &&
         p.proj_pts_ppr >= 0.5 && p.proj_pts_ppr < 9,
       )
@@ -944,14 +959,21 @@ export default function StartSit() {
     [waiverCandidates, apiWaiverPosition, settings],
   );
 
-  const scoreA = useMemo(
-    () => (compareA && propA ? fantasyScore(compareA, propA, settings) : null),
-    [compareA, propA, settings],
-  );
-  const scoreB = useMemo(
-    () => (compareB && propB ? fantasyScore(compareB, propB, settings) : null),
-    [compareB, propB, settings],
-  );
+  const scoreA = useMemo(() => {
+    if (!compareA || !propA) return null;
+    const base = fantasyScore(compareA, propA, settings);
+    if (!base) return null;
+    const ranked = allRankings.find(e => e.player.id === compareA.id);
+    return ranked ? { ...base, verdict: ranked.score.verdict } : base;
+  }, [compareA, propA, settings, allRankings]);
+
+  const scoreB = useMemo(() => {
+    if (!compareB || !propB) return null;
+    const base = fantasyScore(compareB, propB, settings);
+    if (!base) return null;
+    const ranked = allRankings.find(e => e.player.id === compareB.id);
+    return ranked ? { ...base, verdict: ranked.score.verdict } : base;
+  }, [compareB, propB, settings, allRankings]);
 
   const compResult = useMemo(() => {
     if (!compareA || !propA || !compareB || !propB) return null;
@@ -1106,7 +1128,7 @@ export default function StartSit() {
               Rankings
             </button>
             <button
-              onClick={() => setRankTab('waiver')}
+              onClick={() => { setWaiverPosition(position); setRankTab('waiver'); }}
               className={cn(
                 'flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold rounded-lg transition-all',
                 rankTab === 'waiver'

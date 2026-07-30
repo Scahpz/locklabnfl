@@ -42,15 +42,15 @@ function matchupRatingLabel(tier2Score) {
 // ─── Positional constants ─────────────────────────────────────────────────────
 
 // "Elite week" ceiling per position (not theoretical max, just a great week)
-const POS_TOP_FP = { QB: 28, RB: 22, WR: 20, TE: 16, K: 13, DEF: 18 };
+const POS_TOP_FP = { QB: 28, RB: 22, WR: 20, TE: 16, DEF: 18 };
 
 // Replacement-level FP — the floor of a waiver-wire starter in a 12-team league.
-const REPLACEMENT_LEVEL = { QB: 12, RB: 4, WR: 5, TE: 2, K: 3, DEF: 4 };
+const REPLACEMENT_LEVEL = { QB: 12, RB: 4, WR: 5, TE: 2, DEF: 4 };
 
 // Roster-slot based START/FLEX thresholds for a 12-team 1QB/2RB/2WR/1TE/1FLEX league.
 // Scaled proportionally by s.leagueSize at runtime.
-const STARTER_COUNTS = { QB: 13, RB: 26, WR: 26, TE: 13, K: 12, DEF: 12 };
-const FLEX_COUNTS    = { QB: 9,  RB: 18, WR: 18, TE: 7,  K: 4,  DEF: 5  };
+const STARTER_COUNTS = { QB: 12, RB: 24, WR: 24, TE: 12, DEF: 12 };
+const FLEX_COUNTS    = { QB: 6,  RB: 12, WR: 12, TE: 4,  DEF: 0  };
 
 // ─── Dynamic variance ─────────────────────────────────────────────────────────
 // Coefficient of variation (std / mean) for floor/ceiling spread.
@@ -142,15 +142,17 @@ export function fantasyScore(player, prop, settings) {
       tip: `${rawProjFP.toFixed(1)} proj FP (${fmt}) · ${par.toFixed(1)} pts above replacement`,
     });
   } else {
-    // No Sleeper projection — player has no projected fantasy value this week.
-    // Assign a minimal tier1 so they still appear in the list but rank at the bottom.
-    tier1Score = 2;
+    // No real Sleeper projection this week. Score purely by depth-chart role so
+    // real players always rank above depth-chart guesses, and within no-data players
+    // confirmed starters still outrank backups.
+    const depthBonus = depthOrder === 1 ? 5 : depthOrder === 2 ? 2 : 0;
+    tier1Score = depthBonus;
     projFPBase = null;
     criteria.push({
       label: 'Projected Fantasy Points',
-      score: 2,
+      score: depthBonus,
       maxScore: 60,
-      tip: 'No projection data — not expected to have fantasy value this week',
+      tip: 'No weekly projection — ranked by depth chart position',
     });
   }
 
@@ -474,13 +476,6 @@ function scorePosition(players, position, s) {
 
       const score = fantasyScore(player, prop, s);
       if (!score) return null;
-
-      // Drop players with no real Sleeper projection data (they get identical fallback
-      // lines — QB: 246 pass yds, RB: 69 rush yds, TE: 36 rec yds — and 0/0/0 FP).
-      // Keep depth-chart starters even without week data since they belong in rankings.
-      if (score.projection === 0 && score.floor === 0 && player.proj_pts_ppr == null) {
-        return null;
-      }
 
       return { player, prop, score };
     })
