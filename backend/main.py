@@ -140,35 +140,83 @@ async def underdog_props():
             if r.status_code != 200:
                 return {"rawProps": [], "source": "underdog"}
 
-            data   = r.json()
-            lines  = data.get("over_under_lines", [])
-            players = {p["id"]: p for p in data.get("players", [])}
+            data        = r.json()
+            lines       = data.get("over_under_lines", [])
+            players     = {p["id"]: p for p in data.get("players", [])}
+            appearances = {a["id"]: a for a in data.get("appearances", [])}
 
+            # Underdog uses snake_case stat names (game props and season-long)
             STAT_MAP = {
-                "passing_yards": "passing_yards",
-                "passing_touchdowns": "passing_tds",
-                "rushing_yards": "rushing_yards",
-                "receiving_yards": "receiving_yards",
-                "receptions": "receptions",
-                "fantasy_points": "fantasy_points",
+                "passing_yds":             "passing_yards",
+                "rushing_yds":             "rushing_yards",
+                "receiving_yds":           "receiving_yards",
+                "receptions":              "receptions",
+                "passing_tds":             "passing_tds",
+                "rushing_tds":             "rushing_tds",
+                "receiving_tds":           "receiving_tds",
+                "fantasy_pts":             "fantasy_points",
+                # Season-long props (preseason best-ball markets)
+                "season_pass_yards":       "passing_yards",
+                "season_passing_yards":    "passing_yards",
+                "season_rush_yards":       "rushing_yards",
+                "season_rushing_yards":    "rushing_yards",
+                "season_receiving_yards":  "receiving_yards",
+                "season_rec_yards":        "receiving_yards",
+                "season_receptions":       "receptions",
+                "season_pass_tds":         "passing_tds",
+                "season_rush_tds":         "rushing_tds",
+                "season_rec_tds":          "receiving_tds",
             }
 
             props = []
             for line in lines:
-                appearance_id = line.get("over_under", {}).get("appearance_stat", {}).get("appearance_id")
-                player = players.get(appearance_id, {})
-                stat   = line.get("over_under", {}).get("appearance_stat", {}).get("stat")
-                prop_type = STAT_MAP.get(stat)
-                if not prop_type or not player:
+                if line.get("status") != "active":
                     continue
+                stat_value = line.get("stat_value")
+                if stat_value is None:
+                    continue
+
+                ou              = line.get("over_under", {})
+                app_stat        = ou.get("appearance_stat", {})
+                stat            = app_stat.get("stat", "")
+                display_stat    = app_stat.get("display_stat", "")
+                appearance_id   = app_stat.get("appearance_id")
+
+                prop_type = STAT_MAP.get(stat)
+                if not prop_type or not appearance_id:
+                    continue
+
+                # appearance → player lookup chain
+                appearance = appearances.get(appearance_id, {})
+                player_id  = appearance.get("player_id")
+                player     = players.get(player_id, {}) if player_id else {}
+                if not player:
+                    continue
+
+                name = f"{player.get('first_name', '')} {player.get('last_name', '')}".strip()
+                if not name:
+                    continue
+
+                over_odds, under_odds = -110, -110
+                for opt in line.get("options", []):
+                    try:
+                        price = int(opt.get("american_price", -110))
+                    except (TypeError, ValueError):
+                        price = -110
+                    if opt.get("choice") == "higher":
+                        over_odds = price
+                    elif opt.get("choice") == "lower":
+                        under_odds = price
+
                 props.append({
-                    "player_name": player.get("name", ""),
-                    "team":        player.get("team_abbreviation", ""),
-                    "position":    player.get("position", ""),
-                    "prop_type":   prop_type,
-                    "line":        float(line.get("stat_value", 0)),
-                    "over_odds":   -110,
-                    "under_odds":  -110,
+                    "player_name":  name,
+                    "team":         "",
+                    "position":     player.get("position_name", ""),
+                    "prop_type":    prop_type,
+                    "line":         float(stat_value),
+                    "over_odds":    over_odds,
+                    "under_odds":   under_odds,
+                    "display_stat": display_stat,
                 })
 
             return {"rawProps": props, "source": "underdog", "game_date": "Today"}
