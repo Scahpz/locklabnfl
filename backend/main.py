@@ -145,32 +145,35 @@ async def underdog_props():
             players     = {p["id"]: p for p in data.get("players", [])}
             appearances = {a["id"]: a for a in data.get("appearances", [])}
 
-            # Underdog uses snake_case stat names (game props and season-long)
+            # Only game-specific prop stats (no season-total futures markets)
             STAT_MAP = {
-                "passing_yds":             "passing_yards",
-                "rushing_yds":             "rushing_yards",
-                "receiving_yds":           "receiving_yards",
-                "receptions":              "receptions",
-                "passing_tds":             "passing_tds",
-                "rushing_tds":             "rushing_tds",
-                "receiving_tds":           "receiving_tds",
-                "fantasy_pts":             "fantasy_points",
-                # Season-long props (preseason best-ball markets)
-                "season_pass_yards":       "passing_yards",
-                "season_passing_yards":    "passing_yards",
-                "season_rush_yards":       "rushing_yards",
-                "season_rushing_yards":    "rushing_yards",
-                "season_receiving_yards":  "receiving_yards",
-                "season_rec_yards":        "receiving_yards",
-                "season_receptions":       "receptions",
-                "season_pass_tds":         "passing_tds",
-                "season_rush_tds":         "rushing_tds",
-                "season_rec_tds":          "receiving_tds",
+                "passing_yds":              "passing_yards",
+                "rushing_yds":              "rushing_yards",
+                "receiving_yds":            "receiving_yards",
+                "receptions":               "receptions",
+                "passing_tds":              "passing_tds",
+                "rushing_tds":              "rushing_tds",
+                "receiving_tds":            "receiving_tds",
+                "rush_rec_tds":             "rushing_tds",
+                "fantasy_pts":              "fantasy_points",
+                "passing_ints":             "interceptions",
+                "sacks":                    "sacks",
+                "passing_and_rushing_yds":  "passing_yards",
+                "passing_long":             "passing_yards",
+                "rushing_long":             "rushing_yards",
+                # First half / first quarter game props
+                "period_1_receiving_yds":   "receiving_yards",
+                "period_1_2_receiving_yds": "receiving_yards",
+                "period_1_passing_yds":     "passing_yards",
+                "period_1_2_passing_yds":   "passing_yards",
+                "period_1_rushing_yds":     "rushing_yards",
+                "period_1_2_rushing_yds":   "rushing_yards",
             }
 
             # Build team UUID → abbreviation + game info maps from games array
+            # Note: game ids are integers, appearance.match_id is also an integer
             team_uuid_map = {}  # team_uuid → abbreviation
-            game_info_map = {}  # game_uuid → {home, away, scheduled_at}
+            game_info_map = {}  # game_id (int) → {home, away, scheduled_at, home_team_id}
             for g in data.get("games", []):
                 title = g.get("abbreviated_title", "")
                 parts = [p.strip() for p in title.split(" @ ")]
@@ -182,8 +185,8 @@ async def underdog_props():
                     team_uuid_map[away_uuid] = away_abbrev
                 if home_uuid and home_abbrev:
                     team_uuid_map[home_uuid] = home_abbrev
-                g_id = g.get("id", "")
-                if g_id:
+                g_id = g.get("id")  # integer
+                if g_id is not None:
                     game_info_map[g_id] = {
                         "home": home_abbrev,
                         "away": away_abbrev,
@@ -220,11 +223,11 @@ async def underdog_props():
                 if not name:
                     continue
 
-                # Team and opponent from UUID maps
+                # Team and opponent from UUID maps (game id is an integer)
                 team_uuid = appearance.get("team_id", "")
-                game_uuid = appearance.get("match_id") or appearance.get("game_id", "")
+                match_id  = appearance.get("match_id")  # integer
                 team_abbrev = team_uuid_map.get(team_uuid, "")
-                game_meta = game_info_map.get(game_uuid, {})
+                game_meta = game_info_map.get(match_id, {})
                 home = game_meta.get("home", "")
                 away = game_meta.get("away", "")
                 opponent = away if team_abbrev and team_abbrev == home else (home if team_abbrev else "")
@@ -254,6 +257,7 @@ async def underdog_props():
                     "away":          away,
                     "opponent":      opponent,
                     "scheduled_at":  scheduled_at,
+                    "image_url":     player.get("image_url") or player.get("dark_image_url") or "",
                 })
 
             return {"rawProps": props, "source": "underdog", "game_date": "Today"}

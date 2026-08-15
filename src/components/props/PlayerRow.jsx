@@ -8,6 +8,19 @@ import { calcEVVerdict, TIER_CONFIG } from '@/lib/verdict';
 import { base44 } from '@/api/base44Client';
 import { toast } from 'sonner';
 
+function PlayerAvatar({ prop, name }) {
+  const [imgError, setImgError] = React.useState(false);
+  const url = !imgError && prop.image_url ? prop.image_url : null;
+  if (url) {
+    return (
+      <div className="w-9 h-9 rounded-full overflow-hidden bg-secondary flex-shrink-0 border border-white/8">
+        <img src={url} alt={name} className="w-full h-full object-cover object-top" onError={() => setImgError(true)} />
+      </div>
+    );
+  }
+  return <TeamLogo team={prop.team} className="w-9 h-9 flex-shrink-0" />;
+}
+
 const propTypeLabels = {
   // NFL
   passing_yards: 'Pass Yds', passing_tds: 'Pass TDs', completions: 'Comp',
@@ -93,7 +106,7 @@ export default function PlayerRow({ playerName, props, allPlayerProps, rank, ver
           <div className={cn("w-6 h-6 rounded-lg flex items-center justify-center text-[11px] font-bold border flex-shrink-0", rankStyle)}>
             {rank}
           </div>
-          <TeamLogo team={activeProp.team} className="w-8 h-8 flex-shrink-0" />
+          <PlayerAvatar prop={activeProp} name={playerName} />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5">
               <p className="font-semibold text-sm text-foreground truncate leading-tight">{playerName}</p>
