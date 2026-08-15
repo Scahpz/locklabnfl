@@ -63,6 +63,12 @@ export function calcEVVerdict(prop, grade) {
     return { tier: 'TRAP', label: 'TRAP', direction, edgePP, modelProb, marketProb, hasRealOdds };
   }
 
+  // No analytics at all → model prob equals market prob, edge is exactly 0.
+  // Show a neutral PRE-SEASON label instead of the misleading SKIP.
+  if (edgePP === 0 && prop.poisson_hit_prob == null && grade.dataQuality !== 'full') {
+    return { tier: 'PRESEASON', label: 'PRE-SEASON', direction, edgePP, modelProb, marketProb, hasRealOdds };
+  }
+
   let tier, label;
   if (edgePP >= 8) {
     tier  = 'GREEN';
@@ -98,5 +104,10 @@ export const TIER_CONFIG = {
     dot:   'bg-orange-500',
     badge: 'bg-orange-500/15 border-orange-500/40 text-orange-400',
     label: 'TRAP',
+  },
+  PRESEASON: {
+    dot:   'bg-sky-400',
+    badge: 'bg-sky-500/15 border-sky-500/35 text-sky-400',
+    label: 'PRE-SEASON',
   },
 };

@@ -9,6 +9,13 @@ import { base44 } from '@/api/base44Client';
 import { toast } from 'sonner';
 
 const propTypeLabels = {
+  // NFL
+  passing_yards: 'Pass Yds', passing_tds: 'Pass TDs', completions: 'Comp',
+  rushing_yards: 'Rush Yds', rushing_tds: 'Rush TDs', rushing_attempts: 'Rush Att',
+  receiving_yards: 'Rec Yds', receiving_tds: 'Rec TDs', receptions: 'Rec',
+  fantasy_points: 'Fant Pts', kicking_points: 'Kick Pts',
+  tackles: 'Tackles', sacks: 'Sacks', interceptions: 'INTs',
+  // NBA
   points: 'PTS', rebounds: 'REB', assists: 'AST', PRA: 'PRA',
   '3PM': '3PM', steals: 'STL', blocks: 'BLK', turnovers: 'TO',
   'P+R': 'P+R', 'P+A': 'P+A', 'A+R': 'A+R',
@@ -88,9 +95,21 @@ export default function PlayerRow({ playerName, props, allPlayerProps, rank, ver
           </div>
           <TeamLogo team={activeProp.team} className="w-8 h-8 flex-shrink-0" />
           <div className="flex-1 min-w-0">
-            <p className="font-semibold text-sm text-foreground truncate leading-tight">{playerName}</p>
+            <div className="flex items-center gap-1.5">
+              <p className="font-semibold text-sm text-foreground truncate leading-tight">{playerName}</p>
+              {activeProp.position && (
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-primary/15 text-primary border border-primary/20 flex-shrink-0">
+                  {activeProp.position}
+                </span>
+              )}
+            </div>
             <p className="text-[10px] text-muted-foreground/60 leading-tight">
-              {activeProp.team} vs {activeProp.opponent} · {activeProp.position}
+              {activeProp.team
+                ? `${activeProp.team}${activeProp.opponent ? ` vs ${activeProp.opponent}` : ''}`
+                : activeProp.position || ''}
+              {activeProp.scheduled_at && (
+                <span> · {new Date(activeProp.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+              )}
             </p>
           </div>
           <span className={cn(
@@ -155,7 +174,7 @@ export default function PlayerRow({ playerName, props, allPlayerProps, rank, ver
             : <TrendingDown className="w-3 h-3 text-destructive flex-shrink-0" />
           }
           <span className={cn("text-[10px] font-semibold", isOver ? "text-primary" : "text-destructive")}>
-            {evVerdict.direction}
+            {evVerdict.direction} {gradedProp.line}
           </span>
           {stillLoading ? (
             <span className="inline-block w-24 h-2.5 rounded bg-white/8 animate-pulse" />

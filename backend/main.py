@@ -168,6 +168,29 @@ async def underdog_props():
                 "season_rec_tds":          "receiving_tds",
             }
 
+            # Build team UUID → abbreviation + game info maps from games array
+            team_uuid_map = {}  # team_uuid → abbreviation
+            game_info_map = {}  # game_uuid → {home, away, scheduled_at}
+            for g in data.get("games", []):
+                title = g.get("abbreviated_title", "")
+                parts = [p.strip() for p in title.split(" @ ")]
+                away_abbrev = parts[0] if len(parts) >= 1 else ""
+                home_abbrev = parts[1] if len(parts) >= 2 else ""
+                away_uuid = g.get("away_team_id", "")
+                home_uuid = g.get("home_team_id", "")
+                if away_uuid and away_abbrev:
+                    team_uuid_map[away_uuid] = away_abbrev
+                if home_uuid and home_abbrev:
+                    team_uuid_map[home_uuid] = home_abbrev
+                g_id = g.get("id", "")
+                if g_id:
+                    game_info_map[g_id] = {
+                        "home": home_abbrev,
+                        "away": away_abbrev,
+                        "home_team_id": home_uuid,
+                        "scheduled_at": g.get("scheduled_at") or g.get("start_time", ""),
+                    }
+
             props = []
             for line in lines:
                 if line.get("status") != "active":
@@ -197,6 +220,16 @@ async def underdog_props():
                 if not name:
                     continue
 
+                # Team and opponent from UUID maps
+                team_uuid = appearance.get("team_id", "")
+                game_uuid = appearance.get("match_id") or appearance.get("game_id", "")
+                team_abbrev = team_uuid_map.get(team_uuid, "")
+                game_meta = game_info_map.get(game_uuid, {})
+                home = game_meta.get("home", "")
+                away = game_meta.get("away", "")
+                opponent = away if team_abbrev and team_abbrev == home else (home if team_abbrev else "")
+                scheduled_at = game_meta.get("scheduled_at", "")
+
                 over_odds, under_odds = -110, -110
                 for opt in line.get("options", []):
                     try:
@@ -209,14 +242,18 @@ async def underdog_props():
                         under_odds = price
 
                 props.append({
-                    "player_name":  name,
-                    "team":         "",
-                    "position":     player.get("position_name", ""),
-                    "prop_type":    prop_type,
-                    "line":         float(stat_value),
-                    "over_odds":    over_odds,
-                    "under_odds":   under_odds,
-                    "display_stat": display_stat,
+                    "player_name":   name,
+                    "team":          team_abbrev,
+                    "position":      player.get("position_name", ""),
+                    "prop_type":     prop_type,
+                    "line":          float(stat_value),
+                    "over_odds":     over_odds,
+                    "under_odds":    under_odds,
+                    "display_stat":  display_stat,
+                    "home":          home,
+                    "away":          away,
+                    "opponent":      opponent,
+                    "scheduled_at":  scheduled_at,
                 })
 
             return {"rawProps": props, "source": "underdog", "game_date": "Today"}
