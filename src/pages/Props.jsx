@@ -51,14 +51,24 @@ async function fetchBulkGameLogs(names) {
 }
 
 const propTypeLabels = {
-  passing_yards: 'Pass Yds', passing_tds: 'Pass TDs', rushing_yards: 'Rush Yds',
-  rushing_tds: 'Rush TDs', receiving_yards: 'Rec Yds', receptions: 'Rec',
-  receiving_tds: 'Rec TDs', targets: 'Targets', completions: 'Completions',
-  interceptions: 'INTs', fantasy_points: 'Fantasy Pts', sacks: 'Sacks',
-  tackles: 'Tackles', kicking_points: 'Kicking Pts',
+  // Full-game
+  passing_yards: 'Pass Yds', passing_tds: 'Pass TDs', completions: 'Comp',
+  rushing_yards: 'Rush Yds', rushing_tds: 'Rush TDs', rushing_attempts: 'Rush Att',
+  receiving_yards: 'Rec Yds', receiving_tds: 'Rec TDs', receptions: 'Rec',
+  fantasy_points: 'Fantasy Pts', sacks: 'Sacks', tackles: 'Tackles',
+  kicking_points: 'Kick Pts', interceptions: 'INTs',
+  passing_ints: 'INTs Thrown',
+  rush_rec_tds: 'Rush+Rec TDs',
+  pass_rush_yards: 'Pass+Rush Yds',
+  passing_long: 'Long Comp',
+  rushing_long: 'Long Rush',
+  // 1st quarter
+  q1_passing_yards: '1Q Pass Yds', q1_rushing_yards: '1Q Rush Yds', q1_receiving_yards: '1Q Rec Yds',
+  // 1st half
+  h1_passing_yards: '1H Pass Yds', h1_rushing_yards: '1H Rush Yds', h1_receiving_yards: '1H Rec Yds',
 };
 
-const PROP_TYPES = ['all', 'passing_yards', 'rushing_yards', 'receiving_yards', 'receptions', 'passing_tds', 'rushing_tds', 'receiving_tds', 'fantasy_points'];
+// PROP_TYPES is now derived dynamically from loaded props — see propTypeOptions useMemo below.
 const SORT_OPTIONS = [
   { value: 'ai_rank', label: 'AI Rank' },
   { value: 'confidence', label: 'Confidence' },
@@ -321,7 +331,7 @@ export default function Props() {
       } : { ...prop, data_unavailable: dataUnavailable };
 
       // 2. Team context
-      const team    = prop.player_team || '';
+      const team    = prop.team || prop.player_team || '';
       const opp     = prop.opponent    || '';
       const oppData = teams[opp]  || {};
       const tmData  = teams[team] || {};
@@ -583,6 +593,21 @@ export default function Props() {
     return map;
   }, [enrichedProps]);
 
+  // Dynamic prop-type filter chips — only types that have actual data in the feed.
+  // Grouped: Passing → Rushing → Receiving → Combo/Other → Period
+  const propTypeOptions = useMemo(() => {
+    const inFeed = new Set(enrichedProps.map(p => p.prop_type));
+    const ORDER = [
+      'passing_yards', 'passing_tds', 'passing_ints', 'pass_rush_yards', 'passing_long',
+      'rushing_yards', 'rushing_tds', 'rushing_long', 'rushing_attempts',
+      'receiving_yards', 'receiving_tds', 'receptions',
+      'rush_rec_tds', 'fantasy_points', 'sacks', 'tackles',
+      'q1_passing_yards', 'q1_rushing_yards', 'q1_receiving_yards',
+      'h1_passing_yards', 'h1_rushing_yards', 'h1_receiving_yards',
+    ];
+    return ORDER.filter(t => inFeed.has(t));
+  }, [enrichedProps]);
+
   // Unique betting platforms present in the current prop set, in display order
   const availableSources = useMemo(() => {
     const seen = new Set();
@@ -640,7 +665,7 @@ export default function Props() {
       });
     }
 
-    if (selectedType !== 'all') {
+    if (selectedType !== 'all' && propTypeOptions.includes(selectedType)) {
       result = result.filter(p => p.prop_type === selectedType);
     }
 
@@ -944,10 +969,10 @@ export default function Props() {
               );
             })()}
 
-            {/* Prop type pills */}
+            {/* Prop type pills — dynamically generated from what's in the feed */}
             <div className="flex gap-1.5 overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0 md:flex-wrap pb-1 scrollbar-none">
               <SlidersHorizontal className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0 self-center" />
-              {PROP_TYPES.map(t => (
+              {['all', ...propTypeOptions].map(t => (
                 <button
                   key={t}
                   onClick={() => setSelectedType(t)}
@@ -958,7 +983,7 @@ export default function Props() {
                       : "bg-secondary/60 border-border text-muted-foreground hover:text-foreground"
                   )}
                 >
-                  {t === 'all' ? 'All Props' : t.toUpperCase()}
+                  {t === 'all' ? 'All Props' : (propTypeLabels[t] || t)}
                 </button>
               ))}
             </div>

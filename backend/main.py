@@ -145,8 +145,10 @@ async def underdog_props():
             players     = {p["id"]: p for p in data.get("players", [])}
             appearances = {a["id"]: a for a in data.get("appearances", [])}
 
-            # Only game-specific prop stats (no season-total futures markets)
+            # Only single-game prop stats (no season-total futures markets).
+            # Period props get distinct keys so they don't collapse into the full-game market.
             STAT_MAP = {
+                # Full-game props
                 "passing_yds":              "passing_yards",
                 "rushing_yds":              "rushing_yards",
                 "receiving_yds":            "receiving_yards",
@@ -154,20 +156,21 @@ async def underdog_props():
                 "passing_tds":              "passing_tds",
                 "rushing_tds":              "rushing_tds",
                 "receiving_tds":            "receiving_tds",
-                "rush_rec_tds":             "rushing_tds",
+                "rush_rec_tds":             "rush_rec_tds",     # Rush+Rec TDs (combo)
                 "fantasy_pts":              "fantasy_points",
-                "passing_ints":             "interceptions",
+                "passing_ints":             "passing_ints",     # INTs thrown (QB stat, not defensive)
                 "sacks":                    "sacks",
-                "passing_and_rushing_yds":  "passing_yards",
-                "passing_long":             "passing_yards",
-                "rushing_long":             "rushing_yards",
-                # First half / first quarter game props
-                "period_1_receiving_yds":   "receiving_yards",
-                "period_1_2_receiving_yds": "receiving_yards",
-                "period_1_passing_yds":     "passing_yards",
-                "period_1_2_passing_yds":   "passing_yards",
-                "period_1_rushing_yds":     "rushing_yards",
-                "period_1_2_rushing_yds":   "rushing_yards",
+                "passing_and_rushing_yds":  "pass_rush_yards",  # QB combo
+                "passing_long":             "passing_long",
+                "rushing_long":             "rushing_long",
+                # 1st-quarter props
+                "period_1_receiving_yds":   "q1_receiving_yards",
+                "period_1_passing_yds":     "q1_passing_yards",
+                "period_1_rushing_yds":     "q1_rushing_yards",
+                # 1st-half props
+                "period_1_2_receiving_yds": "h1_receiving_yards",
+                "period_1_2_passing_yds":   "h1_passing_yards",
+                "period_1_2_rushing_yds":   "h1_rushing_yards",
             }
 
             # Build team UUID → abbreviation + game info maps from games array

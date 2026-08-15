@@ -22,12 +22,21 @@ function PlayerAvatar({ prop, name }) {
 }
 
 const propTypeLabels = {
-  // NFL
+  // NFL full-game
   passing_yards: 'Pass Yds', passing_tds: 'Pass TDs', completions: 'Comp',
   rushing_yards: 'Rush Yds', rushing_tds: 'Rush TDs', rushing_attempts: 'Rush Att',
   receiving_yards: 'Rec Yds', receiving_tds: 'Rec TDs', receptions: 'Rec',
   fantasy_points: 'Fant Pts', kicking_points: 'Kick Pts',
-  tackles: 'Tackles', sacks: 'Sacks', interceptions: 'INTs',
+  tackles: 'Tackles', sacks: 'Sacks',
+  passing_ints: 'INTs Thrown',   // QB interceptions thrown (not defensive)
+  rush_rec_tds: 'Rush+Rec TDs',  // combined rushing + receiving touchdowns
+  pass_rush_yards: 'Pass+Rush Yds',
+  passing_long: 'Long Comp',
+  rushing_long: 'Long Rush',
+  // NFL 1st quarter
+  q1_passing_yards: '1Q Pass Yds', q1_rushing_yards: '1Q Rush Yds', q1_receiving_yards: '1Q Rec Yds',
+  // NFL 1st half
+  h1_passing_yards: '1H Pass Yds', h1_rushing_yards: '1H Rush Yds', h1_receiving_yards: '1H Rec Yds',
   // NBA
   points: 'PTS', rebounds: 'REB', assists: 'AST', PRA: 'PRA',
   '3PM': '3PM', steals: 'STL', blocks: 'BLK', turnovers: 'TO',

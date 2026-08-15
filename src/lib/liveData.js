@@ -1,5 +1,5 @@
-const CACHE_KEY = 'locklab_live_props_v38';
-const CACHE_TS_KEY = 'locklab_live_props_ts_v38';
+const CACHE_KEY = 'locklab_live_props_v39';
+const CACHE_TS_KEY = 'locklab_live_props_ts_v39';
 const FRESH_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 
 (function purgeOldCaches() {
@@ -68,8 +68,10 @@ function fetchWithTimeout(url, opts, ms) {
 }
 
 function enrichProp(prop, index) {
-  const team = prop.player_team || prop.home || '';
-  const opponent = (prop.player_team && prop.player_team !== prop.home) ? prop.home : prop.away;
+  // Backend sends prop.team (player's team) and prop.opponent separately.
+  // Fall back chain: team > player_team > home (old NBA-era fallback, wrong for NFL).
+  const team     = prop.team || prop.player_team || '';
+  const opponent = prop.opponent || (team && team !== prop.home ? prop.home : prop.away) || '';
 
   const hasRealAnalytics = prop.avg_last_10 != null && prop.hit_rate_last_10 != null;
   const avg_last_10 = prop.avg_last_10 ?? null;
@@ -84,8 +86,9 @@ function enrichProp(prop, index) {
     ...prop,
     team, opponent, is_home: isHome,
     player_id: `live_${index}`,
-    photo_url: null,
-    position: prop.position || 'G',
+    photo_url: prop.image_url || null,
+    image_url: prop.image_url || null,
+    position: prop.position || '',
     is_starter: true,
     injury_status: 'healthy',
     confidence_score, edge, avg_last_10, avg_last_5, hit_rate_last_10: hit_rate, projection,
@@ -144,10 +147,14 @@ function mergeSources(oddsData, ppData, udData, dkData) {
     }
     const m = map[key];
     // Fill in team/game info when an earlier source left it blank (e.g. DraftKings)
+    if (!m.team && prop.team) m.team = prop.team;
+    if (!m.opponent && prop.opponent) m.opponent = prop.opponent;
     if (!m.player_team && prop.player_team) m.player_team = prop.player_team;
     if (!m.home && prop.home) m.home = prop.home;
     if (!m.away && prop.away) m.away = prop.away;
     if (!m.position && prop.position) m.position = prop.position;
+    if (!m.image_url && prop.image_url) m.image_url = prop.image_url;
+    if (!m.scheduled_at && prop.scheduled_at) m.scheduled_at = prop.scheduled_at;
     if (!m.sources.has(bookKey)) {
       m.sources.add(bookKey);
       m.all_books.push({
