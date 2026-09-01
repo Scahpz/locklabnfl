@@ -66,6 +66,11 @@ const propTypeLabels = {
   q1_passing_yards: '1Q Pass Yds', q1_rushing_yards: '1Q Rush Yds', q1_receiving_yards: '1Q Rec Yds',
   // 1st half
   h1_passing_yards: '1H Pass Yds', h1_rushing_yards: '1H Rush Yds', h1_receiving_yards: '1H Rec Yds',
+  // Season-long futures / best-ball markets
+  season_passing_yards: 'Pass Yds (Season)', season_passing_tds: 'Pass TDs (Season)',
+  season_rushing_yards: 'Rush Yds (Season)', season_rushing_tds: 'Rush TDs (Season)',
+  season_receiving_yards: 'Rec Yds (Season)', season_receiving_tds: 'Rec TDs (Season)',
+  season_receptions: 'Rec (Season)', season_sacks: 'Sacks (Season)',
 };
 
 // PROP_TYPES is now derived dynamically from loaded props — see propTypeOptions useMemo below.
@@ -598,12 +603,19 @@ export default function Props() {
   const propTypeOptions = useMemo(() => {
     const inFeed = new Set(enrichedProps.map(p => p.prop_type));
     const ORDER = [
+      // Single-game props
       'passing_yards', 'passing_tds', 'passing_ints', 'pass_rush_yards', 'passing_long',
       'rushing_yards', 'rushing_tds', 'rushing_long', 'rushing_attempts',
       'receiving_yards', 'receiving_tds', 'receptions',
       'rush_rec_tds', 'fantasy_points', 'sacks', 'tackles',
+      // Period props
       'q1_passing_yards', 'q1_rushing_yards', 'q1_receiving_yards',
       'h1_passing_yards', 'h1_rushing_yards', 'h1_receiving_yards',
+      // Season-long futures (shown when no game props are live)
+      'season_passing_yards', 'season_passing_tds',
+      'season_rushing_yards', 'season_rushing_tds',
+      'season_receiving_yards', 'season_receiving_tds',
+      'season_receptions', 'season_sacks',
     ];
     return ORDER.filter(t => inFeed.has(t));
   }, [enrichedProps]);

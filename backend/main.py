@@ -145,8 +145,9 @@ async def underdog_props():
             players     = {p["id"]: p for p in data.get("players", [])}
             appearances = {a["id"]: a for a in data.get("appearances", [])}
 
-            # Only single-game prop stats (no season-total futures markets).
-            # Period props get distinct keys so they don't collapse into the full-game market.
+            # Stat name → internal prop_type. Includes both season-long futures markets
+            # and single-game props. Season-long keys get distinct prop_types so they
+            # never collapse into same-week game markets in the merge step.
             STAT_MAP = {
                 # Full-game props
                 "passing_yds":              "passing_yards",
@@ -156,21 +157,33 @@ async def underdog_props():
                 "passing_tds":              "passing_tds",
                 "rushing_tds":              "rushing_tds",
                 "receiving_tds":            "receiving_tds",
-                "rush_rec_tds":             "rush_rec_tds",     # Rush+Rec TDs (combo)
+                "rush_rec_tds":             "rush_rec_tds",
                 "fantasy_pts":              "fantasy_points",
-                "passing_ints":             "passing_ints",     # INTs thrown (QB stat, not defensive)
+                "passing_ints":             "passing_ints",
                 "sacks":                    "sacks",
-                "passing_and_rushing_yds":  "pass_rush_yards",  # QB combo
+                "passing_and_rushing_yds":  "pass_rush_yards",
                 "passing_long":             "passing_long",
                 "rushing_long":             "rushing_long",
-                # 1st-quarter props
+                # 1st-quarter
                 "period_1_receiving_yds":   "q1_receiving_yards",
                 "period_1_passing_yds":     "q1_passing_yards",
                 "period_1_rushing_yds":     "q1_rushing_yards",
-                # 1st-half props
+                # 1st-half
                 "period_1_2_receiving_yds": "h1_receiving_yards",
                 "period_1_2_passing_yds":   "h1_passing_yards",
                 "period_1_2_rushing_yds":   "h1_rushing_yards",
+                # Season-long futures (shown when no game-specific props are available)
+                "season_receiving_yards":   "season_receiving_yards",
+                "season_rec_yards":         "season_receiving_yards",
+                "season_rec_tds":           "season_receiving_tds",
+                "season_pass_yards":        "season_passing_yards",
+                "season_passing_yards":     "season_passing_yards",
+                "season_rush_yards":        "season_rushing_yards",
+                "season_rushing_yards":     "season_rushing_yards",
+                "season_rush_tds":          "season_rushing_tds",
+                "season_pass_tds":          "season_passing_tds",
+                "season_receptions":        "season_receptions",
+                "season_sacks":             "season_sacks",
             }
 
             # Build team UUID → abbreviation + game info maps from games array
@@ -222,6 +235,10 @@ async def underdog_props():
                 if not player:
                     continue
 
+                # Reject non-NFL players (CFB, tennis, etc. bleed through the NFL endpoint)
+                if player.get("sport_id") != "NFL":
+                    continue
+
                 name = f"{player.get('first_name', '')} {player.get('last_name', '')}".strip()
                 if not name:
                     continue
@@ -256,6 +273,7 @@ async def underdog_props():
                     "over_odds":     over_odds,
                     "under_odds":    under_odds,
                     "display_stat":  display_stat,
+                    "is_season_long": stat.startswith("season_"),
                     "home":          home,
                     "away":          away,
                     "opponent":      opponent,

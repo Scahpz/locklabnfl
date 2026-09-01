@@ -37,6 +37,11 @@ const propTypeLabels = {
   q1_passing_yards: '1Q Pass Yds', q1_rushing_yards: '1Q Rush Yds', q1_receiving_yards: '1Q Rec Yds',
   // NFL 1st half
   h1_passing_yards: '1H Pass Yds', h1_rushing_yards: '1H Rush Yds', h1_receiving_yards: '1H Rec Yds',
+  // NFL season-long (futures / best-ball markets)
+  season_passing_yards: 'Pass Yds (Season)', season_passing_tds: 'Pass TDs (Season)',
+  season_rushing_yards: 'Rush Yds (Season)', season_rushing_tds: 'Rush TDs (Season)',
+  season_receiving_yards: 'Rec Yds (Season)', season_receiving_tds: 'Rec TDs (Season)',
+  season_receptions: 'Rec (Season)', season_sacks: 'Sacks (Season)',
   // NBA
   points: 'PTS', rebounds: 'REB', assists: 'AST', PRA: 'PRA',
   '3PM': '3PM', steals: 'STL', blocks: 'BLK', turnovers: 'TO',

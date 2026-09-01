@@ -1,7 +1,7 @@
 // Fetches live NFL roster (Sleeper API) + per-player projections + schedule/totals (ESPN).
 // Returns a player array with real projected FP attached, compatible with fantasyScore().
 
-const CACHE_KEY = 'locklab_nfl_live_v9';  // v9: depth cap + has_real_projection flag
+const CACHE_KEY = 'locklab_nfl_live_v10'; // v10: DEF depth-chart filter fix
 const CACHE_TTL = 4 * 60 * 60 * 1000;    // 4h
 
 const ESPN_NORM = { WSH: 'WAS' };
@@ -247,9 +247,12 @@ function buildPlayers(sleeperRaw, projections, { teamToOpp, teamToTotal, teamIsH
     if (!p.team || !p.full_name) continue;
     if (p.active === false) continue;
     if (BAD_STATUS.has(p.status ?? '')) continue;
-    // Exclude camp bodies / UDFAs beyond reasonable roster depth
-    const maxDepth = MAX_DEPTH[p.position] ?? 3;
-    if ((p.depth_chart_order ?? 99) > maxDepth) continue;
+    // Exclude camp bodies / UDFAs beyond reasonable roster depth.
+    // DEF (team defenses) have no depth chart order in Sleeper — always include them.
+    if (p.position !== 'DEF') {
+      const maxDepth = MAX_DEPTH[p.position] ?? 3;
+      if ((p.depth_chart_order ?? 99) > maxDepth) continue;
+    }
 
     const team      = p.team;
     const opponent  = teamToOpp[team] ?? 'TBD';

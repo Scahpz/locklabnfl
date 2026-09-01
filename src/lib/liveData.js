@@ -1,5 +1,5 @@
-const CACHE_KEY = 'locklab_live_props_v39';
-const CACHE_TS_KEY = 'locklab_live_props_ts_v39';
+const CACHE_KEY = 'locklab_live_props_v40';
+const CACHE_TS_KEY = 'locklab_live_props_ts_v40';
 const FRESH_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 
 (function purgeOldCaches() {
