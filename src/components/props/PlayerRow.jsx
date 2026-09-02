@@ -29,10 +29,14 @@ const propTypeLabels = {
   fantasy_points: 'Fant Pts', kicking_points: 'Kick Pts',
   tackles: 'Tackles', sacks: 'Sacks',
   passing_ints: 'INTs Thrown',   // QB interceptions thrown (not defensive)
-  rush_rec_tds: 'Rush+Rec TDs',  // combined rushing + receiving touchdowns
+  rush_rec_tds: 'Rush+Rec TDs',
+  rush_rec_yards: 'Rush+Rec Yds',
   pass_rush_yards: 'Pass+Rush Yds',
   passing_long: 'Long Comp',
   rushing_long: 'Long Rush',
+  rushing_attempts: 'Rush Att',
+  q1_receptions: '1Q Rec', q1_rush_rec_tds: '1Q Rush+Rec TDs',
+  h1_receptions: '1H Rec', h1_rush_rec_tds: '1H Rush+Rec TDs',
   // NFL 1st quarter
   q1_passing_yards: '1Q Pass Yds', q1_rushing_yards: '1Q Rush Yds', q1_receiving_yards: '1Q Rec Yds',
   // NFL 1st half

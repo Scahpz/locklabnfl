@@ -133,7 +133,7 @@ async def underdog_props():
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             r = await client.get(
-                "https://api.underdogfantasy.com/beta/v3/over_under_lines",
+                "https://api.underdogfantasy.com/beta/v5/over_under_lines",
                 params={"sport_id": "NFL"},
                 headers={"User-Agent": "Mozilla/5.0"},
             )
@@ -145,34 +145,40 @@ async def underdog_props():
             players     = {p["id"]: p for p in data.get("players", [])}
             appearances = {a["id"]: a for a in data.get("appearances", [])}
 
-            # Stat name → internal prop_type. Includes both season-long futures markets
-            # and single-game props. Season-long keys get distinct prop_types so they
-            # never collapse into same-week game markets in the merge step.
+            # Stat name → internal prop_type.
+            # v5 API uses different names than v3 for some stats (receiving_rec, rushing_att, etc.)
             STAT_MAP = {
                 # Full-game props
                 "passing_yds":              "passing_yards",
                 "rushing_yds":              "rushing_yards",
                 "receiving_yds":            "receiving_yards",
                 "receptions":               "receptions",
+                "receiving_rec":            "receptions",        # v5 name
                 "passing_tds":              "passing_tds",
                 "rushing_tds":              "rushing_tds",
                 "receiving_tds":            "receiving_tds",
                 "rush_rec_tds":             "rush_rec_tds",
+                "rush_rec_yds":             "rush_rec_yards",
                 "fantasy_pts":              "fantasy_points",
                 "passing_ints":             "passing_ints",
                 "sacks":                    "sacks",
                 "passing_and_rushing_yds":  "pass_rush_yards",
                 "passing_long":             "passing_long",
                 "rushing_long":             "rushing_long",
+                "rushing_att":              "rushing_attempts",
                 # 1st-quarter
                 "period_1_receiving_yds":   "q1_receiving_yards",
+                "period_1_receiving_rec":   "q1_receptions",
                 "period_1_passing_yds":     "q1_passing_yards",
                 "period_1_rushing_yds":     "q1_rushing_yards",
+                "period_1_rush_rec_tds":    "q1_rush_rec_tds",
                 # 1st-half
                 "period_1_2_receiving_yds": "h1_receiving_yards",
+                "period_1_2_receiving_rec": "h1_receptions",
                 "period_1_2_passing_yds":   "h1_passing_yards",
                 "period_1_2_rushing_yds":   "h1_rushing_yards",
-                # Season-long futures (shown when no game-specific props are available)
+                "period_1_2_rush_rec_tds":  "h1_rush_rec_tds",
+                # Season-long futures
                 "season_receiving_yards":   "season_receiving_yards",
                 "season_rec_yards":         "season_receiving_yards",
                 "season_rec_tds":           "season_receiving_tds",

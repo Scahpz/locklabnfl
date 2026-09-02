@@ -59,7 +59,11 @@ const propTypeLabels = {
   kicking_points: 'Kick Pts', interceptions: 'INTs',
   passing_ints: 'INTs Thrown',
   rush_rec_tds: 'Rush+Rec TDs',
+  rush_rec_yards: 'Rush+Rec Yds',
   pass_rush_yards: 'Pass+Rush Yds',
+  rushing_attempts: 'Rush Att',
+  q1_receptions: '1Q Rec', q1_rush_rec_tds: '1Q Rush+Rec TDs',
+  h1_receptions: '1H Rec', h1_rush_rec_tds: '1H Rush+Rec TDs',
   passing_long: 'Long Comp',
   rushing_long: 'Long Rush',
   // 1st quarter
@@ -607,10 +611,10 @@ export default function Props() {
       'passing_yards', 'passing_tds', 'passing_ints', 'pass_rush_yards', 'passing_long',
       'rushing_yards', 'rushing_tds', 'rushing_long', 'rushing_attempts',
       'receiving_yards', 'receiving_tds', 'receptions',
-      'rush_rec_tds', 'fantasy_points', 'sacks', 'tackles',
+      'rush_rec_tds', 'rush_rec_yards', 'fantasy_points', 'sacks', 'tackles',
       // Period props
-      'q1_passing_yards', 'q1_rushing_yards', 'q1_receiving_yards',
-      'h1_passing_yards', 'h1_rushing_yards', 'h1_receiving_yards',
+      'q1_passing_yards', 'q1_rushing_yards', 'q1_receiving_yards', 'q1_receptions', 'q1_rush_rec_tds',
+      'h1_passing_yards', 'h1_rushing_yards', 'h1_receiving_yards', 'h1_receptions', 'h1_rush_rec_tds',
       // Season-long futures (shown when no game props are live)
       'season_passing_yards', 'season_passing_tds',
       'season_rushing_yards', 'season_rushing_tds',
