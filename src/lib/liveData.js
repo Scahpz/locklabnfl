@@ -2,13 +2,13 @@ const CACHE_KEY = 'locklab_live_props_v42';
 const CACHE_TS_KEY = 'locklab_live_props_ts_v42';
 const FRESH_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 
-(function purgeOldCaches() {
+try {
   for (let i = 1; i <= 41; i++) {
     localStorage.removeItem(`locklab_live_props_v${i}`);
     localStorage.removeItem(`locklab_live_props_date_v${i}`);
     localStorage.removeItem(`locklab_live_props_ts_v${i}`);
   }
-})();
+} catch {}
 
 import { NFL_API } from './config';
 import { isDemoMode, getMockPayload } from './mockData';
@@ -26,12 +26,21 @@ export function isBackendReachable() {
 }
 
 export function isCacheValid() {
-  const ts = Number(localStorage.getItem(CACHE_TS_KEY) || 0);
-  return Date.now() - ts < FRESH_TTL_MS && !!localStorage.getItem(CACHE_KEY);
+  try {
+    const ts = Number(localStorage.getItem(CACHE_TS_KEY) || 0);
+    return Date.now() - ts < FRESH_TTL_MS && !!localStorage.getItem(CACHE_KEY);
+  } catch { return false; }
 }
 
 export function getCachedProps() {
   try { return JSON.parse(localStorage.getItem(CACHE_KEY)); } catch { return null; }
+}
+
+function saveCache(payload) {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
+    localStorage.setItem(CACHE_TS_KEY, String(Date.now()));
+  } catch { /* QuotaExceededError — payload still returned, just not cached */ }
 }
 
 export function clearLiveCache() {
@@ -235,8 +244,7 @@ async function _doFetch() {
     const fallback = await fetchPropsNoBackend();
     if (fallback) {
       const payload = { ...fallback, props: fallback.props.map((p, i) => enrichProp(p, i)) };
-      localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
-      localStorage.setItem(CACHE_TS_KEY, String(Date.now()));
+      saveCache(payload);
       return payload;
     }
     // No NFL props available right now (offseason / no games today)
@@ -286,8 +294,7 @@ async function _doFetch() {
     if (udDirect?.props?.length) {
       const props = udDirect.props.map((p, i) => enrichProp(p, i));
       const payload = { game_date: udDirect.game_date || new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }), games_summary: [], props };
-      localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
-      localStorage.setItem(CACHE_TS_KEY, String(Date.now()));
+      saveCache(payload);
       return payload;
     }
     return { game_date: new Date().toLocaleDateString(), games_summary: [], props: [] };
@@ -299,9 +306,7 @@ async function _doFetch() {
 
   const props = rawProps.map((prop, i) => enrichProp(prop, i));
   const payload = { game_date: gameDate, games_summary: gamesSummary, props };
-
-  localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
-  localStorage.setItem(CACHE_TS_KEY, String(Date.now()));
+  saveCache(payload);
   return payload;
 }
 
@@ -309,7 +314,20 @@ export async function fetchLiveProps() {
   if (isDemoMode()) return getMockPayload();
   if (isCacheValid()) return getCachedProps();
   if (_fetchPromise) return _fetchPromise;
-  _fetchPromise = _doFetch().finally(() => { _fetchPromise = null; });
+  _fetchPromise = _doFetch()
+    .catch(async (err) => {
+      console.error('[LockLab] props fetch failed, trying direct Underdog:', err);
+      try {
+        const ud = await fetchUnderdogDirect();
+        if (ud?.props?.length) {
+          const payload = { ...ud, props: ud.props.map((p, i) => enrichProp(p, i)) };
+          saveCache(payload);
+          return payload;
+        }
+      } catch {}
+      return { game_date: new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }), games_summary: [], props: [] };
+    })
+    .finally(() => { _fetchPromise = null; });
   return _fetchPromise;
 }
 
