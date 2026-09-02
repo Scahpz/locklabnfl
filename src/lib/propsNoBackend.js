@@ -141,13 +141,157 @@ function computeAnalytics(gameLogs, line) {
   };
 }
 
+// ── Direct Underdog v5 fetch (browser-side, CORS: * on their API) ─────────────
+const UD_URL = 'https://api.underdogfantasy.com/beta/v5/over_under_lines?sport_id=NFL';
+
+const UD_STAT_MAP = {
+  passing_yds: 'passing_yards', rushing_yds: 'rushing_yards',
+  receiving_yds: 'receiving_yards', receptions: 'receptions',
+  receiving_rec: 'receptions', passing_tds: 'passing_tds',
+  rushing_tds: 'rushing_tds', receiving_tds: 'receiving_tds',
+  rush_rec_tds: 'rush_rec_tds', rush_rec_yds: 'rush_rec_yards',
+  fantasy_pts: 'fantasy_points', passing_ints: 'passing_ints',
+  sacks: 'sacks', passing_long: 'passing_long',
+  rushing_long: 'rushing_long', rushing_att: 'rushing_attempts',
+  period_1_receiving_yds: 'q1_receiving_yards',
+  period_1_receiving_rec: 'q1_receptions',
+  period_1_2_receiving_yds: 'h1_receiving_yards',
+  period_1_2_receiving_rec: 'h1_receptions',
+  period_1_passing_yds: 'q1_passing_yards',
+  period_1_2_passing_yds: 'h1_passing_yards',
+  period_1_rushing_yds: 'q1_rushing_yards',
+  period_1_2_rushing_yds: 'h1_rushing_yards',
+  period_1_rush_rec_tds: 'q1_rush_rec_tds',
+  period_1_2_rush_rec_tds: 'h1_rush_rec_tds',
+  season_receiving_yards: 'season_receiving_yards',
+  season_rec_tds: 'season_receiving_tds',
+  season_pass_yards: 'season_passing_yards',
+  season_rush_yards: 'season_rushing_yards',
+  season_rush_tds: 'season_rushing_tds',
+  season_pass_tds: 'season_passing_tds',
+  season_sacks: 'season_sacks',
+};
+
+async function fetchUnderdogDirect() {
+  const raw = await fetchSafe(UD_URL, 15000);
+  if (!raw?.over_under_lines?.length) return null;
+
+  const players     = Object.fromEntries((raw.players     || []).map(p => [p.id, p]));
+  const appearances = Object.fromEntries((raw.appearances || []).map(a => [a.id, a]));
+
+  // Build team UUID → abbreviation from games array (e.g. "NE @ SEA")
+  const teamUUIDMap = {};
+  const gameInfoMap = {};
+  for (const g of (raw.games || [])) {
+    if (g.sport_id && g.sport_id !== 'NFL') continue;
+    const parts = (g.abbreviated_title || g.title || '').split(' @ ');
+    const away  = parts[0]?.trim() || '';
+    const home  = parts[1]?.trim() || '';
+    if (g.away_team_id && away) teamUUIDMap[g.away_team_id] = away;
+    if (g.home_team_id && home) teamUUIDMap[g.home_team_id] = home;
+    if (g.id != null) {
+      gameInfoMap[g.id] = {
+        home, away,
+        home_team_id: g.home_team_id,
+        scheduled_at: g.scheduled_at || '',
+      };
+    }
+  }
+
+  const props = [];
+  const seen  = new Set();
+
+  for (const line of raw.over_under_lines) {
+    if (line.status !== 'active') continue;
+    const statValue = line.stat_value;
+    if (statValue == null) continue;
+
+    const ou         = line.over_under || {};
+    const appStat    = ou.appearance_stat || {};
+    const stat       = appStat.stat || '';
+    const dispStat   = appStat.display_stat || '';
+    const appId      = appStat.appearance_id;
+    const propType   = UD_STAT_MAP[stat];
+    if (!propType || !appId) continue;
+
+    const appearance = appearances[appId] || {};
+    const playerId   = appearance.player_id;
+    const player     = playerId ? players[playerId] : null;
+    if (!player || player.sport_id !== 'NFL') continue;
+
+    const name = `${player.first_name || ''} ${player.last_name || ''}`.trim();
+    if (!name) continue;
+
+    // Dedup by player + prop_type (keep first line seen)
+    const key = `${name}__${propType}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const teamUUID   = appearance.team_id || '';
+    const matchId    = appearance.match_id;
+    const teamAbbrev = teamUUIDMap[teamUUID] || '';
+    const gameMeta   = gameInfoMap[matchId]  || {};
+    const home       = gameMeta.home || '';
+    const away       = gameMeta.away || '';
+    const opponent   = teamAbbrev && teamAbbrev === home ? away : (home || '');
+
+    let overOdds = -110, underOdds = -110;
+    for (const opt of (line.options || [])) {
+      const price = parseInt(opt.american_price, 10) || -110;
+      if (opt.choice === 'higher') overOdds  = price;
+      if (opt.choice === 'lower')  underOdds = price;
+    }
+
+    props.push({
+      player_name:    name,
+      team:           teamAbbrev,
+      player_team:    teamAbbrev,
+      position:       player.position_name || '',
+      prop_type:      propType,
+      line:           parseFloat(statValue),
+      over_odds:      overOdds,
+      under_odds:     underOdds,
+      display_stat:   dispStat,
+      is_season_long: stat.startsWith('season_'),
+      home,
+      away,
+      opponent,
+      scheduled_at:   gameMeta.scheduled_at || '',
+      image_url:      player.image_url || '',
+      sources:        ['underdog'],
+      all_books:      [{ key: 'underdog', title: 'Underdog', line: parseFloat(statValue), over_odds: overOdds, under_odds: underOdds }],
+      has_analytics:  false,
+    });
+  }
+
+  if (!props.length) return null;
+
+  const seenGames = new Map();
+  props.forEach(p => {
+    const a = (p.away || '').toUpperCase();
+    const h = (p.home || '').toUpperCase();
+    if (!a || !h) return;
+    const k = `${a}@${h}`;
+    if (!seenGames.has(k)) seenGames.set(k, { home: p.home, away: p.away, scheduled_at: p.scheduled_at });
+  });
+
+  return {
+    game_date: new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }),
+    games_summary: Array.from(seenGames.values()).sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at)),
+    props,
+  };
+}
+
 export async function fetchPropsNoBackend() {
   const [ppRaw, statsMap] = await Promise.all([
     fetchSafe(PP_URL, 12000),
     buildSeasonStats(),
   ]);
 
-  if (!ppRaw?.data?.length) return null;
+  if (!ppRaw?.data?.length) {
+    // PrizePicks blocked or empty — fall back to direct Underdog fetch
+    return fetchUnderdogDirect();
+  }
 
   // Build PrizePicks entity lookups
   const ppPlayers = {};
