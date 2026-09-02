@@ -172,7 +172,7 @@ const UD_STAT_MAP = {
   season_sacks: 'season_sacks',
 };
 
-async function fetchUnderdogDirect() {
+export async function fetchUnderdogDirect() {
   const raw = await fetchSafe(UD_URL, 15000);
   if (!raw?.over_under_lines?.length) return null;
 

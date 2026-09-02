@@ -1,9 +1,9 @@
-const CACHE_KEY = 'locklab_live_props_v41';
-const CACHE_TS_KEY = 'locklab_live_props_ts_v41';
+const CACHE_KEY = 'locklab_live_props_v42';
+const CACHE_TS_KEY = 'locklab_live_props_ts_v42';
 const FRESH_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 
 (function purgeOldCaches() {
-  for (let i = 1; i <= 36; i++) {
+  for (let i = 1; i <= 41; i++) {
     localStorage.removeItem(`locklab_live_props_v${i}`);
     localStorage.removeItem(`locklab_live_props_date_v${i}`);
     localStorage.removeItem(`locklab_live_props_ts_v${i}`);
@@ -12,7 +12,7 @@ const FRESH_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 
 import { NFL_API } from './config';
 import { isDemoMode, getMockPayload } from './mockData';
-import { fetchPropsNoBackend } from './propsNoBackend';
+import { fetchPropsNoBackend, fetchUnderdogDirect } from './propsNoBackend';
 
 // True when the API URL points to localhost but the browser is on a real domain.
 // This happens in Vercel production builds where .env has VITE_API_URL=http://localhost:8000
@@ -245,9 +245,8 @@ async function _doFetch() {
 
   const defaultBookmakers = 'draftkings,fanduel,betmgm,caesars,pointsbetus';
 
-  // 8s timeout: fast failure when backend is down. Set VITE_API_URL in Vercel
-  // environment variables to your Railway backend URL to enable live props.
-  const TIMEOUT = 8000;
+  // 20s timeout — Railway free tier can take 15s+ on cold start.
+  const TIMEOUT = 20000;
   const [settingsResult, ppResult, udResult, dkResult] = await Promise.allSettled([
     fetchWithTimeout(`${NFL_API}/api/settings`, {}, TIMEOUT).then(r => r.json()).catch(() => ({})),
     fetchWithTimeout(`${NFL_API}/api/prizepicks/props`, {}, TIMEOUT).then(r => r.ok ? r.json() : null).catch(() => null),
@@ -282,6 +281,15 @@ async function _doFetch() {
   }
 
   if (!rawProps.length) {
+    // Railway path returned nothing — try direct Underdog browser fetch as final fallback.
+    const udDirect = await fetchUnderdogDirect();
+    if (udDirect?.props?.length) {
+      const props = udDirect.props.map((p, i) => enrichProp(p, i));
+      const payload = { game_date: udDirect.game_date || new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }), games_summary: [], props };
+      localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
+      localStorage.setItem(CACHE_TS_KEY, String(Date.now()));
+      return payload;
+    }
     return { game_date: new Date().toLocaleDateString(), games_summary: [], props: [] };
   }
 
