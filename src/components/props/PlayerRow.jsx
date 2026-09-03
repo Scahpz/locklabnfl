@@ -1,14 +1,14 @@
 import React, { useState, useMemo } from 'react';
-import { ChevronDown, TrendingUp, TrendingDown, BookmarkPlus, Check } from 'lucide-react';
+import { ChevronDown, TrendingUp, TrendingDown, BookmarkPlus, Check, ArrowUpRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import TeamLogo from '@/components/common/TeamLogo';
-import RankedPropCard from '@/components/props/RankedPropCard';
+import PropGradeChecklist from '@/components/props/PropGradeChecklist';
 import { gradeProp } from '@/lib/grading';
 import { calcEVVerdict, TIER_CONFIG } from '@/lib/verdict';
+import { useParlay } from '@/lib/ParlayContext';
 import { base44 } from '@/api/base44Client';
 import { toast } from 'sonner';
 
-// NFL week from scheduled_at (Thursday after Labor Day = Week 1)
 function getNFLWeek(dateStr) {
   if (!dateStr) return null;
   const d = new Date(dateStr);
@@ -35,6 +35,19 @@ function PlayerAvatar({ prop, name }) {
   return <TeamLogo team={prop.team} className="w-11 h-11 flex-shrink-0" />;
 }
 
+// De-vig market odds to get true implied probabilities
+function devigOdds(overOdds, underOdds) {
+  const toImpl = (o) => {
+    const n = Number(o) || -110;
+    return n < 0 ? Math.abs(n) / (Math.abs(n) + 100) : 100 / (n + 100);
+  };
+  const rawOver  = toImpl(overOdds);
+  const rawUnder = toImpl(underOdds);
+  const total    = rawOver + rawUnder;
+  const overPct  = Math.round((rawOver / total) * 100);
+  return { overPct, underPct: 100 - overPct };
+}
+
 const propTypeLabels = {
   passing_yards: 'Pass Yds', passing_tds: 'Pass TDs', completions: 'Comp',
   rushing_yards: 'Rush Yds', rushing_tds: 'Rush TDs', rushing_attempts: 'Rush Att',
@@ -55,6 +68,7 @@ export default function PlayerRow({ playerName, props, allPlayerProps, rank, ver
   const [expanded, setExpanded] = useState(false);
   const [activeType, setActiveType] = useState(() => props[0]?.prop_type);
   const [tracked, setTracked] = useState(false);
+  const { addLeg, isSelected } = useParlay();
 
   const activeProp = useMemo(
     () => props.find(p => p.prop_type === activeType) ?? props[0],
@@ -82,13 +96,18 @@ export default function PlayerRow({ playerName, props, allPlayerProps, rank, ver
   const evVerdict = calcEVVerdict(gradedProp, grade);
   const isOver    = evVerdict.direction === 'OVER';
 
-  // Replace "PRE-SEASON" with the actual NFL week ("WK 1", "WK 2", …)
   const weekNum = getNFLWeek(activeProp.scheduled_at);
   const displayLabel = evVerdict.tier === 'PRESEASON' && weekNum != null
     ? `WK ${weekNum}`
     : evVerdict.label;
 
-  const hasStats = gradedProp.avg_last_10 != null || gradedProp.hit_rate_last_10 != null;
+  const { overPct, underPct } = devigOdds(gradedProp.over_odds, gradedProp.under_odds);
+
+  const hasStats    = gradedProp.avg_last_10 != null || gradedProp.hit_rate_last_10 != null;
+  const isMarketOnly = evVerdict.tier === 'PRESEASON' || activeProp.data_unavailable === true;
+
+  const selectedOver  = isSelected(playerName, gradedProp.prop_type, 'over');
+  const selectedUnder = isSelected(playerName, gradedProp.prop_type, 'under');
 
   const gameDate = activeProp.scheduled_at
     ? new Date(activeProp.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
@@ -197,38 +216,71 @@ export default function PlayerRow({ playerName, props, allPlayerProps, rank, ver
           })}
         </div>
 
-        {/* ── BIG OVER / UNDER banner ── */}
+        {/* Direction banner */}
         <div className={cn(
-          "rounded-xl p-3.5 flex items-center justify-between mb-3",
+          "rounded-xl p-3 flex items-center justify-between mb-2.5",
           isOver
             ? "bg-emerald-500/10 border border-emerald-500/25"
             : "bg-rose-500/10 border border-rose-500/25"
         )}>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
             {isOver
-              ? <TrendingUp className="w-5 h-5 text-emerald-400 flex-shrink-0" />
-              : <TrendingDown className="w-5 h-5 text-rose-400 flex-shrink-0" />
+              ? <TrendingUp className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+              : <TrendingDown className="w-4 h-4 text-rose-400 flex-shrink-0" />
             }
             <div>
-              <p className={cn("text-xl font-black leading-none tracking-tight", isOver ? "text-emerald-400" : "text-rose-400")}>
+              <p className={cn("text-lg font-black leading-none tracking-tight", isOver ? "text-emerald-400" : "text-rose-400")}>
                 {evVerdict.direction}
               </p>
-              <p className="text-base font-bold text-foreground/90 font-mono leading-tight">
+              <p className="text-sm font-bold text-foreground/80 font-mono leading-tight mt-0.5">
                 {gradedProp.line ?? '—'}
               </p>
             </div>
           </div>
-          <span className={cn(
-            "text-[10px] font-bold px-2.5 py-1.5 rounded-lg border",
-            TIER_CONFIG[evVerdict.tier]?.badge
-          )}>
-            {displayLabel}
-          </span>
+          <div className="text-right">
+            <span className={cn(
+              "text-[10px] font-bold px-2.5 py-1.5 rounded-lg border inline-block",
+              TIER_CONFIG[evVerdict.tier]?.badge
+            )}>
+              {displayLabel}
+            </span>
+            {isMarketOnly && (
+              <p className="text-[9px] text-muted-foreground/40 mt-1">Market lean · no history</p>
+            )}
+          </div>
+        </div>
+
+        {/* OVER / UNDER bet buttons with devigged market probabilities */}
+        <div className="flex gap-2 mb-2.5" onClick={e => e.stopPropagation()}>
+          <button
+            onClick={() => addLeg(gradedProp, 'over')}
+            className={cn(
+              "flex-1 py-2.5 rounded-xl text-xs font-bold transition-all border flex items-center justify-center gap-1.5",
+              selectedOver
+                ? "bg-emerald-500 border-emerald-500 text-white shadow-[0_0_14px_rgba(16,185,129,0.35)]"
+                : "bg-emerald-500/10 border-emerald-500/25 text-emerald-400 hover:bg-emerald-500/20 active:scale-[0.98]"
+            )}
+          >
+            <TrendingUp className="w-3 h-3 flex-shrink-0" />
+            OVER {overPct}%
+          </button>
+          <button
+            onClick={() => addLeg(gradedProp, 'under')}
+            className={cn(
+              "flex-1 py-2.5 rounded-xl text-xs font-bold transition-all border flex items-center justify-center gap-1.5",
+              selectedUnder
+                ? "bg-rose-500 border-rose-500 text-white shadow-[0_0_14px_rgba(239,68,68,0.35)]"
+                : "bg-rose-500/10 border-rose-500/25 text-rose-400 hover:bg-rose-500/20 active:scale-[0.98]"
+            )}
+          >
+            <TrendingDown className="w-3 h-3 flex-shrink-0" />
+            UNDER {underPct}%
+          </button>
         </div>
 
         {/* Stats row — only when historical data is available */}
         {hasStats && (
-          <div className="flex items-center gap-3 text-[10px] text-muted-foreground/60 mb-3 flex-wrap">
+          <div className="flex items-center gap-3 text-[10px] text-muted-foreground/60 mb-2 flex-wrap">
             {gradedProp.avg_last_10 != null && (
               <span>L10 avg <span className="text-foreground/80 font-semibold">{gradedProp.avg_last_10}</span></span>
             )}
@@ -246,30 +298,25 @@ export default function PlayerRow({ playerName, props, allPlayerProps, rank, ver
         {/* Expand toggle */}
         <div className="flex items-center justify-end pt-1 border-t border-white/5">
           <span className="text-[10px] text-muted-foreground/40 flex items-center gap-1">
-            {expanded ? 'Hide breakdown' : 'Full breakdown'}
+            {expanded ? 'Hide breakdown' : 'Grade breakdown'}
             <ChevronDown className={cn("w-3 h-3 transition-transform duration-200", expanded && "rotate-180")} />
           </span>
         </div>
       </div>
 
-      {/* ── Expanded breakdown ─────────────────────────────────── */}
+      {/* ── Expanded: grade checklist + analysis button (no duplicate header) ── */}
       {expanded && (
-        <div className="border-t border-white/6 p-4 space-y-3 bg-black/10">
-          {props.map((p, i) => {
-            const key = `${p.player_name}__${p.prop_type}__${p.line}`;
-            return (
-              <RankedPropCard
-                key={key}
-                prop={p}
-                rank={rank + i}
-                aiVerdict={verdicts[key]}
-                aiLoading={aiLoading}
-                activeSource={activeSource}
-                playerProps={allPlayerProps}
-                onOpenDetail={() => onOpenDetail(p.player_name, p.prop_type)}
-              />
-            );
-          })}
+        <div className="border-t border-white/6 bg-black/10">
+          <PropGradeChecklist prop={activeProp} />
+          <div className="px-4 pb-4">
+            <button
+              onClick={(e) => { e.stopPropagation(); onOpenDetail(activeProp.player_name, activeProp.prop_type); }}
+              className="w-full py-2.5 text-xs font-semibold rounded-xl border border-primary/20 text-primary/70 hover:text-primary hover:border-primary/40 hover:bg-primary/5 transition-all flex items-center justify-center gap-1.5"
+            >
+              Full Analysis + Line Adjuster
+              <ArrowUpRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       )}
     </div>

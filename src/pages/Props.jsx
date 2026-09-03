@@ -1,16 +1,18 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { fetchLiveProps, getCachedProps, isCacheValid, clearLiveCache, SOURCE_META } from '@/lib/liveData';
 import { isDemoMode } from '@/lib/mockData';
 import { getAIVerdicts } from '@/lib/aiVerdicts';
 import LockCards from '@/components/props/LockCards';
 import DemonPickCard from '@/components/props/DemonPickCard';
-import { RefreshCw, Wifi, WifiOff, Zap, SlidersHorizontal, Search, X } from 'lucide-react';
+import { RefreshCw, Wifi, WifiOff, Zap, SlidersHorizontal, Search, X, ShoppingCart } from 'lucide-react';
 import PlayerRow from '@/components/props/PlayerRow';
 import { cn } from '@/lib/utils';
 import { rankScore, gradeProp } from '@/lib/grading';
 import { NFL_API } from '@/lib/config';
 import { TEAM_STATS } from '@/lib/teamStats';
 import PropDetailModal from '@/components/props/PropDetailModal';
+import { useParlay } from '@/lib/ParlayContext';
 
 // ── Game-log localStorage cache ───────────────────────────────────────────────
 const GL_CACHE_PREFIX = 'locklab_gl_v9_';
@@ -35,8 +37,7 @@ function glCacheSet(name, data) {
 }
 async function fetchBulkGameLogs(names) {
   const ctrl = new AbortController();
-  // 50s per chunk — Railway cold-starts + ESPN scoreboard pre-warm can take 30-40s
-  const timer = setTimeout(() => ctrl.abort(), 50000);
+  const timer = setTimeout(() => ctrl.abort(), 8000);
   try {
     const res = await fetch(`${NFL_API}/api/player-gamelogs-bulk`, {
       method: 'POST',
@@ -61,7 +62,6 @@ const propTypeLabels = {
   rush_rec_tds: 'Rush+Rec TDs',
   rush_rec_yards: 'Rush+Rec Yds',
   pass_rush_yards: 'Pass+Rush Yds',
-  rushing_attempts: 'Rush Att',
   q1_receptions: '1Q Rec', q1_rush_rec_tds: '1Q Rush+Rec TDs',
   h1_receptions: '1H Rec', h1_rush_rec_tds: '1H Rush+Rec TDs',
   passing_long: 'Long Comp',
@@ -118,6 +118,7 @@ const todayLocalStr    = new Date().toLocaleDateString('en-CA');
 const tomorrowLocalStr = new Date(Date.now() + 86400000).toLocaleDateString('en-CA');
 
 export default function Props() {
+  const { legs } = useParlay();
   const [rawProps, setRawProps] = useState([]);
   const [gameDate, setGameDate] = useState(null);
   const [gamesSummary, setGamesSummary] = useState([]);
@@ -275,32 +276,33 @@ export default function Props() {
     if (!needsFetch.length) return;
     needsFetch.forEach(n => fetchedPlayers.current.add(n));
 
-    // Split into chunks of 15 and fire simultaneously — each chunk updates the UI
-    // as it resolves so analytics appear progressively instead of all-or-nothing.
-    const CHUNK = 15;
-    const chunks = [];
-    for (let i = 0; i < needsFetch.length; i += CHUNK) chunks.push(needsFetch.slice(i, i + CHUNK));
+    // Single batch: fetch the first 50 visible players, mark the rest null immediately
+    // so factors never stay on "loading…" when the backend returns empty analytics.
+    const TOP = 50;
+    const batch = needsFetch.slice(0, TOP);
 
-    chunks.forEach(chunk => {
-      fetchBulkGameLogs(chunk).then(data => {
-        const updates = {};
-        if (data?.analytics) {
-          Object.entries(data.analytics).forEach(([name, analytics]) => {
-            if (analytics && Object.keys(analytics).length > 0) {
-              updates[name] = analytics;
-              glCacheSet(name, { analytics });
-            }
-          });
-        }
-        // Players not returned by the backend → mark null so criteria show "not available"
-        // rather than staying on "loading" forever.
-        chunk.forEach(n => { if (!(n in updates)) updates[n] = null; });
-        setPlayerAnalytics(prev => ({ ...prev, ...updates }));
-      }).catch(() => {
-        const updates = {};
-        chunk.forEach(n => { updates[n] = null; });
-        setPlayerAnalytics(prev => ({ ...prev, ...updates }));
-      });
+    if (needsFetch.length > TOP) {
+      const skipUpdates = {};
+      needsFetch.slice(TOP).forEach(n => { skipUpdates[n] = null; });
+      setPlayerAnalytics(prev => ({ ...prev, ...skipUpdates }));
+    }
+
+    fetchBulkGameLogs(batch).then(data => {
+      const updates = {};
+      if (data?.analytics) {
+        Object.entries(data.analytics).forEach(([name, analytics]) => {
+          if (analytics && Object.keys(analytics).length > 0) {
+            updates[name] = analytics;
+            glCacheSet(name, { analytics });
+          }
+        });
+      }
+      batch.forEach(n => { if (!(n in updates)) updates[n] = null; });
+      setPlayerAnalytics(prev => ({ ...prev, ...updates }));
+    }).catch(() => {
+      const updates = {};
+      batch.forEach(n => { updates[n] = null; });
+      setPlayerAnalytics(prev => ({ ...prev, ...updates }));
     });
   }, [rawProps]);
 
@@ -791,7 +793,7 @@ export default function Props() {
 
   return (
     <>
-    <div className="space-y-6">
+    <div className={cn("space-y-6", legs.length > 0 && "pb-20")}>
       {/* Demo mode banner */}
       {isDemoMode() && (
         <div className="flex items-center gap-2 text-xs px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 font-medium">
@@ -1205,6 +1207,26 @@ export default function Props() {
     })()}
     {detailDemon && demonPick && (
       <PropDetailModal prop={demonPick.prop} onClose={() => setDetailDemon(false)} />
+    )}
+
+    {/* Sticky parlay bar — shows when legs are queued */}
+    {legs.length > 0 && (
+      <div className="fixed bottom-0 left-0 right-0 z-50 bg-background/95 backdrop-blur-md border-t border-border">
+        <div className="max-w-screen-xl mx-auto flex items-center justify-between gap-4 px-4 py-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <ShoppingCart className="w-4 h-4 text-primary flex-shrink-0" />
+            <span className="text-sm font-semibold text-foreground">
+              {legs.length} leg{legs.length !== 1 ? 's' : ''} selected
+            </span>
+          </div>
+          <Link
+            to="/parlay"
+            className="text-xs px-4 py-2 rounded-lg bg-primary text-primary-foreground font-bold hover:bg-primary/90 transition-colors whitespace-nowrap flex-shrink-0"
+          >
+            View Parlay →
+          </Link>
+        </div>
+      </div>
     )}
     </>
   );
