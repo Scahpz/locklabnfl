@@ -163,13 +163,6 @@ const UD_STAT_MAP = {
   period_1_2_rushing_yds: 'h1_rushing_yards',
   period_1_rush_rec_tds: 'q1_rush_rec_tds',
   period_1_2_rush_rec_tds: 'h1_rush_rec_tds',
-  season_receiving_yards: 'season_receiving_yards',
-  season_rec_tds: 'season_receiving_tds',
-  season_pass_yards: 'season_passing_yards',
-  season_rush_yards: 'season_rushing_yards',
-  season_rush_tds: 'season_rushing_tds',
-  season_pass_tds: 'season_passing_tds',
-  season_sacks: 'season_sacks',
 };
 
 export async function fetchUnderdogDirect() {

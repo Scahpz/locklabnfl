@@ -178,18 +178,6 @@ async def underdog_props():
                 "period_1_2_passing_yds":   "h1_passing_yards",
                 "period_1_2_rushing_yds":   "h1_rushing_yards",
                 "period_1_2_rush_rec_tds":  "h1_rush_rec_tds",
-                # Season-long futures
-                "season_receiving_yards":   "season_receiving_yards",
-                "season_rec_yards":         "season_receiving_yards",
-                "season_rec_tds":           "season_receiving_tds",
-                "season_pass_yards":        "season_passing_yards",
-                "season_passing_yards":     "season_passing_yards",
-                "season_rush_yards":        "season_rushing_yards",
-                "season_rushing_yards":     "season_rushing_yards",
-                "season_rush_tds":          "season_rushing_tds",
-                "season_pass_tds":          "season_passing_tds",
-                "season_receptions":        "season_receptions",
-                "season_sacks":             "season_sacks",
             }
 
             # Build team UUID → abbreviation + game info maps from games array

@@ -98,6 +98,22 @@ function localDateStr(utcIso) {
   return new Date(utcIso).toLocaleDateString('en-CA'); // YYYY-MM-DD in local tz
 }
 
+// NFL week number for a given date. Week 1 starts the Thursday after Labor Day.
+function getNFLWeek(dateStr) {
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  const year = d.getUTCFullYear();
+  const sep1 = new Date(Date.UTC(year, 8, 1));
+  // Labor Day = first Monday of September
+  const daysToMonday = (1 - sep1.getUTCDay() + 7) % 7;
+  const laborDay = new Date(Date.UTC(year, 8, 1 + daysToMonday));
+  // Week 1 kicks off the Thursday after Labor Day
+  const week1Start = new Date(laborDay.getTime() + 3 * 24 * 60 * 60 * 1000);
+  if (d < week1Start) return null; // preseason
+  const weekNum = Math.floor((d.getTime() - week1Start.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
+  return weekNum >= 1 && weekNum <= 18 ? weekNum : null;
+}
+
 const todayLocalStr    = new Date().toLocaleDateString('en-CA');
 const tomorrowLocalStr = new Date(Date.now() + 86400000).toLocaleDateString('en-CA');
 
@@ -123,6 +139,7 @@ export default function Props() {
   const [showPlayerDrop, setShowPlayerDrop] = useState(false);
   const [selectedPlayers, setSelectedPlayers] = useState(savedFilters.selectedPlayers ?? []);
   const [selectedSources, setSelectedSources] = useState(savedFilters.selectedSources ?? []);
+  const [selectedWeeks, setSelectedWeeks] = useState(savedFilters.selectedWeeks ?? [1]);
   const [detailKey, setDetailKey] = useState(null); // { player_name, prop_type }
   const [detailDemon, setDetailDemon] = useState(false);
   const searchRef = useRef(null);
@@ -132,7 +149,7 @@ export default function Props() {
 
   // Persist filter state to sessionStorage so it survives navigation
   useEffect(() => {
-    sessionStorage.setItem('props_filters', JSON.stringify({ selectedGames, selectedType, sortBy, selectedPlayers, selectedSources }));
+    sessionStorage.setItem('props_filters', JSON.stringify({ selectedGames, selectedType, sortBy, selectedPlayers, selectedSources, selectedWeeks }));
   }, [selectedGames, selectedType, sortBy, selectedPlayers, selectedSources]);
 
   const applyData = (data, skipAI = false) => {
@@ -402,18 +419,54 @@ export default function Props() {
     return () => { if (retryTimerRef.current) clearInterval(retryTimerRef.current); };
   }, []);
 
+  // Which NFL week numbers are represented in the loaded data
+  const availableWeeks = useMemo(() => {
+    const weeks = new Set();
+    enrichedProps.forEach(p => {
+      const w = getNFLWeek(p.scheduled_at);
+      if (w != null) weeks.add(w);
+    });
+    return Array.from(weeks).sort((a, b) => a - b);
+  }, [enrichedProps]);
+
+  // Auto-correct: if the default [1] has no data, jump to first available week
+  useEffect(() => {
+    if (!availableWeeks.length) return;
+    const hasData = selectedWeeks.some(w => availableWeeks.includes(w));
+    if (!hasData) setSelectedWeeks([availableWeeks[0]]);
+  }, [availableWeeks]);
+
+  // Props filtered to selected weeks (empty = all weeks)
+  const weekFilteredProps = useMemo(() => {
+    if (selectedWeeks.length === 0) return enrichedProps;
+    return enrichedProps.filter(p => {
+      const w = getNFLWeek(p.scheduled_at);
+      return w != null && selectedWeeks.includes(w);
+    });
+  }, [enrichedProps, selectedWeeks]);
+
+  const toggleWeek = (w) => {
+    setSelectedWeeks(prev => prev.includes(w) ? prev.filter(x => x !== w) : [...prev, w]);
+    setSelectedGames([]);
+  };
+
   const toggleGame = (g) => {
     const key = `${(g.away || '').toUpperCase()}@${(g.home || '').toUpperCase()}`;
     setSelectedGames(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]);
   };
 
+  // Derive games from week-filtered props so game filter only shows relevant matchups
   const sortedGames = useMemo(() => {
-    return [...gamesSummary].sort((a, b) => {
-      const ta = a.scheduled_at ? new Date(a.scheduled_at).getTime() : Infinity;
-      const tb = b.scheduled_at ? new Date(b.scheduled_at).getTime() : Infinity;
-      return ta - tb;
+    const seen = new Map();
+    weekFilteredProps.forEach(p => {
+      const away = (p.away || '').toUpperCase();
+      const home = (p.home || '').toUpperCase();
+      if (!away || !home) return;
+      const k = `${away}@${home}`;
+      if (!seen.has(k)) seen.set(k, { home: p.home, away: p.away, scheduled_at: p.scheduled_at });
     });
-  }, [gamesSummary]);
+    return Array.from(seen.values()).sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at));
+  }, [weekFilteredProps]);
 
   // Split sorted games into today / tomorrow / other for the filter UI.
   // "Other" games are shown in the filter but never affect Locks / Demon Pick (today-only).
@@ -461,11 +514,11 @@ export default function Props() {
       return gradeProp({ ...p, hit_rate_last_10: dynamicHitRate, edge: dynamicEdge }).confidence;
     };
 
-    return [...enrichedProps]
+    return [...weekFilteredProps]
       .filter(p => p.avg_last_10 != null && isTodayProp(p) && getConfidence(p) >= 75)
       .sort((a, b) => rankScore(b) - rankScore(a))
       .slice(0, 2);
-  }, [enrichedProps, todayTeams]);
+  }, [weekFilteredProps, todayTeams]);
 
   // Demon Pick: player on a cold streak BUT the line is set too low vs their season avg —
   // AI predicts a bounce-back explosion because books overreacted to the slump.
@@ -482,7 +535,7 @@ export default function Props() {
     const AVG_DEF = 113.5;
     const AVG_PACE = 98.5;
 
-    const candidates = enrichedProps
+    const candidates = weekFilteredProps
       .filter(p => p.avg_last_10 != null && p.season_avg != null && isTodayProp(p))
       .filter(p => {
         // Must be in a cold streak (under streak of 2+ games OR L5 meaningfully below L10)
@@ -589,58 +642,50 @@ export default function Props() {
       .sort((a, b) => b.boomScore - a.boomScore);
 
     return candidates[0] || null;
-  }, [enrichedProps, todayTeams]);
+  }, [weekFilteredProps, todayTeams]);
 
   // All prop types per player (from the full unfiltered set) — passed to each card
   // so it can show a prop-type switcher without having to know about filtered siblings
   const propsByPlayer = useMemo(() => {
     const map = {};
-    enrichedProps.forEach(p => {
+    weekFilteredProps.forEach(p => {
       if (!map[p.player_name]) map[p.player_name] = [];
       map[p.player_name].push(p);
     });
     return map;
-  }, [enrichedProps]);
+  }, [weekFilteredProps]);
 
   // Dynamic prop-type filter chips — only types that have actual data in the feed.
   // Grouped: Passing → Rushing → Receiving → Combo/Other → Period
   const propTypeOptions = useMemo(() => {
-    const inFeed = new Set(enrichedProps.map(p => p.prop_type));
+    const inFeed = new Set(weekFilteredProps.map(p => p.prop_type));
     const ORDER = [
-      // Single-game props
       'passing_yards', 'passing_tds', 'passing_ints', 'pass_rush_yards', 'passing_long',
       'rushing_yards', 'rushing_tds', 'rushing_long', 'rushing_attempts',
       'receiving_yards', 'receiving_tds', 'receptions',
       'rush_rec_tds', 'rush_rec_yards', 'fantasy_points', 'sacks', 'tackles',
-      // Period props
       'q1_passing_yards', 'q1_rushing_yards', 'q1_receiving_yards', 'q1_receptions', 'q1_rush_rec_tds',
       'h1_passing_yards', 'h1_rushing_yards', 'h1_receiving_yards', 'h1_receptions', 'h1_rush_rec_tds',
-      // Season-long futures (shown when no game props are live)
-      'season_passing_yards', 'season_passing_tds',
-      'season_rushing_yards', 'season_rushing_tds',
-      'season_receiving_yards', 'season_receiving_tds',
-      'season_receptions', 'season_sacks',
     ];
     return ORDER.filter(t => inFeed.has(t));
-  }, [enrichedProps]);
+  }, [weekFilteredProps]);
 
   // Unique betting platforms present in the current prop set, in display order
   const availableSources = useMemo(() => {
     const seen = new Set();
-    enrichedProps.forEach(p => (p.sources || []).forEach(s => seen.add(s)));
-    // Order: sportsbooks first, then DFS/contest sites
+    weekFilteredProps.forEach(p => (p.sources || []).forEach(s => seen.add(s)));
     const ORDER = ['fanduel', 'draftkings', 'betmgm', 'caesars', 'pointsbetus', 'prizepicks', 'underdog'];
     return ORDER.filter(s => seen.has(s));
-  }, [enrichedProps]);
+  }, [weekFilteredProps]);
 
   // Unique player names for search suggestions
   const allPlayerNames = useMemo(() => {
     const seen = new Set();
-    return enrichedProps
+    return weekFilteredProps
       .map(p => p.player_name)
       .filter(n => { if (seen.has(n)) return false; seen.add(n); return true; })
       .sort();
-  }, [enrichedProps]);
+  }, [weekFilteredProps]);
 
   const playerSuggestions = useMemo(() => {
     if (!playerSearch.trim()) return [];
@@ -658,7 +703,7 @@ export default function Props() {
   }, []);
 
   const filteredAndRanked = useMemo(() => {
-    let result = enrichedProps;
+    let result = weekFilteredProps;
 
     if (selectedPlayers.length > 0) {
       result = result.filter(p => selectedPlayers.includes(p.player_name));
@@ -711,7 +756,7 @@ export default function Props() {
     }
 
     return result;
-  }, [enrichedProps, selectedGames, selectedType, sortBy, selectedPlayers, selectedSources]);
+  }, [weekFilteredProps, selectedGames, selectedType, sortBy, selectedPlayers, selectedSources]);
 
   // Group ranked props by player, preserving the rank of their best prop
   const playerGroups = useMemo(() => {
@@ -779,6 +824,38 @@ export default function Props() {
           Refresh
         </button>
       </div>
+
+      {/* Week selector — shown when multiple weeks have data, or always once data is loaded */}
+      {availableWeeks.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mr-1">Week</span>
+          {availableWeeks.map(w => {
+            const active = selectedWeeks.includes(w);
+            return (
+              <button
+                key={w}
+                onClick={() => toggleWeek(w)}
+                className={cn(
+                  "text-xs px-3 py-1.5 rounded-lg border transition-all font-semibold",
+                  active
+                    ? "bg-primary/20 border-primary/50 text-primary"
+                    : "bg-secondary/60 border-border text-muted-foreground hover:text-foreground hover:border-white/15"
+                )}
+              >
+                Week {w}
+              </button>
+            );
+          })}
+          {selectedWeeks.length > 0 && (
+            <button
+              onClick={() => setSelectedWeeks([])}
+              className="text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors ml-1"
+            >
+              All weeks
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Game filter — split by Today / Tomorrow */}
       {sortedGames.length > 0 && (
@@ -883,7 +960,7 @@ export default function Props() {
         </div>
       )}
 
-      {/* Empty state */}
+      {/* Empty state — no data at all (fetch failed or offseason) */}
       {enrichedProps.length === 0 && (
         <div className="text-center py-20 text-muted-foreground space-y-3">
           <Zap className="w-12 h-12 mx-auto opacity-20" />
@@ -922,7 +999,21 @@ export default function Props() {
         </div>
       )}
 
-      {enrichedProps.length > 0 && (
+      {/* Empty state — data loaded but week filter has no props */}
+      {enrichedProps.length > 0 && weekFilteredProps.length === 0 && (
+        <div className="text-center py-16 text-muted-foreground space-y-2">
+          <Zap className="w-10 h-10 mx-auto opacity-20" />
+          <p className="text-base font-medium">No props for the selected week{selectedWeeks.length !== 1 ? 's' : ''}</p>
+          <button
+            onClick={() => setSelectedWeeks(availableWeeks.length ? [availableWeeks[0]] : [])}
+            className="mt-1 text-xs px-3 py-1.5 rounded-lg bg-secondary border border-border text-muted-foreground hover:text-foreground transition-all"
+          >
+            Show available weeks
+          </button>
+        </div>
+      )}
+
+      {enrichedProps.length > 0 && weekFilteredProps.length > 0 && (
         <>
           {/* Locks of the Day */}
           <LockCards locks={locks} verdicts={verdicts} aiLoading={aiLoading} />
@@ -1029,8 +1120,8 @@ export default function Props() {
                 {showPlayerDrop && playerSuggestions.length > 0 && (
                   <div className="absolute top-full mt-1 w-64 bg-popover border border-border rounded-lg shadow-xl z-50 overflow-hidden">
                     {playerSuggestions.filter(name => !selectedPlayers.includes(name)).map(name => {
-                      const p = enrichedProps.find(ep => ep.player_name === name);
-                      const propCount = enrichedProps.filter(ep => ep.player_name === name).length;
+                      const p = weekFilteredProps.find(ep => ep.player_name === name);
+                      const propCount = weekFilteredProps.filter(ep => ep.player_name === name).length;
                       return (
                         <button
                           key={name}
@@ -1109,7 +1200,7 @@ export default function Props() {
 
     {/* Prop detail modal — looks up live enriched prop so analytics update even if modal was opened early */}
     {detailKey && (() => {
-      const liveProp = enrichedProps.find(p => p.player_name === detailKey.player_name && p.prop_type === detailKey.prop_type);
+      const liveProp = weekFilteredProps.find(p => p.player_name === detailKey.player_name && p.prop_type === detailKey.prop_type);
       return liveProp ? <PropDetailModal prop={liveProp} onClose={() => setDetailKey(null)} /> : null;
     })()}
     {detailDemon && demonPick && (
