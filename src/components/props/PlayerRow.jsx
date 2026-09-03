@@ -102,6 +102,9 @@ export default function PlayerRow({ playerName, props, allPlayerProps, rank, ver
     : evVerdict.label;
 
   const { overPct, underPct } = devigOdds(gradedProp.over_odds, gradedProp.under_odds);
+  // Don't show percentages when odds are equal — flat -110/-110 (DFS platforms) devig to 50/50
+  // which adds no information over just showing OVER/UNDER.
+  const showPct = gradedProp.over_odds !== gradedProp.under_odds && overPct !== underPct;
 
   const hasStats    = gradedProp.avg_last_10 != null || gradedProp.hit_rate_last_10 != null;
   const isMarketOnly = evVerdict.tier === 'PRESEASON' || activeProp.data_unavailable === true;
@@ -262,7 +265,7 @@ export default function PlayerRow({ playerName, props, allPlayerProps, rank, ver
             )}
           >
             <TrendingUp className="w-3 h-3 flex-shrink-0" />
-            OVER {overPct}%
+            OVER{showPct ? ` ${overPct}%` : ''}
           </button>
           <button
             onClick={() => addLeg(gradedProp, 'under')}
@@ -274,7 +277,7 @@ export default function PlayerRow({ playerName, props, allPlayerProps, rank, ver
             )}
           >
             <TrendingDown className="w-3 h-3 flex-shrink-0" />
-            UNDER {underPct}%
+            UNDER{showPct ? ` ${underPct}%` : ''}
           </button>
         </div>
 
@@ -307,7 +310,7 @@ export default function PlayerRow({ playerName, props, allPlayerProps, rank, ver
       {/* ── Expanded: grade checklist + analysis button (no duplicate header) ── */}
       {expanded && (
         <div className="border-t border-white/6 bg-black/10">
-          <PropGradeChecklist prop={activeProp} />
+          <PropGradeChecklist prop={activeProp} initialOpen={true} />
           <div className="px-4 pb-4">
             <button
               onClick={(e) => { e.stopPropagation(); onOpenDetail(activeProp.player_name, activeProp.prop_type); }}

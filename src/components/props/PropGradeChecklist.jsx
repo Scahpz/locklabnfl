@@ -21,8 +21,8 @@ function toLetterGrade(pass, available) {
   return 'F';
 }
 
-export default function PropGradeChecklist({ prop }) {
-  const [open, setOpen] = useState(false);
+export default function PropGradeChecklist({ prop, initialOpen = false }) {
+  const [open, setOpen] = useState(initialOpen);
   const { criteria, passCount, totalCriteria, dataQuality } = gradeProp(prop);
   const availableCount = criteria.filter(c => c.available).length;
   const letterGrade = toLetterGrade(passCount, availableCount);
@@ -91,11 +91,6 @@ export default function PropGradeChecklist({ prop }) {
             </div>
           ))}
 
-          {dataQuality === 'market' && (
-            <p className="text-[9px] text-muted-foreground/50 pt-2 border-t border-white/5 italic">
-              Full analytics loading in background…
-            </p>
-          )}
         </div>
       )}
     </div>
