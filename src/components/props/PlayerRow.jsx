@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { ChevronDown, ChevronUp, TrendingUp, TrendingDown, BookmarkPlus, Check } from 'lucide-react';
+import { ChevronDown, TrendingUp, TrendingDown, BookmarkPlus, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import TeamLogo from '@/components/common/TeamLogo';
 import RankedPropCard from '@/components/props/RankedPropCard';
@@ -8,48 +8,47 @@ import { calcEVVerdict, TIER_CONFIG } from '@/lib/verdict';
 import { base44 } from '@/api/base44Client';
 import { toast } from 'sonner';
 
+// NFL week from scheduled_at (Thursday after Labor Day = Week 1)
+function getNFLWeek(dateStr) {
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  const year = d.getUTCFullYear();
+  const sep1 = new Date(Date.UTC(year, 8, 1));
+  const daysToMonday = (1 - sep1.getUTCDay() + 7) % 7;
+  const laborDay = new Date(Date.UTC(year, 8, 1 + daysToMonday));
+  const week1Start = new Date(laborDay.getTime() + 3 * 24 * 60 * 60 * 1000);
+  if (d < week1Start) return null;
+  const n = Math.floor((d.getTime() - week1Start.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
+  return n >= 1 && n <= 18 ? n : null;
+}
+
 function PlayerAvatar({ prop, name }) {
-  const [imgError, setImgError] = React.useState(false);
-  const url = !imgError && prop.image_url ? prop.image_url : null;
+  const [err, setErr] = React.useState(false);
+  const url = !err && prop.image_url ? prop.image_url : null;
   if (url) {
     return (
-      <div className="w-9 h-9 rounded-full overflow-hidden bg-secondary flex-shrink-0 border border-white/8">
-        <img src={url} alt={name} className="w-full h-full object-cover object-top" onError={() => setImgError(true)} />
+      <div className="w-11 h-11 rounded-full overflow-hidden bg-secondary flex-shrink-0 border border-white/10">
+        <img src={url} alt={name} className="w-full h-full object-cover object-top" onError={() => setErr(true)} />
       </div>
     );
   }
-  return <TeamLogo team={prop.team} className="w-9 h-9 flex-shrink-0" />;
+  return <TeamLogo team={prop.team} className="w-11 h-11 flex-shrink-0" />;
 }
 
 const propTypeLabels = {
-  // NFL full-game
   passing_yards: 'Pass Yds', passing_tds: 'Pass TDs', completions: 'Comp',
   rushing_yards: 'Rush Yds', rushing_tds: 'Rush TDs', rushing_attempts: 'Rush Att',
   receiving_yards: 'Rec Yds', receiving_tds: 'Rec TDs', receptions: 'Rec',
   fantasy_points: 'Fant Pts', kicking_points: 'Kick Pts',
   tackles: 'Tackles', sacks: 'Sacks',
-  passing_ints: 'INTs Thrown',   // QB interceptions thrown (not defensive)
-  rush_rec_tds: 'Rush+Rec TDs',
-  rush_rec_yards: 'Rush+Rec Yds',
+  passing_ints: 'INTs Thrown',
+  rush_rec_tds: 'Rush+Rec TDs', rush_rec_yards: 'Rush+Rec Yds',
   pass_rush_yards: 'Pass+Rush Yds',
-  passing_long: 'Long Comp',
-  rushing_long: 'Long Rush',
-  rushing_attempts: 'Rush Att',
-  q1_receptions: '1Q Rec', q1_rush_rec_tds: '1Q Rush+Rec TDs',
-  h1_receptions: '1H Rec', h1_rush_rec_tds: '1H Rush+Rec TDs',
-  // NFL 1st quarter
+  passing_long: 'Long Comp', rushing_long: 'Long Rush',
+  q1_receptions: '1Q Rec', q1_rush_rec_tds: '1Q R+R TDs',
+  h1_receptions: '1H Rec', h1_rush_rec_tds: '1H R+R TDs',
   q1_passing_yards: '1Q Pass Yds', q1_rushing_yards: '1Q Rush Yds', q1_receiving_yards: '1Q Rec Yds',
-  // NFL 1st half
   h1_passing_yards: '1H Pass Yds', h1_rushing_yards: '1H Rush Yds', h1_receiving_yards: '1H Rec Yds',
-  // NFL season-long (futures / best-ball markets)
-  season_passing_yards: 'Pass Yds (Season)', season_passing_tds: 'Pass TDs (Season)',
-  season_rushing_yards: 'Rush Yds (Season)', season_rushing_tds: 'Rush TDs (Season)',
-  season_receiving_yards: 'Rec Yds (Season)', season_receiving_tds: 'Rec TDs (Season)',
-  season_receptions: 'Rec (Season)', season_sacks: 'Sacks (Season)',
-  // NBA
-  points: 'PTS', rebounds: 'REB', assists: 'AST', PRA: 'PRA',
-  '3PM': '3PM', steals: 'STL', blocks: 'BLK', turnovers: 'TO',
-  'P+R': 'P+R', 'P+A': 'P+A', 'A+R': 'A+R',
 };
 
 export default function PlayerRow({ playerName, props, allPlayerProps, rank, verdicts, aiLoading, activeSource, onOpenDetail }) {
@@ -57,10 +56,10 @@ export default function PlayerRow({ playerName, props, allPlayerProps, rank, ver
   const [activeType, setActiveType] = useState(() => props[0]?.prop_type);
   const [tracked, setTracked] = useState(false);
 
-  // If activeType is no longer in the filtered set, fall back gracefully
-  const activeProp = useMemo(() => {
-    return props.find(p => p.prop_type === activeType) ?? props[0];
-  }, [props, activeType]);
+  const activeProp = useMemo(
+    () => props.find(p => p.prop_type === activeType) ?? props[0],
+    [props, activeType]
+  );
 
   const platformBook = useMemo(() => {
     if (!activeSource) return null;
@@ -82,29 +81,18 @@ export default function PlayerRow({ playerName, props, allPlayerProps, rank, ver
   const grade     = gradeProp(gradedProp);
   const evVerdict = calcEVVerdict(gradedProp, grade);
   const isOver    = evVerdict.direction === 'OVER';
-  const stillLoading = !gradedProp.has_analytics && !gradedProp.data_unavailable;
 
-  const handleTrack = async (e) => {
-    e.stopPropagation();
-    try {
-      await base44.entities.PropHistory.create({
-        player_name:  playerName,
-        team:         gradedProp.team || gradedProp.player_team || '',
-        opponent:     gradedProp.opponent || '',
-        prop_type:    gradedProp.prop_type,
-        line:         gradedProp.line,
-        direction:    evVerdict.direction,
-        grade_label:  evVerdict.label,
-        tier:         evVerdict.tier,
-        game_date:    new Date().toLocaleDateString('en-CA'),
-        result:       'pending',
-      });
-      setTracked(true);
-      toast.success(`Tracking ${playerName} ${evVerdict.direction} ${gradedProp.line} ${gradedProp.prop_type}`);
-    } catch {
-      toast.error('Failed to track prop');
-    }
-  };
+  // Replace "PRE-SEASON" with the actual NFL week ("WK 1", "WK 2", …)
+  const weekNum = getNFLWeek(activeProp.scheduled_at);
+  const displayLabel = evVerdict.tier === 'PRESEASON' && weekNum != null
+    ? `WK ${weekNum}`
+    : evVerdict.label;
+
+  const hasStats = gradedProp.avg_last_10 != null || gradedProp.hit_rate_last_10 != null;
+
+  const gameDate = activeProp.scheduled_at
+    ? new Date(activeProp.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    : null;
 
   const rankStyle = rank <= 3
     ? 'text-chart-4 bg-chart-4/10 border-chart-4/25'
@@ -112,64 +100,75 @@ export default function PlayerRow({ playerName, props, allPlayerProps, rank, ver
     ? 'text-primary bg-primary/10 border-primary/15'
     : 'text-muted-foreground bg-white/5 border-white/8';
 
+  const handleTrack = async (e) => {
+    e.stopPropagation();
+    try {
+      await base44.entities.PropHistory.create({
+        player_name: playerName,
+        team:        gradedProp.team || '',
+        opponent:    gradedProp.opponent || '',
+        prop_type:   gradedProp.prop_type,
+        line:        gradedProp.line,
+        direction:   evVerdict.direction,
+        grade_label: evVerdict.label,
+        tier:        evVerdict.tier,
+        game_date:   new Date().toLocaleDateString('en-CA'),
+        result:      'pending',
+      });
+      setTracked(true);
+      toast.success(`Tracking ${playerName} ${evVerdict.direction} ${gradedProp.line}`);
+    } catch {
+      toast.error('Failed to track prop');
+    }
+  };
+
   return (
     <div className={cn(
-      "rounded-2xl border bg-[hsl(222,47%,9%)] overflow-hidden transition-all duration-200",
-      expanded ? "border-white/12 shadow-[0_4px_20px_rgba(0,0,0,0.25)]" : "border-white/6 hover:border-white/10"
+      "rounded-2xl border bg-[hsl(222,47%,9%)] overflow-hidden transition-all duration-200 flex flex-col",
+      expanded
+        ? "border-white/12 shadow-[0_4px_24px_rgba(0,0,0,0.3)]"
+        : "border-white/6 hover:border-white/12"
     )}>
-      {/* Collapsed header — always visible. Click whole header to expand/collapse. */}
-      <div className="p-3 cursor-pointer select-none" onClick={() => setExpanded(e => !e)}>
-        {/* Top row: rank + player info + verdict + chevron */}
-        <div className="flex items-center gap-2">
-          <div className={cn("w-6 h-6 rounded-lg flex items-center justify-center text-[11px] font-bold border flex-shrink-0", rankStyle)}>
+      {/* ── Card face ──────────────────────────────────────────── */}
+      <div className="p-4 cursor-pointer select-none flex-1" onClick={() => setExpanded(e => !e)}>
+
+        {/* Player header */}
+        <div className="flex items-center gap-2.5 mb-3">
+          <div className={cn("w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold border flex-shrink-0", rankStyle)}>
             {rank}
           </div>
           <PlayerAvatar prop={activeProp} name={playerName} />
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5">
-              <p className="font-semibold text-sm text-foreground truncate leading-tight">{playerName}</p>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <p className="font-bold text-sm text-foreground leading-tight">{playerName}</p>
               {activeProp.position && (
                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-primary/15 text-primary border border-primary/20 flex-shrink-0">
                   {activeProp.position}
                 </span>
               )}
             </div>
-            <p className="text-[10px] text-muted-foreground/60 leading-tight">
-              {activeProp.team
-                ? `${activeProp.team}${activeProp.opponent ? ` vs ${activeProp.opponent}` : ''}`
-                : activeProp.position || ''}
-              {activeProp.scheduled_at && (
-                <span> · {new Date(activeProp.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
-              )}
+            <p className="text-[10px] text-muted-foreground/70 leading-tight mt-0.5">
+              {activeProp.team && activeProp.opponent
+                ? `${activeProp.team} vs ${activeProp.opponent}`
+                : activeProp.team || ''}
+              {gameDate && ` · ${gameDate}`}
             </p>
           </div>
-          <span className={cn(
-            "flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-lg border flex-shrink-0",
-            TIER_CONFIG[evVerdict.tier]?.badge
-          )}>
-            <span className={cn('w-1.5 h-1.5 rounded-full flex-shrink-0', TIER_CONFIG[evVerdict.tier]?.dot)} />
-            {evVerdict.label}
-          </span>
           <button
             onClick={handleTrack}
             title={tracked ? 'Tracked!' : 'Track this prop'}
             className={cn(
-              "w-6 h-6 flex items-center justify-center rounded-lg transition-all flex-shrink-0",
-              tracked
-                ? "bg-primary/15 text-primary"
-                : "bg-white/5 text-muted-foreground hover:bg-primary/10 hover:text-primary"
+              "w-7 h-7 flex items-center justify-center rounded-lg transition-all flex-shrink-0",
+              tracked ? "bg-primary/15 text-primary" : "bg-white/5 text-muted-foreground hover:bg-primary/10 hover:text-primary"
             )}
           >
             {tracked ? <Check className="w-3.5 h-3.5" /> : <BookmarkPlus className="w-3.5 h-3.5" />}
           </button>
-          <div className="w-6 h-6 flex items-center justify-center rounded-lg bg-white/5 text-muted-foreground flex-shrink-0">
-            {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-          </div>
         </div>
 
-        {/* Prop type pills — each shows the line. Stop propagation so clicks don't toggle expand. */}
+        {/* Prop type tabs */}
         <div
-          className="flex items-center gap-1.5 mt-2.5 overflow-x-auto scrollbar-none"
+          className="flex items-center gap-1.5 mb-3 overflow-x-auto scrollbar-none"
           onClick={e => e.stopPropagation()}
         >
           {props.map(p => {
@@ -183,14 +182,14 @@ export default function PlayerRow({ playerName, props, allPlayerProps, rank, ver
                 key={p.prop_type}
                 onClick={() => setActiveType(p.prop_type)}
                 className={cn(
-                  "flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-all flex-shrink-0 whitespace-nowrap",
+                  "flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1.5 rounded-lg border transition-all flex-shrink-0 whitespace-nowrap",
                   isActive
                     ? "bg-primary/20 border-primary/40 text-primary"
-                    : "bg-white/5 border-white/8 text-muted-foreground/70 hover:text-foreground hover:border-white/15"
+                    : "bg-white/5 border-white/8 text-muted-foreground/60 hover:text-foreground hover:border-white/15"
                 )}
               >
                 {label}
-                <span className={cn("font-mono text-[9px]", isActive ? "text-primary/80" : "text-muted-foreground/50")}>
+                <span className={cn("font-mono text-[9px]", isActive ? "text-primary/70" : "text-muted-foreground/40")}>
                   {pLine ?? '—'}
                 </span>
               </button>
@@ -198,37 +197,64 @@ export default function PlayerRow({ playerName, props, allPlayerProps, rank, ver
           })}
         </div>
 
-        {/* Edge / hit rate summary for the active prop */}
-        <div className="flex items-center gap-2 mt-1.5">
-          {isOver
-            ? <TrendingUp className="w-3 h-3 text-primary flex-shrink-0" />
-            : <TrendingDown className="w-3 h-3 text-destructive flex-shrink-0" />
-          }
-          <span className={cn("text-[10px] font-semibold", isOver ? "text-primary" : "text-destructive")}>
-            {evVerdict.direction} {gradedProp.line}
+        {/* ── BIG OVER / UNDER banner ── */}
+        <div className={cn(
+          "rounded-xl p-3.5 flex items-center justify-between mb-3",
+          isOver
+            ? "bg-emerald-500/10 border border-emerald-500/25"
+            : "bg-rose-500/10 border border-rose-500/25"
+        )}>
+          <div className="flex items-center gap-3">
+            {isOver
+              ? <TrendingUp className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+              : <TrendingDown className="w-5 h-5 text-rose-400 flex-shrink-0" />
+            }
+            <div>
+              <p className={cn("text-xl font-black leading-none tracking-tight", isOver ? "text-emerald-400" : "text-rose-400")}>
+                {evVerdict.direction}
+              </p>
+              <p className="text-base font-bold text-foreground/90 font-mono leading-tight">
+                {gradedProp.line ?? '—'}
+              </p>
+            </div>
+          </div>
+          <span className={cn(
+            "text-[10px] font-bold px-2.5 py-1.5 rounded-lg border",
+            TIER_CONFIG[evVerdict.tier]?.badge
+          )}>
+            {displayLabel}
           </span>
-          {stillLoading ? (
-            <span className="inline-block w-24 h-2.5 rounded bg-white/8 animate-pulse" />
-          ) : (
-            <>
-              {gradedProp.edge != null && (
-                <span className="text-[10px] text-muted-foreground/50">
-                  {gradedProp.edge > 0 ? '+' : ''}{gradedProp.edge} edge
-                </span>
-              )}
-              {gradedProp.hit_rate_last_10 != null && (
-                <span className="text-[10px] text-muted-foreground/50">
-                  · {gradedProp.hit_rate_last_10}% hit L10
-                </span>
-              )}
-            </>
-          )}
+        </div>
+
+        {/* Stats row — only when historical data is available */}
+        {hasStats && (
+          <div className="flex items-center gap-3 text-[10px] text-muted-foreground/60 mb-3 flex-wrap">
+            {gradedProp.avg_last_10 != null && (
+              <span>L10 avg <span className="text-foreground/80 font-semibold">{gradedProp.avg_last_10}</span></span>
+            )}
+            {gradedProp.hit_rate_last_10 != null && (
+              <span>Hit rate <span className="text-foreground/80 font-semibold">{gradedProp.hit_rate_last_10}%</span></span>
+            )}
+            {gradedProp.edge != null && gradedProp.edge !== 0 && (
+              <span>Edge <span className={cn("font-semibold", gradedProp.edge > 0 ? "text-emerald-400" : "text-rose-400")}>
+                {gradedProp.edge > 0 ? '+' : ''}{gradedProp.edge}
+              </span></span>
+            )}
+          </div>
+        )}
+
+        {/* Expand toggle */}
+        <div className="flex items-center justify-end pt-1 border-t border-white/5">
+          <span className="text-[10px] text-muted-foreground/40 flex items-center gap-1">
+            {expanded ? 'Hide breakdown' : 'Full breakdown'}
+            <ChevronDown className={cn("w-3 h-3 transition-transform duration-200", expanded && "rotate-180")} />
+          </span>
         </div>
       </div>
 
-      {/* Expanded: full RankedPropCards for each filtered prop */}
+      {/* ── Expanded breakdown ─────────────────────────────────── */}
       {expanded && (
-        <div className="border-t border-white/5 p-3 space-y-3">
+        <div className="border-t border-white/6 p-4 space-y-3 bg-black/10">
           {props.map((p, i) => {
             const key = `${p.player_name}__${p.prop_type}__${p.line}`;
             return (

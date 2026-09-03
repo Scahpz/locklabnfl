@@ -1178,7 +1178,7 @@ export default function Props() {
                 {playerGroups.length} players · {filteredAndRanked.length} props · ranked by {SORT_OPTIONS.find(o => o.value === sortBy)?.label}
               </p>
             </div>
-            <div className="space-y-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
               {playerGroups.map(({ playerName, rank, props }) => (
                 <PlayerRow
                   key={playerName}
