@@ -1,9 +1,9 @@
-const CACHE_KEY = 'locklab_live_props_v42';
-const CACHE_TS_KEY = 'locklab_live_props_ts_v42';
+const CACHE_KEY = 'locklab_live_props_v43';
+const CACHE_TS_KEY = 'locklab_live_props_ts_v43';
 const FRESH_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 
 try {
-  for (let i = 1; i <= 41; i++) {
+  for (let i = 1; i <= 42; i++) {
     localStorage.removeItem(`locklab_live_props_v${i}`);
     localStorage.removeItem(`locklab_live_props_date_v${i}`);
     localStorage.removeItem(`locklab_live_props_ts_v${i}`);
