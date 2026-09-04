@@ -321,11 +321,13 @@ export default function Props() {
       // playerAnalytics[name] is an object   → fetched, has data
       const analyticsEntry = playerAnalytics[prop.player_name];
       const analytics = (analyticsEntry != null) ? analyticsEntry?.[prop.prop_type] : undefined;
-      // dataUnavailable when: (1) player fetch returned null (not found in NBA API), or
-      //                       (2) player was found but no stats computed for this specific prop type
-      //                           (avg below threshold) — prevents "loading" state forever
-      const dataUnavailable = analyticsEntry === null
-        || (analyticsEntry !== undefined && analyticsEntry !== null && analytics === undefined);
+      // If the prop was pre-enriched with Sleeper stats (has_analytics: true on the raw prop),
+      // a null backend response should NOT override it as data_unavailable.
+      const propPreEnriched = prop.has_analytics === true && prop.avg_last_10 != null;
+      const dataUnavailable = !propPreEnriched && (
+        analyticsEntry === null
+        || (analyticsEntry !== undefined && analyticsEntry !== null && analytics === undefined)
+      );
       const cs = analytics?.confidence_score || prop.confidence_score || 5;
       const base = analytics ? {
         ...prop,
@@ -356,7 +358,9 @@ export default function Props() {
         confidence_tier:   cs >= 8 ? 'A' : cs >= 6 ? 'B' : 'C',
         is_lock:           cs === 10,
         best_value:        (analytics.edge || 0) > 8,
-      } : { ...prop, data_unavailable: dataUnavailable };
+      } : propPreEnriched
+        ? { ...prop } // Sleeper analytics already on the raw prop — preserve as-is
+        : { ...prop, data_unavailable: dataUnavailable };
 
       // 2. Team context
       const team    = prop.team || prop.player_team || '';

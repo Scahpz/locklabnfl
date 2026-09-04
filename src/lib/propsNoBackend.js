@@ -3,11 +3,16 @@
 
 const PP_URL = 'https://api.prizepicks.com/projections?league_id=9&per_page=250&single_stat=true';
 const SLEEPER_STATS_URL = week => `https://api.sleeper.app/v1/stats/nfl/regular/2025/${week}`;
-const LIVE_CACHE_KEY = 'locklab_nfl_live_v5'; // nflLiveData.js cache for name→id mapping
+const SLEEPER_PLAYERS_URL = 'https://api.sleeper.app/v1/players/nfl';
+const LIVE_CACHE_KEY = 'locklab_nfl_live_v10'; // nflLiveData.js cache for name→id mapping
 
 const STATS_CACHE_KEY = 'locklab_s25_wkstats_v1';
 const STATS_CACHE_TS  = 'locklab_s25_wkstats_ts_v1';
 const STATS_TTL_MS    = 24 * 60 * 60 * 1000;
+
+const NAME_ID_CACHE_KEY = 'locklab_nfl_nameid_v1';
+const NAME_ID_CACHE_TS  = 'locklab_nfl_nameid_ts_v1';
+const NAME_ID_TTL_MS    = 7 * 24 * 60 * 60 * 1000; // 7 days — player list is stable
 
 const PP_STAT_MAP = {
   'Passing Yards':    'passing_yards',
@@ -34,6 +39,8 @@ const PROP_TO_SLEEPER = {
   passing_tds:     'pass_td',
   rushing_tds:     'rush_td',
   receiving_tds:   'rec_td',
+  fantasy_points:  'pts_ppr',
+  passing_ints:    'pass_int',
 };
 
 async function fetchSafe(url, ms = 10000) {
@@ -102,6 +109,37 @@ function buildNameToId() {
   }
 }
 
+// Full name→id lookup: tries nflLiveData cache first, then a dedicated name→id cache,
+// then fetches the Sleeper player list as a last resort (cached 7 days).
+async function buildNameToIdFull() {
+  const fast = buildNameToId();
+  if (Object.keys(fast).length > 10) return fast;
+
+  try {
+    const cached = localStorage.getItem(NAME_ID_CACHE_KEY);
+    const ts = Number(localStorage.getItem(NAME_ID_CACHE_TS) || 0);
+    if (cached && Date.now() - ts < NAME_ID_TTL_MS) return JSON.parse(cached);
+  } catch {}
+
+  const players = await fetchSafe(SLEEPER_PLAYERS_URL, 20000);
+  if (!players) return {};
+
+  const SKILL = new Set(['QB', 'RB', 'WR', 'TE', 'K']);
+  const map = {};
+  Object.entries(players).forEach(([id, p]) => {
+    if (!p.first_name || !p.last_name || !SKILL.has(p.position)) return;
+    const name = `${p.first_name} ${p.last_name}`.trim().toLowerCase();
+    map[name] = id;
+  });
+
+  try {
+    localStorage.setItem(NAME_ID_CACHE_KEY, JSON.stringify(map));
+    localStorage.setItem(NAME_ID_CACHE_TS, String(Date.now()));
+  } catch {}
+
+  return map;
+}
+
 function computeAnalytics(gameLogs, line) {
   if (!gameLogs?.length) return null;
   const last10 = gameLogs.slice(-10);
@@ -166,7 +204,11 @@ const UD_STAT_MAP = {
 };
 
 export async function fetchUnderdogDirect() {
-  const raw = await fetchSafe(UD_URL, 15000);
+  // Fetch props and 2025 season stats in parallel
+  const [raw, statsMap] = await Promise.all([
+    fetchSafe(UD_URL, 15000),
+    buildSeasonStats(),
+  ]);
   if (!raw?.over_under_lines?.length) return null;
 
   const players     = Object.fromEntries((raw.players     || []).map(p => [p.id, p]));
@@ -258,6 +300,19 @@ export async function fetchUnderdogDirect() {
   }
 
   if (!props.length) return null;
+
+  // Enrich with 2025 Sleeper season stats (last 10 games, hit rate, season avg)
+  if (statsMap) {
+    const nameToId = await buildNameToIdFull();
+    props.forEach(prop => {
+      const sleeperKey = PROP_TO_SLEEPER[prop.prop_type];
+      if (!sleeperKey) return;
+      const pid = nameToId[prop.player_name.toLowerCase()];
+      if (!pid || !statsMap[pid]?.[sleeperKey]?.length) return;
+      const analytics = computeAnalytics(statsMap[pid][sleeperKey], prop.line);
+      if (analytics) Object.assign(prop, analytics);
+    });
+  }
 
   const seenGames = new Map();
   props.forEach(p => {
