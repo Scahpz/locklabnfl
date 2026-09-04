@@ -43,10 +43,9 @@ export function calcEVVerdict(prop, grade) {
   let modelOverProb;
   if (prop.poisson_hit_prob != null) {
     modelOverProb = prop.poisson_hit_prob;
-  } else if (grade.dataQuality === 'full') {
-    modelOverProb = grade.lean === 'OVER'
-      ? grade.confidence / 100
-      : 1 - grade.confidence / 100;
+  } else if (grade.overScore != null && grade.dataQuality !== 'market') {
+    // Use the market-blended overScore from grading — reflects actual data quality
+    modelOverProb = grade.overScore;
   } else {
     modelOverProb = devig(overOdds, underOdds);
   }
@@ -63,9 +62,9 @@ export function calcEVVerdict(prop, grade) {
     return { tier: 'TRAP', label: 'TRAP', direction, edgePP, modelProb, marketProb, hasRealOdds };
   }
 
-  // No analytics at all → model prob equals market prob, edge is exactly 0.
-  // Show a neutral PRE-SEASON label instead of the misleading SKIP.
-  if (edgePP === 0 && prop.poisson_hit_prob == null && grade.dataQuality !== 'full') {
+  // No analytics at all (pure market data) → show PRESEASON instead of misleading SKIP.
+  // Only fires when dataQuality is 'market' — not when we have Sleeper or backend stats.
+  if (grade.dataQuality === 'market' && prop.poisson_hit_prob == null) {
     return { tier: 'PRESEASON', label: 'PRE-SEASON', direction, edgePP, modelProb, marketProb, hasRealOdds };
   }
 

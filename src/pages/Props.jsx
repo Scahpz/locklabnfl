@@ -1,18 +1,16 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Link } from 'react-router-dom';
 import { fetchLiveProps, getCachedProps, isCacheValid, clearLiveCache, SOURCE_META } from '@/lib/liveData';
 import { isDemoMode } from '@/lib/mockData';
 import { getAIVerdicts } from '@/lib/aiVerdicts';
 import LockCards from '@/components/props/LockCards';
 import DemonPickCard from '@/components/props/DemonPickCard';
-import { RefreshCw, Wifi, WifiOff, Zap, SlidersHorizontal, Search, X, ShoppingCart } from 'lucide-react';
+import { RefreshCw, Wifi, WifiOff, Zap, SlidersHorizontal, Search, X } from 'lucide-react';
 import PlayerRow from '@/components/props/PlayerRow';
 import { cn } from '@/lib/utils';
 import { rankScore, gradeProp } from '@/lib/grading';
 import { NFL_API } from '@/lib/config';
 import { TEAM_STATS } from '@/lib/teamStats';
 import PropDetailModal from '@/components/props/PropDetailModal';
-import { useParlay } from '@/lib/ParlayContext';
 
 // ── Game-log localStorage cache ───────────────────────────────────────────────
 const GL_CACHE_PREFIX = 'locklab_gl_v9_';
@@ -118,7 +116,6 @@ const todayLocalStr    = new Date().toLocaleDateString('en-CA');
 const tomorrowLocalStr = new Date(Date.now() + 86400000).toLocaleDateString('en-CA');
 
 export default function Props() {
-  const { legs } = useParlay();
   const [rawProps, setRawProps] = useState([]);
   const [gameDate, setGameDate] = useState(null);
   const [gamesSummary, setGamesSummary] = useState([]);
@@ -809,7 +806,7 @@ export default function Props() {
 
   return (
     <>
-    <div className={cn("space-y-6", legs.length > 0 && "pb-20")}>
+    <div className="space-y-6">
       {/* Demo mode banner */}
       {isDemoMode() && (
         <div className="flex items-center gap-2 text-xs px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 font-medium">
@@ -1225,25 +1222,7 @@ export default function Props() {
       <PropDetailModal prop={demonPick.prop} onClose={() => setDetailDemon(false)} />
     )}
 
-    {/* Sticky parlay bar — shows when legs are queued */}
-    {legs.length > 0 && (
-      <div className="fixed bottom-0 left-0 right-0 z-50 bg-background/95 backdrop-blur-md border-t border-border">
-        <div className="max-w-screen-xl mx-auto flex items-center justify-between gap-4 px-4 py-3">
-          <div className="flex items-center gap-2 min-w-0">
-            <ShoppingCart className="w-4 h-4 text-primary flex-shrink-0" />
-            <span className="text-sm font-semibold text-foreground">
-              {legs.length} leg{legs.length !== 1 ? 's' : ''} selected
-            </span>
-          </div>
-          <Link
-            to="/parlay"
-            className="text-xs px-4 py-2 rounded-lg bg-primary text-primary-foreground font-bold hover:bg-primary/90 transition-colors whitespace-nowrap flex-shrink-0"
-          >
-            View Parlay →
-          </Link>
-        </div>
-      </div>
-    )}
+    {/* Parlay bar is handled globally by MiniParlayBar in AppLayout */}
     </>
   );
 }

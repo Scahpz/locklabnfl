@@ -91,9 +91,10 @@ export default function PropDetailModal({ prop, onClose }) {
   const { addLeg, isSelected } = useParlay();
   const originalLine = prop.line;
 
-  // Slider range: ±6 from original, step 0.5
-  const sliderMin = Math.max(0.5, Math.round((originalLine - 6) * 2) / 2);
-  const sliderMax = Math.round((originalLine + 6) * 2) / 2;
+  // Slider range: ±30% of line (min ±10), step 0.5
+  const sliderRange = Math.max(10, Math.round(originalLine * 0.3));
+  const sliderMin = Math.max(0.5, Math.round((originalLine - sliderRange) * 2) / 2);
+  const sliderMax = Math.round((originalLine + sliderRange) * 2) / 2;
 
   const [adjustedLine, setAdjustedLine] = useState(originalLine);
   const [chartWindow, setChartWindow] = useState('l10'); // 'l5' | 'l10' | 'l20'

@@ -17,15 +17,24 @@ const PROP_LABELS = {
   h1_passing_yards: '1H Pass Yds', h1_rushing_yards: '1H Rush Yds', h1_receiving_yards: '1H Rec Yds',
 };
 
-function toLetterGrade(confidence) {
-  if (confidence >= 88) return 'A+';
-  if (confidence >= 83) return 'A';
-  if (confidence >= 78) return 'A-';
-  if (confidence >= 74) return 'B+';
-  if (confidence >= 70) return 'B';
-  if (confidence >= 65) return 'B-';
-  if (confidence >= 61) return 'C+';
-  if (confidence >= 57) return 'C';
+function toLetterGrade(confidence, completeness) {
+  // Cap grade when data completeness is low
+  const effectiveConf = completeness < 25
+    ? Math.min(confidence, 62)
+    : completeness < 45
+    ? Math.min(confidence, 70)
+    : completeness < 65
+    ? Math.min(confidence, 80)
+    : confidence;
+
+  if (effectiveConf >= 88) return 'A+';
+  if (effectiveConf >= 83) return 'A';
+  if (effectiveConf >= 78) return 'A-';
+  if (effectiveConf >= 74) return 'B+';
+  if (effectiveConf >= 70) return 'B';
+  if (effectiveConf >= 65) return 'B-';
+  if (effectiveConf >= 61) return 'C+';
+  if (effectiveConf >= 57) return 'C';
   return 'C-';
 }
 
@@ -38,18 +47,22 @@ function gradeStyle(letter) {
 
 function buildNarrative(prop, grade) {
   const propLabel = PROP_LABELS[prop.prop_type] || prop.prop_type;
-  const { lean, confidence, criteria, dataQuality } = grade;
-  const letter    = toLetterGrade(confidence);
+  const { lean, overProb, underProb, criteria, dataQuality, completeness } = grade;
 
   const dirText = lean === 'OVER'
     ? `exceed ${prop.line} ${propLabel}`
-    : `stay UNDER ${prop.line} ${propLabel}`;
+    : `stay under ${prop.line} ${propLabel}`;
 
-  let txt = `${prop.player_name} is likely to ${dirText} — ${letter} grade (${confidence}/100).`;
+  const probDisplay = lean === 'OVER' ? `${overProb}%` : `${underProb}%`;
+  let txt = `Model gives ${prop.player_name} a ${probDisplay} probability to ${dirText}.`;
 
-  if (dataQuality === 'market') {
-    txt += ' No historical game-log data available for this season; verdict is derived from market odds and team context only.';
+  if (dataQuality === 'market' || completeness < 20) {
+    txt += ' No historical stats found — verdict is derived from market odds and team context only.';
     return txt;
+  }
+
+  if (completeness < 50) {
+    txt += ` Limited data available (${completeness}% of factors populated) — result is partially anchored to market odds.`;
   }
 
   const real = criteria.filter(c => c.available && !c.pending && !c.market);
@@ -66,34 +79,54 @@ function buildNarrative(prop, grade) {
 export default function PropGradeChecklist({ prop, initialOpen = false }) {
   const [open, setOpen] = useState(initialOpen);
   const grade = gradeProp(prop);
-  const { criteria, confidence, lean } = grade;
+  const { criteria, confidence, lean, overProb, underProb, completeness, totalCriteria } = grade;
 
-  const letter    = toLetterGrade(confidence);
+  const letter    = toLetterGrade(confidence, completeness);
   const style     = gradeStyle(letter);
   const narrative = buildNarrative(prop, grade);
+
   const availCount = criteria.filter(c => c.available).length;
+  const unavailCount = totalCriteria - availCount;
+
+  // Direction-aware probability display
+  const primaryProb = lean === 'OVER' ? overProb : underProb;
+  const barColor = lean === 'OVER' ? 'bg-emerald-500' : 'bg-rose-500';
 
   return (
     <div className="px-4 pt-3 pb-3">
 
-      {/* Grade header — score + letter + direction */}
+      {/* Grade header — probability + letter grade + direction */}
       <div className="flex items-start gap-3 mb-3">
         <div className="flex-1 min-w-0">
-          <div className="flex items-baseline gap-2 mb-1.5">
-            <span className={cn('text-3xl font-black leading-none tabular-nums', style.text)}>
-              {confidence}
+          <div className="flex items-baseline gap-2 mb-1.5 flex-wrap">
+            {/* Primary: side-specific probability */}
+            <span className={cn('text-3xl font-black leading-none tabular-nums', lean === 'OVER' ? 'text-emerald-400' : 'text-rose-400')}>
+              {primaryProb}%
             </span>
-            <span className="text-sm text-muted-foreground/40">/100</span>
+            <span className="text-sm text-muted-foreground/40">{lean}</span>
+            {/* Secondary: letter grade */}
             <span className={cn('text-sm font-black px-2 py-0.5 rounded-lg', style.ring)}>
               {letter}
             </span>
+            {/* Completeness pill */}
+            {completeness < 80 && (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-white/8 text-muted-foreground/60 border border-white/8">
+                {completeness}% data
+              </span>
+            )}
           </div>
-          {/* Confidence bar */}
+          {/* Probability bar */}
           <div className="h-1.5 bg-white/6 rounded-full overflow-hidden">
             <div
-              className={cn('h-full rounded-full transition-all duration-500', style.bar)}
-              style={{ width: `${confidence}%` }}
+              className={cn('h-full rounded-full transition-all duration-500', barColor)}
+              style={{ width: `${primaryProb}%` }}
             />
+          </div>
+          {/* Split display: OVER X% · UNDER Y% */}
+          <div className="flex items-center gap-2 mt-1">
+            <span className="text-[9px] text-emerald-400/70 font-semibold">▲ OVER {overProb}%</span>
+            <span className="text-[9px] text-muted-foreground/30">·</span>
+            <span className="text-[9px] text-rose-400/70 font-semibold">▼ UNDER {underProb}%</span>
           </div>
         </div>
 
@@ -119,7 +152,7 @@ export default function PropGradeChecklist({ prop, initialOpen = false }) {
         className="w-full flex items-center justify-between py-1.5 group"
       >
         <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/45 group-hover:text-foreground/60 transition-colors">
-          Grade Breakdown · {availCount} factor{availCount !== 1 ? 's' : ''}
+          Grade Breakdown · {availCount}/{totalCriteria} factors with data
         </span>
         {open
           ? <ChevronUp  className="w-3.5 h-3.5 text-muted-foreground/35" />
@@ -136,7 +169,7 @@ export default function PropGradeChecklist({ prop, initialOpen = false }) {
             return (
               <div key={i} className="px-3 py-2.5 space-y-1.5">
                 <div className="flex items-start gap-2.5">
-                  {/* Icon */}
+                  {/* Icon: green = supports pick, red = opposes pick, grey = no data */}
                   <div className={cn(
                     'w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5',
                     c.pending    ? 'bg-white/6 border border-white/10'
@@ -158,7 +191,7 @@ export default function PropGradeChecklist({ prop, initialOpen = false }) {
                   <div className="flex-1 min-w-0">
                     <p className={cn(
                       'text-[11px] font-semibold leading-tight',
-                      c.pending ? 'text-muted-foreground/40'
+                      !c.available ? 'text-muted-foreground/35'
                         : c.pass ? 'text-foreground/90'
                         : 'text-muted-foreground/65'
                     )}>
@@ -169,7 +202,7 @@ export default function PropGradeChecklist({ prop, initialOpen = false }) {
                     </p>
                   </div>
 
-                  {/* Score fraction */}
+                  {/* Score fraction — only for available factors */}
                   {c.available && c.factorScore != null && (
                     <span className={cn(
                       'text-[10px] font-mono font-bold flex-shrink-0 self-start mt-0.5',
@@ -178,9 +211,15 @@ export default function PropGradeChecklist({ prop, initialOpen = false }) {
                       {c.factorScore.toFixed(1)}/{c.weight}
                     </span>
                   )}
+                  {/* Unavailable factor weight (shows what's missing) */}
+                  {!c.available && c.weight > 0 && (
+                    <span className="text-[10px] font-mono text-muted-foreground/20 flex-shrink-0 self-start mt-0.5">
+                      —/{c.weight}
+                    </span>
+                  )}
                 </div>
 
-                {/* Mini score bar */}
+                {/* Mini score bar — only for available factors */}
                 {c.available && c.factorScore != null && (
                   <div className="h-0.5 bg-white/4 rounded-full overflow-hidden ml-6">
                     <div
@@ -192,6 +231,15 @@ export default function PropGradeChecklist({ prop, initialOpen = false }) {
               </div>
             );
           })}
+
+          {/* Completeness footer */}
+          {unavailCount > 0 && (
+            <div className="px-3 py-2 bg-white/2">
+              <p className="text-[9px] text-muted-foreground/40 text-center">
+                {unavailCount} factor{unavailCount !== 1 ? 's' : ''} excluded from score (no data) · model blended {completeness}% toward prior-season stats, {100 - completeness}% toward market odds
+              </p>
+            </div>
+          )}
         </div>
       )}
     </div>
