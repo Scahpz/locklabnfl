@@ -319,6 +319,24 @@ function gradeWithContext(prop) {
     }
   }
 
+  // -- AIR YARDS SHARE / aDOT (weight 4) — receiving props only ---------------
+  const adot = prop.adot; // air_yards_share * 100 (% of team's air yards)
+  const isReceivingProp = ['receiving_yards', 'receptions', 'receiving_tds', 'rush_rec_yards', 'rush_rec_tds'].includes(propType);
+  if (adot != null && isReceivingProp) {
+    const highAirYards = adot >= 20;
+    criteria.push({
+      label: `Air Yards Share: ${adot.toFixed(0)}% (need ≥ 20%)`,
+      detail: highAirYards
+        ? `${adot.toFixed(0)}% of team air yards — primary downfield target, high ceiling`
+        : `Only ${adot.toFixed(0)}% of team air yards — underneath/limited aerial role`,
+      pass:            highAirYards,
+      continuousScore: Math.min(0.85, Math.max(0.15, adot / 20 * 0.5 + 0.2)),
+      weight:          4,
+      available:       true,
+      category:        'usage',
+    });
+  }
+
   // -- HOME/AWAY SPLIT ----------------------------------------------------------
   const homeAvg = prop.home_avg;
   const awayAvg = prop.away_avg;
@@ -363,6 +381,25 @@ function gradeWithContext(prop) {
       pass:            h2hAvg > line,
       continuousScore: formScore(h2hAvg, line),
       weight:          7,
+      available:       true,
+      category:        'form',
+    });
+  }
+
+  // -- EPA PER GAME (weight 6) -------------------------------------------------
+  const epaPerGame = prop.epa_per_game;
+  if (epaPerGame != null) {
+    const goodEpa = epaPerGame > 0;
+    // Scale: most players sit in -5 to +5 range; ±10 maps to ~85%/15%
+    const epaScore = Math.min(0.85, Math.max(0.15, 0.5 + epaPerGame / 12));
+    criteria.push({
+      label: `EPA/Game: ${epaPerGame > 0 ? '+' : ''}${epaPerGame}`,
+      detail: goodEpa
+        ? `Averaging +${epaPerGame} EPA/game — producing above expected value`
+        : `Averaging ${epaPerGame} EPA/game — below expected value production`,
+      pass:            goodEpa,
+      continuousScore: epaScore,
+      weight:          6,
       available:       true,
       category:        'form',
     });

@@ -447,9 +447,10 @@ export default function Props() {
         opp_injury_context:   oppInjuryContext,
         opp_injury_count:     injuredOpponents.length,
         // New fields from nfl_data_py analytics
-        target_share: analytics?.target_share ?? prop.target_share ?? null,
-        snap_pct:     analytics?.snap_pct     ?? prop.snap_pct     ?? null,
-        adot:         analytics?.adot         ?? prop.adot         ?? null,
+        target_share:  analytics?.target_share  ?? prop.target_share  ?? null,
+        snap_pct:      analytics?.snap_pct      ?? prop.snap_pct      ?? null,
+        adot:          analytics?.adot          ?? prop.adot          ?? null,
+        epa_per_game:  analytics?.epa_per_game  ?? prop.epa_per_game  ?? null,
         // Weather for this game (keyed by home team)
         weather:      weatherData[prop.home || ''] ?? null,
       };

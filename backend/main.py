@@ -42,6 +42,7 @@ async def health():
 
 # ── nfl_data_py: background loading at startup ────────────────────────────────
 _weekly_df    = None
+_snap_df      = None   # separate import_snap_counts dataset
 _data_loaded  = False
 _data_loading = False
 
@@ -71,7 +72,7 @@ def _norm(name: str) -> str:
 
 
 def _load_nfl_data():
-    global _weekly_df, _data_loaded, _data_loading
+    global _weekly_df, _snap_df, _data_loaded, _data_loading
     _data_loading = True
     try:
         import nfl_data_py as nfl  # type: ignore
@@ -128,6 +129,22 @@ def _load_nfl_data():
         df["_norm_name"] = df[name_col].fillna("").apply(_norm)
 
         _weekly_df = df
+
+        # Snap counts live in a separate dataset (not in weekly player data)
+        try:
+            snaps = nfl.import_snap_counts(seasons)
+            # Prefer pfr_player_name (full name) over 'player' (abbreviated)
+            snap_name_col = next(
+                (c for c in ['pfr_player_name', 'player_name', 'player'] if c in snaps.columns),
+                None
+            )
+            if snap_name_col:
+                snaps['_norm_name'] = snaps[snap_name_col].fillna('').apply(_norm)
+                _snap_df = snaps
+                print(f"[nfl_data_py] Snap counts: {len(snaps):,} rows")
+        except Exception as snap_err:
+            print(f"[nfl_data_py] Snap counts failed: {snap_err}")
+
         _data_loaded = True
         print(f"[nfl_data_py] Ready — {len(df):,} player-weeks across seasons {seasons}")
     except Exception as exc:
@@ -205,27 +222,52 @@ def _player_analytics(name: str, prop_type: str, line, df) -> dict | None:
     latest_season = int(pdf["season"].max())
     season_vals = pdf[pdf["season"] == latest_season]["_val"].dropna().tolist()
 
-    # Target share (average last 5 games)
+    # Target share (average last 5 games, from weekly data)
     target_share = None
     if "target_share" in pdf.columns:
         ts_vals = pdf.head(5)["target_share"].dropna().tolist()
         target_share = round(sum(ts_vals) / len(ts_vals), 3) if ts_vals else None
 
-    # Snap percentage (average last 5 games)
-    snap_pct = None
-    for snap_col in ["offense_pct", "snap_pct"]:
-        if snap_col in pdf.columns:
-            sp_vals = pdf.head(5)[snap_col].dropna().tolist()
-            if sp_vals:
-                snap_pct = round(sum(sp_vals) / len(sp_vals), 3)
-            break
-
-    # Air yards share as aDOT proxy
+    # Air yards share as aDOT proxy (average last 5 games)
     adot = None
     if "air_yards_share" in pdf.columns:
         ay_vals = pdf.head(5)["air_yards_share"].dropna().tolist()
         if ay_vals:
             adot = round(sum(ay_vals) / len(ay_vals) * 100, 1)
+
+    # Snap percentage — from the separate snap counts dataset
+    snap_pct = None
+    if _snap_df is not None:
+        snorm = _norm(name)
+        sdf = _snap_df[_snap_df["_norm_name"] == snorm]
+        if sdf.empty:
+            parts = snorm.split()
+            if len(parts) >= 2:
+                cands = _snap_df[_snap_df["_norm_name"].str.endswith(" " + parts[-1])]
+                if not cands.empty:
+                    sdf = cands[cands["_norm_name"].str.startswith(parts[0][0])]
+        if not sdf.empty and "offense_pct" in sdf.columns:
+            sdf = sdf.sort_values(["season", "week"], ascending=[False, False])
+            sp_vals = sdf.head(5)["offense_pct"].dropna().tolist()
+            if sp_vals:
+                snap_pct = round(sum(sp_vals) / len(sp_vals), 3)
+
+    # EPA per game — pick the column that matches the prop type
+    EPA_COL: dict[str, str] = {
+        "passing_yards": "passing_epa", "passing_tds": "passing_epa",
+        "completions": "passing_epa", "passing_ints": "passing_epa",
+        "rushing_yards": "rushing_epa", "rushing_tds": "rushing_epa",
+        "rushing_attempts": "rushing_epa",
+        "receiving_yards": "receiving_epa", "receiving_tds": "receiving_epa",
+        "receptions": "receiving_epa", "rush_rec_yards": "receiving_epa",
+        "rush_rec_tds": "receiving_epa", "fantasy_points": "receiving_epa",
+    }
+    epa_per_game = None
+    epa_col = EPA_COL.get(prop_type)
+    if epa_col and epa_col in pdf.columns:
+        epa_vals = pdf.head(10)[epa_col].dropna().tolist()
+        if epa_vals:
+            epa_per_game = round(sum(epa_vals) / len(epa_vals), 2)
 
     avg10 = avg(v10)
     avg5  = avg(v5)
@@ -253,6 +295,7 @@ def _player_analytics(name: str, prop_type: str, line, df) -> dict | None:
         "target_share":      target_share,
         "snap_pct":          snap_pct,
         "adot":              adot,
+        "epa_per_game":      epa_per_game,
         "edge":              edge,
         "projection":        avg5 if avg5 is not None else avg10,
         "home_avg":          avg(home_vals),
