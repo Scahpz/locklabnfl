@@ -38,13 +38,22 @@ async def get_settings():
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "sport": "nfl", "data_loaded": _data_loaded, "data_loading": _data_loading}
+    import datetime
+    return {
+        "status": "ok",
+        "sport": "nfl",
+        "data_loaded": _data_loaded,
+        "data_loading": _data_loading,
+        "loaded_seasons": _loaded_seasons,
+        "current_year": datetime.datetime.now().year,
+    }
 
 # ── nfl_data_py: background loading at startup ────────────────────────────────
-_weekly_df    = None
-_snap_df      = None   # separate import_snap_counts dataset
-_data_loaded  = False
-_data_loading = False
+_weekly_df      = None
+_snap_df        = None   # separate import_snap_counts dataset
+_data_loaded    = False
+_data_loading   = False
+_loaded_seasons: list[int] = []   # which seasons are actually in _weekly_df
 
 # Prop type → column(s) in the weekly dataframe. Combo stats are summed.
 PROP_COLS: dict[str, list[str]] = {
@@ -72,29 +81,37 @@ def _norm(name: str) -> str:
 
 
 def _load_nfl_data():
-    global _weekly_df, _snap_df, _data_loaded, _data_loading
+    global _weekly_df, _snap_df, _data_loaded, _data_loading, _loaded_seasons
     _data_loading = True
     try:
         import nfl_data_py as nfl  # type: ignore
         import pandas as pd
 
-        # Discover which seasons actually have data (try last 3 years)
+        # Discover which seasons actually have regular-season data (try last 3 years).
+        # The current year may only have preseason data if the season hasn't started —
+        # we include it only if it has actual REG rows.
         import datetime
         current_year = datetime.datetime.now().year
         available = []
         for yr in [current_year - 2, current_year - 1, current_year]:
             try:
                 tmp = nfl.import_weekly_data([yr])
-                if tmp is not None and len(tmp) > 0:
+                if tmp is None or len(tmp) == 0:
+                    continue
+                # Only count a year if it has at least one regular-season row
+                if "season_type" in tmp.columns:
+                    if len(tmp[tmp["season_type"] == "REG"]) > 0:
+                        available.append(yr)
+                else:
                     available.append(yr)
             except Exception:
                 pass
 
         if not available:
-            print("[nfl_data_py] No seasons found — giving up")
+            print("[nfl_data_py] No regular-season data found — giving up")
             return
 
-        # Use the two most recent seasons so we cross the season boundary
+        # Use the two most recent seasons with real data (crosses season boundary cleanly)
         seasons = sorted(available)[-2:]
         print(f"[nfl_data_py] Loading seasons {seasons}")
         df = nfl.import_weekly_data(seasons)
@@ -102,6 +119,8 @@ def _load_nfl_data():
         # Keep regular season only
         if "season_type" in df.columns:
             df = df[df["season_type"] == "REG"]
+
+        _loaded_seasons = seasons
 
         # Normalise 'recent_team' → 'team' when needed
         if "recent_team" in df.columns and "team" not in df.columns:

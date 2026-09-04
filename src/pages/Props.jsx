@@ -4,7 +4,7 @@ import { isDemoMode } from '@/lib/mockData';
 import { getAIVerdicts } from '@/lib/aiVerdicts';
 import LockCards from '@/components/props/LockCards';
 import DemonPickCard from '@/components/props/DemonPickCard';
-import { RefreshCw, Wifi, WifiOff, Zap, SlidersHorizontal, Search, X } from 'lucide-react';
+import { RefreshCw, Wifi, WifiOff, Zap, SlidersHorizontal, Search, X, Info } from 'lucide-react';
 import PlayerRow from '@/components/props/PlayerRow';
 import { cn } from '@/lib/utils';
 import { rankScore, gradeProp } from '@/lib/grading';
@@ -472,6 +472,22 @@ export default function Props() {
     return Array.from(weeks).sort((a, b) => a - b);
   }, [enrichedProps]);
 
+  // Current real-world NFL week (null = preseason/offseason)
+  const todaysNFLWeek = useMemo(() => getNFLWeek(new Date().toISOString()), []);
+  // Season banner: preseason if no current week; early-season for weeks 1-3 where
+  // the model still runs on prior-year data because current-year logs haven't accumulated.
+  const seasonBanner = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+    const priorYear   = currentYear - 1;
+    if (todaysNFLWeek === null) {
+      return { type: 'preseason', priorYear };
+    }
+    if (todaysNFLWeek <= 3) {
+      return { type: 'early', week: todaysNFLWeek, priorYear };
+    }
+    return null;
+  }, [todaysNFLWeek]);
+
   // Auto-correct: if the default [1] has no data, jump to first available week
   useEffect(() => {
     if (!availableWeeks.length) return;
@@ -843,6 +859,29 @@ export default function Props() {
           Demo Mode — showing example props with mock data. Remove <code className="font-mono bg-amber-500/20 px-1 rounded">?demo</code> from the URL to see live props.
         </div>
       )}
+
+      {/* Season state banner */}
+      {seasonBanner && (
+        <div className="flex items-start gap-2.5 text-xs px-4 py-3 rounded-xl bg-sky-500/8 border border-sky-500/20 text-sky-300/80">
+          <Info className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-sky-400" />
+          <div>
+            {seasonBanner.type === 'preseason' ? (
+              <>
+                <span className="font-semibold text-sky-300">Preseason — </span>
+                model predictions use <span className="font-semibold">{seasonBanner.priorYear} season history</span> until regular-season games begin.
+                Confidence scores will sharpen as {new Date().getFullYear()} game data accumulates.
+              </>
+            ) : (
+              <>
+                <span className="font-semibold text-sky-300">Week {seasonBanner.week} model — </span>
+                grading is anchored to <span className="font-semibold">{seasonBanner.priorYear} season history</span>.
+                Confidence improves week-over-week as {new Date().getFullYear()} logs accumulate (full signal by Week 4).
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
@@ -1185,14 +1224,43 @@ export default function Props() {
               </div>
 
               {/* Sort */}
-              <span className="text-xs text-muted-foreground">Sort:</span>
-              <select
-                value={sortBy}
-                onChange={e => setSortBy(e.target.value)}
-                className="text-xs bg-secondary border border-border text-foreground rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary"
-              >
-                {SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
+              <span className="text-xs text-muted-foreground flex-shrink-0">Sort:</span>
+              {(() => {
+                const hasEdge      = weekFilteredProps.some(p => p.edge != null && p.edge !== 0);
+                const hasHitRate   = weekFilteredProps.some(p => p.hit_rate_last_10 != null);
+                const hasConf      = weekFilteredProps.some(p => (p.confidence_score || 0) > 5);
+                const disabled = {
+                  confidence: !hasConf,
+                  edge:       !hasEdge,
+                  hit_rate:   !hasHitRate,
+                };
+                return (
+                  <div className="flex items-center gap-1">
+                    {SORT_OPTIONS.map(o => {
+                      const off = disabled[o.value] === true;
+                      const active = sortBy === o.value;
+                      return (
+                        <button
+                          key={o.value}
+                          disabled={off}
+                          onClick={() => !off && setSortBy(o.value)}
+                          title={off ? `No ${o.label.toLowerCase()} data yet — loads once analytics are available` : undefined}
+                          className={cn(
+                            'text-xs px-2.5 py-1.5 rounded-lg border transition-all font-medium whitespace-nowrap',
+                            off
+                              ? 'opacity-35 cursor-not-allowed bg-secondary/30 border-border/30 text-muted-foreground/40'
+                              : active
+                              ? 'bg-primary/20 border-primary/40 text-primary'
+                              : 'bg-secondary/40 border-border text-muted-foreground hover:text-foreground hover:border-white/15'
+                          )}
+                        >
+                          {o.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
 
               {/* Selected player chips */}
               {selectedPlayers.map(name => (

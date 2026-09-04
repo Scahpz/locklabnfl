@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { X, Check, Clock, Zap, Home, Plane } from 'lucide-react';
+import { X, Check, Clock, Zap, Home, Plane, ChevronUp, ChevronDown, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { gradeProp } from '@/lib/grading';
 import TeamLogo from '@/components/common/TeamLogo';
@@ -142,6 +142,9 @@ export default function PropDetailModal({ prop, onClose }) {
     return { ...prop, line: adjustedLine, hit_rate_last_10: dynamicHitRate, edge: dynamicEdge };
   }, [prop, adjustedLine, gameLogs]);
 
+  // Grade at the original market line (used for delta comparison when line is adjusted)
+  const marketGrade = useMemo(() => gradeProp(prop), [prop]);
+
   // Run the 4-factor grade engine
   const rawGrade = useMemo(() => gradeProp(adjustedProp), [adjustedProp]);
 
@@ -245,23 +248,77 @@ export default function PropDetailModal({ prop, onClose }) {
               />
             </div>
 
-            {/* Line slider */}
+            {/* Line adjuster */}
             <div className="bg-secondary/40 border border-border/60 rounded-xl p-4 space-y-3">
-              <div className="flex items-center justify-between">
+              {/* Delta row — probability change since market line */}
+              {lineChanged && (() => {
+                const mktProb = isOverFavorable ? marketGrade.overProb : marketGrade.underProb;
+                const adjProb = isOverFavorable ? grade.overProb     : grade.underProb;
+                const delta   = adjProb - mktProb;
+                const dir     = isOverFavorable ? 'OVER' : 'UNDER';
+                return (
+                  <div className="flex items-center gap-1.5 text-[10px] font-semibold flex-wrap bg-black/20 rounded-lg px-3 py-2">
+                    <span className="text-muted-foreground/50">Market {originalLine}</span>
+                    <span className={cn(isOverFavorable ? 'text-emerald-400' : 'text-rose-400')}>{dir} {mktProb}%</span>
+                    <span className="text-muted-foreground/25">→</span>
+                    <span className="text-muted-foreground/50">Adjusted {adjustedLine}</span>
+                    <span className={cn(isOverFavorable ? 'text-emerald-400' : 'text-rose-400')}>{dir} {adjProb}%</span>
+                    <span className={cn('font-black ml-0.5', delta > 0 ? 'text-emerald-400' : delta < 0 ? 'text-rose-400' : 'text-muted-foreground')}>
+                      ({delta > 0 ? '+' : ''}{delta}pp)
+                    </span>
+                  </div>
+                );
+              })()}
+
+              {/* Label + typed input with ± steppers */}
+              <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-semibold text-foreground">Adjust Line</p>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">Drag to see how the analysis changes</p>
-                </div>
-                <div className="text-right">
-                  <p className={cn('text-2xl font-bold leading-none', lineChanged ? 'text-chart-4' : 'text-foreground')}>
-                    {adjustedLine}
+                  <p className="text-[10px] text-muted-foreground/55 mt-0.5">
+                    {lineChanged ? `was ${originalLine} · market line` : 'Drag, type, or step with ±'}
                   </p>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setAdjustedLine(v => Math.max(sliderMin, Math.round((v - 0.5) * 2) / 2))}
+                    className="w-7 h-7 flex items-center justify-center rounded-lg bg-secondary border border-border text-muted-foreground hover:text-foreground hover:border-white/20 transition-colors"
+                  >
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  </button>
+                  <input
+                    type="number"
+                    step={0.5}
+                    min={sliderMin}
+                    max={sliderMax}
+                    value={adjustedLine}
+                    onChange={e => {
+                      const v = parseFloat(e.target.value);
+                      if (!isNaN(v)) setAdjustedLine(Math.max(sliderMin, Math.min(sliderMax, Math.round(v * 2) / 2)));
+                    }}
+                    className={cn(
+                      'w-20 text-center text-xl font-bold bg-transparent border rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none',
+                      lineChanged ? 'border-chart-4/50 text-chart-4' : 'border-border text-foreground'
+                    )}
+                  />
+                  <button
+                    onClick={() => setAdjustedLine(v => Math.min(sliderMax, Math.round((v + 0.5) * 2) / 2))}
+                    className="w-7 h-7 flex items-center justify-center rounded-lg bg-secondary border border-border text-muted-foreground hover:text-foreground hover:border-white/20 transition-colors"
+                  >
+                    <ChevronUp className="w-3.5 h-3.5" />
+                  </button>
                   {lineChanged && (
-                    <p className="text-[10px] text-muted-foreground mt-0.5">was {originalLine}</p>
+                    <button
+                      onClick={() => setAdjustedLine(originalLine)}
+                      className="w-7 h-7 flex items-center justify-center rounded-lg bg-secondary border border-border text-muted-foreground hover:text-primary hover:border-primary/30 transition-colors ml-0.5"
+                      title="Reset to market line"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                    </button>
                   )}
                 </div>
               </div>
 
+              {/* Range slider */}
               <input
                 type="range"
                 min={sliderMin}
@@ -269,44 +326,67 @@ export default function PropDetailModal({ prop, onClose }) {
                 step={0.5}
                 value={adjustedLine}
                 onChange={e => setAdjustedLine(parseFloat(e.target.value))}
-                className="w-full h-2 rounded-full appearance-none cursor-pointer accent-primary bg-secondary"
+                className="w-full h-2 rounded-full appearance-none cursor-pointer accent-primary"
                 style={{
                   background: `linear-gradient(to right, hsl(142 71% 45%) ${sliderPct}%, hsl(217 33% 17%) ${sliderPct}%)`
                 }}
               />
-
-              <div className="flex justify-between text-[10px] text-muted-foreground">
+              <div className="flex justify-between text-[9px] text-muted-foreground/35">
                 <span>{sliderMin}</span>
-                {lineChanged && (
-                  <button
-                    onClick={() => setAdjustedLine(originalLine)}
-                    className="text-primary hover:underline"
-                  >
-                    reset to {originalLine}
-                  </button>
-                )}
                 <span>{sliderMax}</span>
               </div>
 
-              {/* Marker dots at L5, L10, projection */}
+              {/* Preset snap buttons */}
               {(prop.avg_last_5 != null || prop.avg_last_10 != null || prop.projection != null) && (
-                <div className="flex flex-wrap gap-2 pt-1">
+                <div className="flex flex-wrap gap-1.5 pt-0.5">
+                  <button
+                    onClick={() => setAdjustedLine(originalLine)}
+                    className={cn(
+                      'text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-all',
+                      adjustedLine === originalLine
+                        ? 'bg-primary/20 border-primary/40 text-primary'
+                        : 'bg-secondary/60 border-border text-muted-foreground hover:text-foreground hover:border-white/15'
+                    )}
+                  >
+                    Market {originalLine}
+                  </button>
                   {prop.avg_last_10 != null && (
-                    <button onClick={() => setAdjustedLine(Math.round(prop.avg_last_10 * 2) / 2)}
-                      className="text-[10px] px-2 py-0.5 rounded-full bg-secondary border border-border hover:border-primary/40 transition-colors">
-                      Jump to L10 avg ({prop.avg_last_10})
+                    <button
+                      onClick={() => setAdjustedLine(Math.round(prop.avg_last_10 * 2) / 2)}
+                      className={cn(
+                        'text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-all',
+                        adjustedLine === Math.round(prop.avg_last_10 * 2) / 2
+                          ? 'bg-primary/20 border-primary/40 text-primary'
+                          : 'bg-secondary/60 border-border text-muted-foreground hover:text-foreground hover:border-white/15'
+                      )}
+                    >
+                      L10 avg {prop.avg_last_10}
                     </button>
                   )}
                   {prop.avg_last_5 != null && (
-                    <button onClick={() => setAdjustedLine(Math.round(prop.avg_last_5 * 2) / 2)}
-                      className="text-[10px] px-2 py-0.5 rounded-full bg-secondary border border-border hover:border-primary/40 transition-colors">
-                      Jump to L5 avg ({prop.avg_last_5})
+                    <button
+                      onClick={() => setAdjustedLine(Math.round(prop.avg_last_5 * 2) / 2)}
+                      className={cn(
+                        'text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-all',
+                        adjustedLine === Math.round(prop.avg_last_5 * 2) / 2
+                          ? 'bg-primary/20 border-primary/40 text-primary'
+                          : 'bg-secondary/60 border-border text-muted-foreground hover:text-foreground hover:border-white/15'
+                      )}
+                    >
+                      L5 avg {prop.avg_last_5}
                     </button>
                   )}
                   {prop.projection != null && (
-                    <button onClick={() => setAdjustedLine(Math.round(prop.projection * 2) / 2)}
-                      className="text-[10px] px-2 py-0.5 rounded-full bg-secondary border border-border hover:border-primary/40 transition-colors">
-                      Jump to projection ({prop.projection})
+                    <button
+                      onClick={() => setAdjustedLine(Math.round(prop.projection * 2) / 2)}
+                      className={cn(
+                        'text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-all',
+                        adjustedLine === Math.round(prop.projection * 2) / 2
+                          ? 'bg-primary/20 border-primary/40 text-primary'
+                          : 'bg-secondary/60 border-border text-muted-foreground hover:text-foreground hover:border-white/15'
+                      )}
+                    >
+                      Proj {prop.projection}
                     </button>
                   )}
                 </div>

@@ -232,14 +232,25 @@ export default function PropGradeChecklist({ prop, initialOpen = false }) {
             );
           })}
 
-          {/* Completeness footer */}
-          {unavailCount > 0 && (
-            <div className="px-3 py-2 bg-white/2">
-              <p className="text-[9px] text-muted-foreground/40 text-center">
-                {unavailCount} factor{unavailCount !== 1 ? 's' : ''} excluded from score (no data) · model blended {completeness}% toward prior-season stats, {100 - completeness}% toward market odds
-              </p>
-            </div>
-          )}
+          {/* Completeness + season provenance footer */}
+          {(unavailCount > 0 || completeness < 100) && (() => {
+            const currentYear = new Date().getFullYear();
+            const seasonLabel = `${currentYear - 1} season history`;
+            return (
+              <div className="px-3 py-2 bg-white/2 space-y-1">
+                {unavailCount > 0 && (
+                  <p className="text-[9px] text-muted-foreground/40 text-center">
+                    {unavailCount} factor{unavailCount !== 1 ? 's' : ''} excluded (no data) ·
+                    {' '}grade weighted {completeness}% historical / {100 - completeness}% market
+                  </p>
+                )}
+                <p className="text-[9px] text-muted-foreground/30 text-center">
+                  Historical data: <span className="text-muted-foreground/50">{seasonLabel}</span>
+                  {' · '}prior-year weighted model
+                </p>
+              </div>
+            );
+          })()}
         </div>
       )}
     </div>
