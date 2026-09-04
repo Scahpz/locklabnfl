@@ -220,10 +220,15 @@ export default function PlayerRow({ playerName, props, allPlayerProps, rank, ver
               : <TrendingDown className="w-4 h-4 text-rose-400 flex-shrink-0" />
             }
             <div>
-              <p className={cn("text-lg font-black leading-none tracking-tight", isOver ? "text-emerald-400" : "text-rose-400")}>
-                {evVerdict.direction}
-              </p>
-              <p className="text-sm font-bold text-foreground/80 font-mono leading-tight mt-0.5">
+              <div className="flex items-baseline gap-1.5">
+                <p className={cn("text-xl font-black leading-none tracking-tight tabular-nums", isOver ? "text-emerald-400" : "text-rose-400")}>
+                  {isOver ? grade.overProb : grade.underProb}%
+                </p>
+                <p className={cn("text-[11px] font-bold leading-none", isOver ? "text-emerald-400/55" : "text-rose-400/55")}>
+                  {evVerdict.direction}
+                </p>
+              </div>
+              <p className="text-xs font-semibold text-foreground/55 font-mono leading-tight mt-0.5">
                 {gradedProp.line ?? '—'}
               </p>
             </div>

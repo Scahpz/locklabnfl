@@ -208,25 +208,40 @@ export default function PropDetailModal({ prop, onClose }) {
         <div className="flex-1 overflow-y-auto overscroll-contain">
           <div className="p-5 space-y-5">
 
-            {/* Verdict + confidence */}
-            <div className="flex items-center justify-between gap-4">
+            {/* OVER/UNDER probability + letter grade + verdict badge */}
+            <div className="flex items-start gap-3">
+              <div className="flex-1">
+                <div className="flex items-baseline gap-2 mb-1.5 flex-wrap">
+                  <span className={cn('text-3xl font-black leading-none tabular-nums', isOverFavorable ? 'text-emerald-400' : 'text-rose-400')}>
+                    {isOverFavorable ? grade.overProb : grade.underProb}%
+                  </span>
+                  <span className="text-sm text-muted-foreground/50">{isOverFavorable ? 'OVER' : 'UNDER'}</span>
+                  {(() => {
+                    const avail = grade.criteria.filter(c => c.available).length;
+                    const lg = toLetterGrade(grade.passCount, avail);
+                    const lgStyle = lg[0] === 'A' ? 'bg-emerald-500/15 text-emerald-400'
+                      : lg[0] === 'B' ? 'bg-primary/20 text-primary'
+                      : 'bg-amber-500/15 text-amber-400';
+                    return <span className={cn('text-sm font-black px-2 py-0.5 rounded-lg', lgStyle)}>{lg}</span>;
+                  })()}
+                </div>
+                <div className="h-2 bg-secondary rounded-full overflow-hidden">
+                  <div
+                    className={cn('h-full rounded-full transition-all duration-300', isOverFavorable ? 'bg-emerald-500' : 'bg-rose-500')}
+                    style={{ width: `${isOverFavorable ? grade.overProb : grade.underProb}%` }}
+                  />
+                </div>
+                <div className="flex items-center gap-2 mt-1.5">
+                  <span className="text-[9px] text-emerald-400/70 font-semibold">▲ OVER {grade.overProb}%</span>
+                  <span className="text-[9px] text-muted-foreground/30">·</span>
+                  <span className="text-[9px] text-rose-400/70 font-semibold">▼ UNDER {grade.underProb}%</span>
+                </div>
+              </div>
               <VerdictBadge
                 verdict={grade.verdict}
                 ai_confidence={grade.confidence}
                 dataQuality={grade.dataQuality}
                 loading={false}
-              />
-              <div className="text-right">
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider">AI Confidence</p>
-                <p className="text-3xl font-bold text-foreground leading-none">{grade.confidence}%</p>
-              </div>
-            </div>
-
-            {/* Confidence bar */}
-            <div className="h-2 bg-secondary rounded-full overflow-hidden">
-              <div
-                className={cn('h-full rounded-full transition-all duration-300', isOverFavorable ? 'bg-primary' : 'bg-destructive')}
-                style={{ width: `${grade.confidence}%` }}
               />
             </div>
 
@@ -493,10 +508,15 @@ export default function PropDetailModal({ prop, onClose }) {
                   <div key={i} className="flex items-start gap-3">
                     <div className={cn(
                       'w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5',
-                      c.pending ? 'bg-secondary border border-border' : c.pass ? 'bg-primary/20' : 'bg-destructive/20'
+                      c.pending    ? 'bg-secondary border border-border'
+                      : !c.available ? 'bg-white/4'
+                      : c.pass     ? 'bg-primary/20'
+                      :               'bg-destructive/20'
                     )}>
                       {c.pending
                         ? <Clock className="w-3 h-3 text-muted-foreground" />
+                        : !c.available
+                        ? <span className="text-[9px] leading-none text-muted-foreground/30">—</span>
                         : c.pass
                           ? <Check className="w-3 h-3 text-primary" />
                           : <X className="w-3 h-3 text-destructive" />

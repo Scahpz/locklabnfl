@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { fetchLiveProps } from '@/lib/liveData';
-import { Layers, X, TrendingUp, CheckCircle2, Trophy, Loader2, History } from 'lucide-react';
+import { Layers, X, TrendingUp, TrendingDown, CheckCircle2, Trophy, Loader2, History } from 'lucide-react';
+import { gradeProp } from '@/lib/grading';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -179,34 +180,55 @@ export default function ParlayBuilder() {
               </div>
             ) : (
               <div className="space-y-2 mb-4">
-                {legs.map((leg, i) => (
-                  <div key={i} className="flex items-center justify-between bg-secondary/50 rounded-lg p-2.5">
-                    <div className="flex items-center gap-2 flex-1 min-w-0">
-                      <TeamLogo team={leg.team} className="w-7 h-7" />
-                      <div className="min-w-0">
-                        <p className="text-xs font-medium text-foreground truncate">{leg.player_name}</p>
-                        <p className="text-[10px] text-muted-foreground">
-                          {leg.is_game_bet ? (
-                            <span className="font-bold text-primary">{leg.prop_type.toUpperCase()} ({leg.odds > 0 ? '+' : ''}{leg.odds})</span>
-                          ) : (
-                            <>
-                              <span className={cn("font-bold", leg.pick === 'over' ? 'text-primary' : 'text-foreground')}>
-                                {leg.pick.toUpperCase()}
-                              </span>
-                              {' '}{leg.line} {leg.prop_type.toUpperCase()} ({leg.odds > 0 ? '+' : ''}{leg.odds})
-                            </>
-                          )}
-                        </p>
+                {legs.map((leg, i) => {
+                  const legGrade = leg.is_game_bet ? null : gradeProp(leg);
+                  const isOver = leg.pick === 'over';
+                  const prob = legGrade ? (isOver ? legGrade.overProb : legGrade.underProb) : null;
+                  return (
+                    <div key={i} className={cn(
+                      "flex items-center justify-between rounded-lg p-2.5 border",
+                      isOver
+                        ? "bg-emerald-500/6 border-emerald-500/20"
+                        : "bg-rose-500/6 border-rose-500/20"
+                    )}>
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <TeamLogo team={leg.team} className="w-7 h-7 flex-shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-medium text-foreground truncate">{leg.player_name}</p>
+                          <p className="text-[10px] text-muted-foreground">
+                            {leg.is_game_bet ? (
+                              <span className="font-bold text-primary">{leg.prop_type.toUpperCase()} ({leg.odds > 0 ? '+' : ''}{leg.odds})</span>
+                            ) : (
+                              <>
+                                <span className={cn("font-bold", isOver ? 'text-emerald-400' : 'text-rose-400')}>
+                                  {leg.pick.toUpperCase()}
+                                </span>
+                                {' '}{leg.line} · {leg.odds > 0 ? '+' : ''}{leg.odds}
+                              </>
+                            )}
+                          </p>
+                        </div>
+                        {prob != null && (
+                          <div className="flex-shrink-0 flex items-center gap-1">
+                            {isOver
+                              ? <TrendingUp className="w-3 h-3 text-emerald-400/70" />
+                              : <TrendingDown className="w-3 h-3 text-rose-400/70" />
+                            }
+                            <span className={cn("text-xs font-bold tabular-nums", isOver ? 'text-emerald-400' : 'text-rose-400')}>
+                              {prob}%
+                            </span>
+                          </div>
+                        )}
                       </div>
+                      <button
+                        onClick={() => leg.is_game_bet ? removeGameLeg(leg.leg_id) : removeLeg(i)}
+                        className="text-muted-foreground hover:text-destructive transition-colors ml-2 flex-shrink-0"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
                     </div>
-                    <button
-                      onClick={() => leg.is_game_bet ? removeGameLeg(leg.leg_id) : removeLeg(i)}
-                      className="text-muted-foreground hover:text-destructive transition-colors ml-2"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
 

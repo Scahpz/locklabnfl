@@ -805,11 +805,12 @@ export default function Props() {
   const playerGroups = useMemo(() => {
     const seen = new Map();
     const groups = [];
-    filteredAndRanked.forEach((prop, i) => {
+    filteredAndRanked.forEach((prop) => {
       const name = prop.player_name;
       if (!seen.has(name)) {
         seen.set(name, groups.length);
-        groups.push({ playerName: name, rank: i + 1, props: [] });
+        // rank = sequential group position (1, 2, 3...) — avoids gaps from multi-prop players
+        groups.push({ playerName: name, rank: groups.length + 1, props: [] });
       }
       groups[seen.get(name)].props.push(prop);
     });
@@ -1216,10 +1217,48 @@ export default function Props() {
 
           {/* Ranked props list — collapsed by player */}
           <div>
-            <div className="flex items-center gap-2 mb-3">
+            <div className="flex items-center gap-2 mb-3 flex-wrap">
               <p className="text-xs text-muted-foreground">
                 {playerGroups.length} players · {filteredAndRanked.length} props · ranked by {SORT_OPTIONS.find(o => o.value === sortBy)?.label}
               </p>
+              {/* Active filter pills */}
+              {selectedType !== 'all' && (
+                <button
+                  onClick={() => setSelectedType('all')}
+                  className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-primary/12 border border-primary/25 text-primary hover:bg-primary/20 transition-colors"
+                >
+                  {propTypeLabels[selectedType] || selectedType} <X className="w-2.5 h-2.5" />
+                </button>
+              )}
+              {selectedGames.map(key => {
+                const [away, home] = key.split('@');
+                return (
+                  <button
+                    key={key}
+                    onClick={() => setSelectedGames(prev => prev.filter(k => k !== key))}
+                    className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white/8 border border-white/12 text-foreground/70 hover:text-foreground hover:border-white/20 transition-colors"
+                  >
+                    {away} @ {home} <X className="w-2.5 h-2.5" />
+                  </button>
+                );
+              })}
+              {selectedSources.map(src => (
+                <button
+                  key={src}
+                  onClick={() => setSelectedSources(prev => prev.filter(s => s !== src))}
+                  className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white/8 border border-white/12 text-foreground/70 hover:text-foreground hover:border-white/20 transition-colors"
+                >
+                  {SOURCE_META[src]?.label ?? src} <X className="w-2.5 h-2.5" />
+                </button>
+              ))}
+              {(selectedType !== 'all' || selectedGames.length > 0 || selectedSources.length > 0 || selectedPlayers.length > 0) && (
+                <button
+                  onClick={() => { setSelectedType('all'); setSelectedGames([]); setSelectedSources([]); setSelectedPlayers([]); }}
+                  className="text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+                >
+                  Clear all
+                </button>
+              )}
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
               {playerGroups.map(({ playerName, rank, props }) => (
