@@ -370,12 +370,24 @@ export default function Props() {
         ? (isHome ? homeSpread : -homeSpread)
         : null;
 
-      // Map player position to G/F/C category for position-specific def rating
-      const rawPos = (prop.position || base.position || '').toUpperCase();
-      const posCategory = rawPos === 'C' ? 'C'
-        : (rawPos === 'PG' || rawPos === 'SG' || rawPos === 'G') ? 'G'
-        : 'F'; // SF, PF, F, or unknown default to F
-      const posDefRating = oppData.pos_def?.[posCategory] ?? oppData.def_rating ?? null;
+      // Pick the defensive stat column that matches this prop type + position
+      const propType = prop.prop_type || '';
+      const posUpper = (prop.position || base.position || '').toUpperCase();
+      let defStatKey = 'pass_yds_allowed'; // default (QB props)
+      if (propType === 'rushing_yards' || propType === 'rushing_tds' || propType === 'rushing_attempts') {
+        defStatKey = 'rush_yds_allowed';
+      } else if (
+        propType === 'receiving_yards' || propType === 'receiving_tds' ||
+        propType === 'receptions'      || propType === 'rush_rec_yards'
+      ) {
+        defStatKey = posUpper === 'TE' ? 'rec_yds_allowed_te'
+                   : posUpper === 'RB' ? 'rec_yds_allowed_rb'
+                   : 'rec_yds_allowed_wr';
+      } else if (propType === 'rush_rec_tds') {
+        defStatKey = posUpper === 'RB' ? 'rush_yds_allowed' : 'rec_yds_allowed_wr';
+      }
+      // opp_def_stat = the specific yards-allowed figure used by gradeWithContext criterion 1
+      const oppDefStat = oppData[defStatKey] ?? null;
 
       // 3. Injury context — find injured teammates and opponents
       const teamUpper = team.toUpperCase();
@@ -396,17 +408,17 @@ export default function Props() {
 
       return {
         ...base,
-        opponent_def_rating:  oppData.def_rating   ?? null,
-        pos_def_rating:       posDefRating,
-        pos_category:         posCategory,
-        opponent_pace:        oppData.pace          ?? null,
-        player_team_pace:     tmData.pace           ?? null,
-        // Stat-specific opponent defense (higher = weaker defense = favors OVER)
-        opp_ast_pg:           oppData.opp_ast       ?? null,
-        opp_reb_pg:           oppData.opp_reb       ?? null,
-        opp_3pm_pg:           oppData.opp_3pm       ?? null,
-        is_home:              isHome,
-        is_back_to_back:      b2b.has(team),
+        // Use the prop-type-specific yard-allowed stat as the primary defense rating.
+        // Non-null whenever the opponent abbreviation matches a known team — this is what
+        // triggers gradeWithContext instead of the market-only fallback.
+        opponent_def_rating: oppDefStat,
+        opp_def_stat:        oppDefStat,
+        pos_def_rating:      oppDefStat,
+        pos_category:        posUpper,
+        opponent_pace:       oppData.pace ?? null,
+        player_team_pace:    tmData.pace  ?? null,
+        is_home:             isHome,
+        is_back_to_back:     b2b.has(team),
         spread:               playerSpread,
         injury_context:       injuryContext,
         injury_count:         injuredTeammates.length,
