@@ -76,8 +76,28 @@ function buildNarrative(prop, grade) {
   return txt;
 }
 
+// One-line tooltip explaining what each grading factor measures
+const FACTOR_TIPS = {
+  'Opponent Defense':      'How many yards this position group allows per game — tougher defense = lower OVER probability',
+  'Game Total (O/U)':      'The game\'s over/under total; high-scoring games create more counting-stat opportunities',
+  'Recent Form (L10)':     'Average performance over the last 10 games vs the current line',
+  'Recent Form (L5)':      'Average performance over the last 5 games — more sensitive to current hot/cold streaks',
+  'Hit Rate':              'How often this player has exceeded this line historically',
+  'Season Average':        'Full-season average performance relative to the current line',
+  'Usage / Snap %':        'Target share and snap percentage — high usage increases ceiling and floor',
+  'Target Share':          'Share of team pass targets — directly drives receiving volume',
+  'Snap %':                'Offensive snap percentage — lower snaps cap upside regardless of efficiency',
+  'Home/Away Split':       'Career split for this player as home vs away team',
+  'Head-to-Head':          'Historical performance specifically against this opponent',
+  'EPA/Game':              'Expected Points Added per game — efficiency signal above raw yardage',
+  'Air Yards Share':       'Proportion of team air yards targeted to this player — indicates downfield role',
+  'Weather':               'Wind speed and conditions for outdoor games — wind suppresses passing props',
+  'Line Movement':         'Direction and magnitude of line movement since opening',
+};
+
 export default function PropGradeChecklist({ prop, initialOpen = false }) {
   const [open, setOpen] = useState(initialOpen);
+  const [showUnavail, setShowUnavail] = useState(false);
   const grade = gradeProp(prop);
   const { criteria, confidence, lean, overProb, underProb, completeness, totalCriteria } = grade;
 
@@ -160,99 +180,118 @@ export default function PropGradeChecklist({ prop, initialOpen = false }) {
         }
       </button>
 
-      {open && (
-        <div className="mt-2 border border-white/5 rounded-xl overflow-hidden divide-y divide-white/4">
-          {criteria.map((c, i) => {
-            const barPct = c.available && c.factorScore != null && c.weight
-              ? Math.max(2, (c.factorScore / c.weight) * 100)
-              : 0;
-            return (
-              <div key={i} className="px-3 py-2.5 space-y-1.5">
-                <div className="flex items-start gap-2.5">
-                  {/* Icon: green = supports pick, red = opposes pick, grey = no data */}
-                  <div className={cn(
-                    'w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5',
-                    c.pending    ? 'bg-white/6 border border-white/10'
-                    : !c.available ? 'bg-white/4'
-                    : c.pass     ? 'bg-emerald-500/18'
-                    :               'bg-rose-500/15'
-                  )}>
-                    {c.pending
-                      ? <Clock className="w-2.5 h-2.5 text-muted-foreground/40" />
-                      : !c.available
-                      ? <span className="text-[8px] leading-none text-muted-foreground/30">—</span>
-                      : c.pass
-                      ? <Check className="w-2.5 h-2.5 text-emerald-400" />
-                      : <X    className="w-2.5 h-2.5 text-rose-400"    />
-                    }
-                  </div>
+      {open && (() => {
+        const availCriteria  = criteria.filter(c => c.available);
+        const unavailCrit    = criteria.filter(c => !c.available);
 
-                  {/* Label + detail */}
-                  <div className="flex-1 min-w-0">
-                    <p className={cn(
-                      'text-[11px] font-semibold leading-tight',
+        const renderCriterion = (c, i) => {
+          const barPct = c.available && c.factorScore != null && c.weight
+            ? Math.max(2, (c.factorScore / c.weight) * 100)
+            : 0;
+          // Find tooltip for this label — try exact match then partial match
+          const tip = FACTOR_TIPS[c.label] || Object.entries(FACTOR_TIPS).find(([k]) => c.label.startsWith(k))?.[1];
+          return (
+            <div key={i} className="px-3 py-2.5 space-y-1.5">
+              <div className="flex items-start gap-2.5">
+                <div className={cn(
+                  'w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5',
+                  c.pending    ? 'bg-white/6 border border-white/10'
+                  : !c.available ? 'bg-white/4'
+                  : c.pass     ? 'bg-emerald-500/18'
+                  :               'bg-rose-500/15'
+                )}>
+                  {c.pending
+                    ? <Clock className="w-2.5 h-2.5 text-muted-foreground/40" />
+                    : !c.available
+                    ? <span className="text-[8px] leading-none text-muted-foreground/30">—</span>
+                    : c.pass
+                    ? <Check className="w-2.5 h-2.5 text-emerald-400" />
+                    : <X    className="w-2.5 h-2.5 text-rose-400"    />
+                  }
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <p
+                    className={cn(
+                      'text-[11px] font-semibold leading-tight cursor-help',
                       !c.available ? 'text-muted-foreground/35'
                         : c.pass ? 'text-foreground/90'
                         : 'text-muted-foreground/65'
-                    )}>
-                      {c.label}
-                    </p>
-                    <p className="text-[10px] text-muted-foreground/55 leading-snug mt-0.5">
-                      {c.detail}
-                    </p>
-                  </div>
-
-                  {/* Score fraction — only for available factors */}
-                  {c.available && c.factorScore != null && (
-                    <span className={cn(
-                      'text-[10px] font-mono font-bold flex-shrink-0 self-start mt-0.5',
-                      c.pass ? 'text-emerald-400/60' : 'text-muted-foreground/30'
-                    )}>
-                      {c.factorScore.toFixed(1)}/{c.weight}
-                    </span>
-                  )}
-                  {/* Unavailable factor weight (shows what's missing) */}
-                  {!c.available && c.weight > 0 && (
-                    <span className="text-[10px] font-mono text-muted-foreground/20 flex-shrink-0 self-start mt-0.5">
-                      —/{c.weight}
-                    </span>
-                  )}
+                    )}
+                    title={tip}
+                  >
+                    {c.label}
+                    {tip && <span className="ml-1 text-[8px] text-muted-foreground/25">?</span>}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground/55 leading-snug mt-0.5">
+                    {c.detail}
+                  </p>
                 </div>
 
-                {/* Mini score bar — only for available factors */}
                 {c.available && c.factorScore != null && (
-                  <div className="h-0.5 bg-white/4 rounded-full overflow-hidden ml-6">
-                    <div
-                      className={cn('h-full rounded-full', c.pass ? 'bg-emerald-500/55' : 'bg-rose-500/30')}
-                      style={{ width: `${barPct}%` }}
-                    />
+                  <span className={cn(
+                    'text-[10px] font-mono font-bold flex-shrink-0 self-start mt-0.5',
+                    c.pass ? 'text-emerald-400/60' : 'text-muted-foreground/30'
+                  )}>
+                    {c.factorScore.toFixed(1)}/{c.weight}
+                  </span>
+                )}
+                {!c.available && c.weight > 0 && (
+                  <span className="text-[10px] font-mono text-muted-foreground/20 flex-shrink-0 self-start mt-0.5">
+                    —/{c.weight}
+                  </span>
+                )}
+              </div>
+
+              {c.available && c.factorScore != null && (
+                <div className="h-0.5 bg-white/4 rounded-full overflow-hidden ml-6">
+                  <div
+                    className={cn('h-full rounded-full', c.pass ? 'bg-emerald-500/55' : 'bg-rose-500/30')}
+                    style={{ width: `${barPct}%` }}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        };
+
+        return (
+          <div className="mt-2 border border-white/5 rounded-xl overflow-hidden divide-y divide-white/4">
+            {/* Available factors — always shown */}
+            {availCriteria.map((c, i) => renderCriterion(c, i))}
+
+            {/* Unavailable factors — collapsed under expander */}
+            {unavailCrit.length > 0 && (
+              <>
+                <button
+                  onClick={() => setShowUnavail(v => !v)}
+                  className="w-full flex items-center justify-between px-3 py-2 bg-white/2 hover:bg-white/4 transition-colors group"
+                >
+                  <span className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/35 group-hover:text-muted-foreground/55 transition-colors">
+                    {unavailCrit.length} factor{unavailCrit.length !== 1 ? 's' : ''} not scored (no data)
+                  </span>
+                  <ChevronDown className={cn('w-3 h-3 text-muted-foreground/25 transition-transform', showUnavail && 'rotate-180')} />
+                </button>
+                {showUnavail && (
+                  <div className="divide-y divide-white/4 bg-black/10">
+                    {unavailCrit.map((c, i) => renderCriterion(c, availCriteria.length + i))}
                   </div>
                 )}
-              </div>
-            );
-          })}
+              </>
+            )}
 
-          {/* Completeness + season provenance footer */}
-          {(unavailCount > 0 || completeness < 100) && (() => {
-            const currentYear = new Date().getFullYear();
-            const seasonLabel = `${currentYear - 1} season history`;
-            return (
-              <div className="px-3 py-2 bg-white/2 space-y-1">
-                {unavailCount > 0 && (
-                  <p className="text-[9px] text-muted-foreground/40 text-center">
-                    {unavailCount} factor{unavailCount !== 1 ? 's' : ''} excluded (no data) ·
-                    {' '}grade weighted {completeness}% historical / {100 - completeness}% market
-                  </p>
-                )}
+            {/* Season provenance footer */}
+            {completeness < 100 && (
+              <div className="px-3 py-2 bg-white/2">
                 <p className="text-[9px] text-muted-foreground/30 text-center">
-                  Historical data: <span className="text-muted-foreground/50">{seasonLabel}</span>
-                  {' · '}prior-year weighted model
+                  Historical data: <span className="text-muted-foreground/50">{new Date().getFullYear() - 1} season</span>
+                  {' · '}{completeness}% historical / {100 - completeness}% market · prior-year weighted
                 </p>
               </div>
-            );
-          })()}
-        </div>
-      )}
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }

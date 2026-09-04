@@ -56,7 +56,7 @@ const propTypeLabels = {
   h1_passing_yards: '1H Pass Yds', h1_rushing_yards: '1H Rush Yds', h1_receiving_yards: '1H Rec Yds',
 };
 
-export default function PlayerRow({ playerName, props, allPlayerProps, rank, verdicts, aiLoading, activeSource, onOpenDetail }) {
+export default function PlayerRow({ playerName, props, allPlayerProps, rank, totalCount, verdicts, aiLoading, activeSource, onOpenDetail }) {
   const [expanded, setExpanded] = useState(false);
   const [activeType, setActiveType] = useState(() => props[0]?.prop_type);
   const [tracked, setTracked] = useState(false);
@@ -144,8 +144,11 @@ export default function PlayerRow({ playerName, props, allPlayerProps, rank, ver
 
         {/* Player header */}
         <div className="flex items-center gap-2.5 mb-3">
-          <div className={cn("w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold border flex-shrink-0", rankStyle)}>
-            {rank}
+          <div
+            className={cn("w-7 h-6 rounded-lg flex items-center justify-center text-[9px] font-black border flex-shrink-0 tracking-tight", rankStyle)}
+            title={totalCount ? `AI Rank #${rank} of ${totalCount} players` : `AI Rank #${rank}`}
+          >
+            #{rank}
           </div>
           <PlayerAvatar prop={activeProp} name={playerName} />
           <div className="flex-1 min-w-0">
@@ -164,16 +167,28 @@ export default function PlayerRow({ playerName, props, allPlayerProps, rank, ver
               {gameDate && ` · ${gameDate}`}
             </p>
           </div>
-          <button
-            onClick={handleTrack}
-            title={tracked ? 'Tracked!' : 'Track this prop'}
-            className={cn(
-              "w-7 h-7 flex items-center justify-center rounded-lg transition-all flex-shrink-0",
-              tracked ? "bg-primary/15 text-primary" : "bg-white/5 text-muted-foreground hover:bg-primary/10 hover:text-primary"
-            )}
-          >
-            {tracked ? <Check className="w-3.5 h-3.5" /> : <BookmarkPlus className="w-3.5 h-3.5" />}
-          </button>
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            {/* Data-strength dot */}
+            {(() => {
+              const c = grade.completeness;
+              const dotCls = c >= 80 ? 'bg-emerald-500 shadow-[0_0_4px_rgba(16,185,129,0.6)]'
+                : c >= 50  ? 'bg-amber-500 shadow-[0_0_4px_rgba(245,158,11,0.5)]'
+                : c >= 20  ? 'bg-rose-500'
+                : 'bg-white/15';
+              const label = c >= 80 ? 'Strong data' : c >= 50 ? 'Partial data' : c >= 20 ? 'Limited data' : 'Market only';
+              return <div className={cn('w-2 h-2 rounded-full', dotCls)} title={`${label} (${c}% completeness)`} />;
+            })()}
+            <button
+              onClick={handleTrack}
+              title={tracked ? 'Tracked!' : 'Track this prop'}
+              className={cn(
+                "w-7 h-7 flex items-center justify-center rounded-lg transition-all",
+                tracked ? "bg-primary/15 text-primary" : "bg-white/5 text-muted-foreground hover:bg-primary/10 hover:text-primary"
+              )}
+            >
+              {tracked ? <Check className="w-3.5 h-3.5" /> : <BookmarkPlus className="w-3.5 h-3.5" />}
+            </button>
+          </div>
         </div>
 
         {/* Prop type tabs */}

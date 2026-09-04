@@ -4,7 +4,9 @@ import { isDemoMode } from '@/lib/mockData';
 import { getAIVerdicts } from '@/lib/aiVerdicts';
 import LockCards from '@/components/props/LockCards';
 import DemonPickCard from '@/components/props/DemonPickCard';
-import { RefreshCw, Wifi, WifiOff, Zap, SlidersHorizontal, Search, X, Info } from 'lucide-react';
+import { RefreshCw, Wifi, WifiOff, Zap, SlidersHorizontal, Search, X, Info, LayoutGrid, List, TrendingUp, TrendingDown } from 'lucide-react';
+import TeamLogo from '@/components/common/TeamLogo';
+import { calcEVVerdict } from '@/lib/verdict';
 import PlayerRow from '@/components/props/PlayerRow';
 import { cn } from '@/lib/utils';
 import { rankScore, gradeProp } from '@/lib/grading';
@@ -84,6 +86,36 @@ const SORT_OPTIONS = [
   { value: 'hit_rate', label: 'Hit Rate' },
 ];
 
+function toLetterGrade(confidence, completeness) {
+  const eff = completeness < 25 ? Math.min(confidence, 62)
+    : completeness < 45 ? Math.min(confidence, 70)
+    : completeness < 65 ? Math.min(confidence, 80)
+    : confidence;
+  if (eff >= 88) return 'A+';
+  if (eff >= 83) return 'A';
+  if (eff >= 78) return 'A-';
+  if (eff >= 74) return 'B+';
+  if (eff >= 70) return 'B';
+  if (eff >= 65) return 'B-';
+  if (eff >= 61) return 'C+';
+  if (eff >= 57) return 'C';
+  return 'C-';
+}
+
+function strengthDotClass(completeness) {
+  if (completeness == null || completeness < 20) return 'bg-white/20';
+  if (completeness < 50) return 'bg-rose-500';
+  if (completeness < 80) return 'bg-amber-500';
+  return 'bg-emerald-500';
+}
+
+function letterGradeStyle(letter) {
+  const g = letter[0];
+  if (g === 'A') return 'text-emerald-400';
+  if (g === 'B') return 'text-primary';
+  return 'text-amber-400';
+}
+
 function fmtTipoff(scheduledAt) {
   if (!scheduledAt) return null;
   try {
@@ -141,6 +173,8 @@ export default function Props() {
   const [selectedWeeks, setSelectedWeeks] = useState(savedFilters.selectedWeeks ?? [1]);
   const [detailKey, setDetailKey] = useState(null); // { player_name, prop_type }
   const [detailDemon, setDetailDemon] = useState(false);
+  const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'table'
+  const [lastFetchedAt, setLastFetchedAt] = useState(null); // Date when odds last loaded
   const searchRef = useRef(null);
   // Pre-seed with hardcoded stats so pace/defense show immediately
   const [teamContext, setTeamContext] = useState({ teams: TEAM_STATS, injuries: {}, back_to_back: [], game_spreads: {} });
@@ -159,6 +193,7 @@ export default function Props() {
     setGameDate(data.game_date);
     setGamesSummary(data.games_summary || []);
     setIsLive(true);
+    setLastFetchedAt(new Date());
     if (!skipAI) {
       setAiLoading(true);
       getAIVerdicts(realProps.slice(0, 50)).then(v => {
@@ -1286,9 +1321,31 @@ export default function Props() {
           {/* Ranked props list — collapsed by player */}
           <div>
             <div className="flex items-center gap-2 mb-3 flex-wrap">
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-muted-foreground flex-1 min-w-0">
                 {playerGroups.length} players · {filteredAndRanked.length} props · ranked by {SORT_OPTIONS.find(o => o.value === sortBy)?.label}
+                {lastFetchedAt && (() => {
+                  const mins = Math.round((Date.now() - lastFetchedAt.getTime()) / 60000);
+                  return <span className="text-muted-foreground/40 ml-1">· odds {mins <= 0 ? 'just updated' : `updated ${mins}m ago`}</span>;
+                })()}
               </p>
+              {/* View toggle */}
+              <div className="flex items-center gap-0.5 bg-secondary/60 border border-border rounded-lg p-0.5 flex-shrink-0">
+                <button
+                  onClick={() => setViewMode('grid')}
+                  className={cn('p-1.5 rounded transition-all', viewMode === 'grid' ? 'bg-white/12 text-foreground' : 'text-muted-foreground/50 hover:text-muted-foreground')}
+                  title="Grid view"
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => setViewMode('table')}
+                  className={cn('p-1.5 rounded transition-all', viewMode === 'table' ? 'bg-white/12 text-foreground' : 'text-muted-foreground/50 hover:text-muted-foreground')}
+                  title="Table view"
+                >
+                  <List className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
               {/* Active filter pills */}
               {selectedType !== 'all' && (
                 <button
@@ -1328,21 +1385,122 @@ export default function Props() {
                 </button>
               )}
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-              {playerGroups.map(({ playerName, rank, props }) => (
-                <PlayerRow
-                  key={playerName}
-                  playerName={playerName}
-                  props={props}
-                  allPlayerProps={propsByPlayer[playerName] ?? props}
-                  rank={rank}
-                  verdicts={verdicts}
-                  aiLoading={aiLoading}
-                  activeSource={selectedSources.length === 1 ? selectedSources[0] : null}
-                  onOpenDetail={(pName, pType) => setDetailKey({ player_name: pName, prop_type: pType })}
-                />
-              ))}
-            </div>
+            {viewMode === 'grid' ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {playerGroups.map(({ playerName, rank, props }) => (
+                  <PlayerRow
+                    key={playerName}
+                    playerName={playerName}
+                    props={props}
+                    allPlayerProps={propsByPlayer[playerName] ?? props}
+                    rank={rank}
+                    totalCount={playerGroups.length}
+                    verdicts={verdicts}
+                    aiLoading={aiLoading}
+                    activeSource={selectedSources.length === 1 ? selectedSources[0] : null}
+                    onOpenDetail={(pName, pType) => setDetailKey({ player_name: pName, prop_type: pType })}
+                  />
+                ))}
+              </div>
+            ) : (
+              /* Compact table view */
+              <div className="rounded-xl border border-border overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-border bg-secondary/40">
+                        <th className="text-left px-3 py-2.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50 w-8">#</th>
+                        <th className="text-left px-3 py-2.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">Player</th>
+                        <th className="text-left px-3 py-2.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">Prop · Line</th>
+                        <th className="text-left px-3 py-2.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">Probability</th>
+                        <th className="text-left px-3 py-2.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">Grade</th>
+                        <th className="text-left px-3 py-2.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">Edge</th>
+                        <th className="text-left px-3 py-2.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">Data</th>
+                        <th className="px-3 py-2.5 w-24" />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/4">
+                      {filteredAndRanked.map((prop, i) => {
+                        const g = gradeProp(prop);
+                        const ev = calcEVVerdict(prop, g);
+                        const isOver = ev.direction === 'OVER';
+                        const prob = isOver ? g.overProb : g.underProb;
+                        const lg = toLetterGrade(g.confidence, g.completeness);
+                        const lgCls = letterGradeStyle(lg);
+                        const dotCls = strengthDotClass(g.completeness);
+                        const propLabel = propTypeLabels[prop.prop_type] || prop.prop_type;
+                        return (
+                          <tr
+                            key={`${prop.player_name}-${prop.prop_type}`}
+                            className="hover:bg-white/3 transition-colors cursor-pointer"
+                            onClick={() => setDetailKey({ player_name: prop.player_name, prop_type: prop.prop_type })}
+                          >
+                            <td className="px-3 py-2.5">
+                              <span className="text-[10px] font-bold text-muted-foreground/40">#{i + 1}</span>
+                            </td>
+                            <td className="px-3 py-2.5">
+                              <div className="flex items-center gap-2">
+                                <TeamLogo team={prop.team} className="w-6 h-6 flex-shrink-0" />
+                                <div className="min-w-0">
+                                  <p className="font-semibold text-foreground truncate max-w-[120px]">{prop.player_name}</p>
+                                  <p className="text-[10px] text-muted-foreground/55">{prop.position} · {prop.team} vs {prop.opponent}</p>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-3 py-2.5">
+                              <p className="font-semibold text-foreground">{propLabel}</p>
+                              <p className="text-[10px] font-mono text-muted-foreground/60">{prop.line}</p>
+                            </td>
+                            <td className="px-3 py-2.5">
+                              <div className="flex items-center gap-1.5">
+                                {isOver
+                                  ? <TrendingUp className="w-3 h-3 text-emerald-400 flex-shrink-0" />
+                                  : <TrendingDown className="w-3 h-3 text-rose-400 flex-shrink-0" />
+                                }
+                                <span className={cn('font-black tabular-nums', isOver ? 'text-emerald-400' : 'text-rose-400')}>
+                                  {prob}%
+                                </span>
+                                <span className={cn('text-[10px] font-semibold', isOver ? 'text-emerald-400/50' : 'text-rose-400/50')}>
+                                  {ev.direction}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="px-3 py-2.5">
+                              <span className={cn('font-black text-sm', lgCls)}>{lg}</span>
+                            </td>
+                            <td className="px-3 py-2.5">
+                              {prop.edge != null && prop.edge !== 0 ? (
+                                <span className={cn('font-semibold tabular-nums', prop.edge > 0 ? 'text-emerald-400' : 'text-rose-400')}>
+                                  {prop.edge > 0 ? '+' : ''}{prop.edge}
+                                </span>
+                              ) : (
+                                <span className="text-muted-foreground/25">—</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2.5">
+                              <div className="flex items-center gap-1.5" title={`${g.completeness}% data completeness`}>
+                                <div className={cn('w-2 h-2 rounded-full flex-shrink-0', dotCls)} />
+                                <span className="text-[10px] text-muted-foreground/40">{g.completeness}%</span>
+                              </div>
+                            </td>
+                            <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
+                              <div className="flex items-center gap-1">
+                                <button
+                                  onClick={() => {}}
+                                  className="text-[10px] font-bold px-2 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 hover:bg-emerald-500/20 transition-colors whitespace-nowrap"
+                                >
+                                  OVER {prop.over_odds > 0 ? '+' : ''}{prop.over_odds ?? ''}
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}
