@@ -186,6 +186,7 @@ function gradeWithContext(prop) {
 
   // -- 7. TARGET SHARE / USAGE (weight 8) ----------------------------------------
   const targetShare = prop.target_share;
+  const snapPct     = prop.snap_pct;
   if (injNote) {
     const injWeight = Math.min(8, injCount >= 2 ? 8 : 6);
     criteria.push({
@@ -195,19 +196,33 @@ function gradeWithContext(prop) {
     });
   } else if (targetShare != null) {
     const HIGH_TARGET_SHARE = 0.20;
+    const snapBonus = snapPct != null && snapPct >= 0.85 ? 0.05 : 0;
     criteria.push({
-      label: `Target Share: ${Math.round(targetShare * 100)}% (need ≥ 20%)`,
+      label: `Target Share: ${Math.round(targetShare * 100)}%${snapPct != null ? ` · Snap: ${Math.round(snapPct * 100)}%` : ''}`,
       detail: targetShare >= HIGH_TARGET_SHARE
-        ? `${Math.round(targetShare * 100)}% target share — strong passing game role`
+        ? `${Math.round(targetShare * 100)}% target share — strong passing game role${snapPct != null ? `, ${Math.round(snapPct * 100)}% snap rate` : ''}`
         : `Only ${Math.round(targetShare * 100)}% target share — limited looks`,
       pass: targetShare >= HIGH_TARGET_SHARE,
-      continuousScore: Math.min(0.85, targetShare / HIGH_TARGET_SHARE * 0.5 + 0.2),
+      continuousScore: Math.min(0.85, targetShare / HIGH_TARGET_SHARE * 0.5 + 0.2 + snapBonus),
+      weight: 8,
+      available: true,
+      category: 'usage',
+    });
+  } else if (snapPct != null) {
+    const highSnap = snapPct >= 0.75;
+    criteria.push({
+      label: `Snap Rate: ${Math.round(snapPct * 100)}% (need ≥ 75%)`,
+      detail: highSnap
+        ? `${Math.round(snapPct * 100)}% snap rate — full workload expected`
+        : `Only ${Math.round(snapPct * 100)}% snap rate — rotational role`,
+      pass: highSnap,
+      continuousScore: Math.min(0.85, snapPct * 0.9 + 0.1),
       weight: 8,
       available: true,
       category: 'usage',
     });
   } else {
-    // No target share or injury data — neutral signal, not negative
+    // No volume data — neutral signal, not negative
     const edgeScale = Math.max(Math.abs(l10 ?? line ?? 1), 1);
     const edgeContinuousScore = edge != null
       ? Math.min(0.85, Math.max(0.15, 0.5 + edge / edgeScale))
@@ -217,7 +232,7 @@ function gradeWithContext(prop) {
       detail: edge != null && edge > 0
         ? `Model projects +${edge} above the line`
         : 'No major lineup changes — normal role expected',
-      pass: edge != null ? edge > 0 : true, // neutral snap count is not a negative
+      pass: edge != null ? edge > 0 : true,
       continuousScore: edgeContinuousScore,
       weight: 8,
       available: true,
@@ -270,6 +285,38 @@ function gradeWithContext(prop) {
       available:       true,
       category:        'rest',
     });
+  }
+
+  // -- 10. WEATHER (weight 5) — only for passing/receiving/combo props ----------
+  const weather = prop.weather;
+  const isPassingProp = ['passing_yards', 'receiving_yards', 'receptions', 'passing_tds',
+    'rush_rec_yards', 'pass_rush_yards', 'receiving_tds'].includes(propType);
+  if (weather != null && isPassingProp) {
+    if (weather.dome) {
+      criteria.push({
+        label: 'Weather: Indoor stadium',
+        detail: 'Controlled environment — no wind or weather impact',
+        pass: true, continuousScore: 0.75, weight: 5, available: true, category: 'matchup',
+      });
+    } else if (weather.wind_mph != null) {
+      const veryWindy = weather.wind_mph > 25;
+      const windy     = weather.wind_mph > 15;
+      const rainy     = weather.is_rainy;
+      const label     = `Weather: ${weather.wind_mph} mph wind${rainy ? ', rain' : ''}${weather.temp_f != null ? `, ${weather.temp_f}°F` : ''}`;
+      criteria.push({
+        label,
+        detail: veryWindy
+          ? `Severe wind (${weather.wind_mph} mph) — significantly suppresses passing game`
+          : windy
+          ? `Wind (${weather.wind_mph} mph) — may limit deep passing and kicking game`
+          : `Favorable conditions — no weather concern`,
+        pass:            !windy,
+        continuousScore: veryWindy ? 0.10 : windy ? 0.25 : rainy ? 0.60 : 0.80,
+        weight:          5,
+        available:       true,
+        category:        'matchup',
+      });
+    }
   }
 
   // -- HOME/AWAY SPLIT ----------------------------------------------------------

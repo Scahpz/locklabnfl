@@ -33,14 +33,15 @@ function glCacheGet(name) {
 function glCacheSet(name, data) {
   try { localStorage.setItem(GL_CACHE_PREFIX + name, JSON.stringify({ data, ts: Date.now() })); } catch {}
 }
-async function fetchBulkGameLogs(names) {
+// playerProps: [{name, prop_type, line}]
+async function fetchBulkGameLogs(playerProps) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 8000);
   try {
     const res = await fetch(`${NFL_API}/api/player-gamelogs-bulk`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ playerNames: names }),
+      body: JSON.stringify({ playerProps }),
       signal: ctrl.signal,
     });
     if (!res.ok) return null;
@@ -143,6 +144,7 @@ export default function Props() {
   const searchRef = useRef(null);
   // Pre-seed with hardcoded stats so pace/defense show immediately
   const [teamContext, setTeamContext] = useState({ teams: TEAM_STATS, injuries: {}, back_to_back: [], game_spreads: {} });
+  const [weatherData, setWeatherData] = useState({});
   const fetchedPlayers = useRef(new Set());
 
   // Persist filter state to sessionStorage so it survives navigation
@@ -254,6 +256,19 @@ export default function Props() {
     return () => ctrl.abort();
   }, [rawProps.length]);
 
+  // Fetch weather for each unique home team (Open-Meteo via backend, cached 3h)
+  useEffect(() => {
+    if (!rawProps.length) return;
+    const homeTeams = [...new Set(rawProps.map(p => p.home).filter(Boolean))];
+    homeTeams.forEach(team => {
+      if (weatherData[team] !== undefined) return;
+      fetch(`${NFL_API}/api/weather/${team}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(data => { if (data) setWeatherData(prev => ({ ...prev, [team]: data })); })
+        .catch(() => {});
+    });
+  }, [rawProps]);
+
   // Auto-fetch game logs for all players in one bulk request
   useEffect(() => {
     if (!rawProps.length || isDemoMode()) return;
@@ -284,13 +299,19 @@ export default function Props() {
       setPlayerAnalytics(prev => ({ ...prev, ...skipUpdates }));
     }
 
-    fetchBulkGameLogs(batch).then(data => {
+    // Build playerProps: every prop row for players in this batch
+    const playerProps = rawProps
+      .filter(p => batch.includes(p.player_name))
+      .map(p => ({ name: p.player_name, prop_type: p.prop_type, line: p.line }));
+
+    fetchBulkGameLogs(playerProps).then(data => {
       const updates = {};
       if (data?.analytics) {
-        Object.entries(data.analytics).forEach(([name, analytics]) => {
-          if (analytics && Object.keys(analytics).length > 0) {
-            updates[name] = analytics;
-            glCacheSet(name, { analytics });
+        Object.entries(data.analytics).forEach(([name, playerData]) => {
+          // playerData is {prop_type: analyticsObj, ...}
+          if (playerData && typeof playerData === 'object' && Object.keys(playerData).length > 0) {
+            updates[name] = playerData;
+            glCacheSet(name, { analytics: playerData });
           }
         });
       }
@@ -425,9 +446,15 @@ export default function Props() {
         injury_count:         injuredTeammates.length,
         opp_injury_context:   oppInjuryContext,
         opp_injury_count:     injuredOpponents.length,
+        // New fields from nfl_data_py analytics
+        target_share: analytics?.target_share ?? prop.target_share ?? null,
+        snap_pct:     analytics?.snap_pct     ?? prop.snap_pct     ?? null,
+        adot:         analytics?.adot         ?? prop.adot         ?? null,
+        // Weather for this game (keyed by home team)
+        weather:      weatherData[prop.home || ''] ?? null,
       };
     });
-  }, [rawProps, playerAnalytics, teamContext]);
+  }, [rawProps, playerAnalytics, teamContext, weatherData]);
 
   useEffect(() => {
     loadData();
