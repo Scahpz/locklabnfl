@@ -139,12 +139,15 @@ export default function PropGradeChecklist({ prop, initialOpen = false }) {
                   {/* Icon */}
                   <div className={cn(
                     'w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5',
-                    c.pending ? 'bg-white/6 border border-white/10'
-                      : c.pass ? 'bg-emerald-500/18'
-                      : 'bg-rose-500/15'
+                    c.pending    ? 'bg-white/6 border border-white/10'
+                    : !c.available ? 'bg-white/4'
+                    : c.pass     ? 'bg-emerald-500/18'
+                    :               'bg-rose-500/15'
                   )}>
                     {c.pending
                       ? <Clock className="w-2.5 h-2.5 text-muted-foreground/40" />
+                      : !c.available
+                      ? <span className="text-[8px] leading-none text-muted-foreground/30">—</span>
                       : c.pass
                       ? <Check className="w-2.5 h-2.5 text-emerald-400" />
                       : <X    className="w-2.5 h-2.5 text-rose-400"    />

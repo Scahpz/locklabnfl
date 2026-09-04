@@ -39,7 +39,11 @@ function getDefStatLabel(propType, position) {
 }
 
 export function gradeProp(prop) {
-  const hasContext = prop.opponent_def_rating != null || prop.has_analytics;
+  // Use gradeWithContext whenever we have ANY team context: a known opponent (even
+  // if the specific def-stat lookup missed), real analytics, or a confirmed no-data
+  // state.  gradeFromMarket is only for truly unknown props (no opponent, no data).
+  const hasContext = prop.opponent_def_rating != null || prop.has_analytics
+    || !!prop.opponent || prop.data_unavailable === true;
   if (prop.has_analytics || hasContext) return gradeWithContext(prop);
   return gradeFromMarket(prop);
 }

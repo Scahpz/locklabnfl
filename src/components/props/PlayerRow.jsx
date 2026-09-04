@@ -35,17 +35,9 @@ function PlayerAvatar({ prop, name }) {
   return <TeamLogo team={prop.team} className="w-11 h-11 flex-shrink-0" />;
 }
 
-// De-vig market odds to get true implied probabilities
-function devigOdds(overOdds, underOdds) {
-  const toImpl = (o) => {
-    const n = Number(o) || -110;
-    return n < 0 ? Math.abs(n) / (Math.abs(n) + 100) : 100 / (n + 100);
-  };
-  const rawOver  = toImpl(overOdds);
-  const rawUnder = toImpl(underOdds);
-  const total    = rawOver + rawUnder;
-  const overPct  = Math.round((rawOver / total) * 100);
-  return { overPct, underPct: 100 - overPct };
+function fmtOdds(n) {
+  if (n == null) return '';
+  return n > 0 ? `+${n}` : `${n}`;
 }
 
 const propTypeLabels = {
@@ -101,10 +93,6 @@ export default function PlayerRow({ playerName, props, allPlayerProps, rank, ver
     ? `WK ${weekNum}`
     : evVerdict.label;
 
-  const { overPct, underPct } = devigOdds(gradedProp.over_odds, gradedProp.under_odds);
-  // Don't show percentages when odds are equal — flat -110/-110 (DFS platforms) devig to 50/50
-  // which adds no information over just showing OVER/UNDER.
-  const showPct = gradedProp.over_odds !== gradedProp.under_odds && overPct !== underPct;
 
   const hasStats    = gradedProp.avg_last_10 != null || gradedProp.hit_rate_last_10 != null;
   const isMarketOnly = evVerdict.tier === 'PRESEASON' || activeProp.data_unavailable === true;
@@ -265,7 +253,7 @@ export default function PlayerRow({ playerName, props, allPlayerProps, rank, ver
             )}
           >
             <TrendingUp className="w-3 h-3 flex-shrink-0" />
-            OVER{showPct ? ` ${overPct}%` : ''}
+            OVER {fmtOdds(gradedProp.over_odds)}
           </button>
           <button
             onClick={() => addLeg(gradedProp, 'under')}
@@ -277,7 +265,7 @@ export default function PlayerRow({ playerName, props, allPlayerProps, rank, ver
             )}
           >
             <TrendingDown className="w-3 h-3 flex-shrink-0" />
-            UNDER{showPct ? ` ${underPct}%` : ''}
+            UNDER {fmtOdds(gradedProp.under_odds)}
           </button>
         </div>
 
