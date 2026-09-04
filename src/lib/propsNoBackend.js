@@ -92,6 +92,13 @@ async function buildSeasonStats() {
   return map;
 }
 
+// Normalize player names for comparison across data sources.
+// Strips dots (D.J. → DJ), collapses whitespace, lowercases.
+// Handles: "D.J. Moore" ↔ "DJ Moore", "T.J. Watt" ↔ "TJ Watt", etc.
+function normName(n) {
+  return (n || '').toLowerCase().replace(/\./g, '').replace(/\s+/g, ' ').trim();
+}
+
 // Get player name → Sleeper ID mapping. Uses the nflLiveData cached players
 // if available (free), otherwise skips analytics rather than fetching ~7MB list.
 function buildNameToId() {
@@ -101,7 +108,7 @@ function buildNameToId() {
     if (!cached?.players?.length) return {};
     const map = {};
     cached.players.forEach(p => {
-      if (p.player_name && p.id) map[p.player_name.toLowerCase()] = p.id;
+      if (p.player_name && p.id) map[normName(p.player_name)] = p.id;
     });
     return map;
   } catch {
@@ -128,8 +135,7 @@ async function buildNameToIdFull() {
   const map = {};
   Object.entries(players).forEach(([id, p]) => {
     if (!p.first_name || !p.last_name || !SKILL.has(p.position)) return;
-    const name = `${p.first_name} ${p.last_name}`.trim().toLowerCase();
-    map[name] = id;
+    map[normName(`${p.first_name} ${p.last_name}`)] = id;
   });
 
   try {
@@ -307,7 +313,7 @@ export async function fetchUnderdogDirect() {
     props.forEach(prop => {
       const sleeperKey = PROP_TO_SLEEPER[prop.prop_type];
       if (!sleeperKey) return;
-      const pid = nameToId[prop.player_name.toLowerCase()];
+      const pid = nameToId[normName(prop.player_name)];
       if (!pid || !statsMap[pid]?.[sleeperKey]?.length) return;
       const analytics = computeAnalytics(statsMap[pid][sleeperKey], prop.line);
       if (analytics) Object.assign(prop, analytics);
@@ -379,7 +385,7 @@ export async function fetchPropsNoBackend() {
     // Analytics from 2025 Sleeper stats
     let analytics = null;
     const statKey  = PROP_TO_SLEEPER[propType];
-    const pid      = nameToId[playerName.toLowerCase()];
+    const pid      = nameToId[normName(playerName)];
     if (statKey && pid && statsMap[pid]?.[statKey]?.length) {
       analytics = computeAnalytics(statsMap[pid][statKey], line);
     }

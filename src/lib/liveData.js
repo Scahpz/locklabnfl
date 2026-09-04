@@ -1,13 +1,16 @@
-const CACHE_KEY = 'locklab_live_props_v43';
-const CACHE_TS_KEY = 'locklab_live_props_ts_v43';
+const CACHE_KEY = 'locklab_live_props_v44';
+const CACHE_TS_KEY = 'locklab_live_props_ts_v44';
 const FRESH_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 
 try {
-  for (let i = 1; i <= 42; i++) {
+  for (let i = 1; i <= 43; i++) {
     localStorage.removeItem(`locklab_live_props_v${i}`);
     localStorage.removeItem(`locklab_live_props_date_v${i}`);
     localStorage.removeItem(`locklab_live_props_ts_v${i}`);
   }
+  // Clear old name→id cache so it gets rebuilt with normalized keys
+  localStorage.removeItem('locklab_nfl_nameid_v1');
+  localStorage.removeItem('locklab_nfl_nameid_ts_v1');
 } catch {}
 
 import { NFL_API } from './config';
