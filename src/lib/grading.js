@@ -334,6 +334,12 @@ function gradeWithContext(prop) {
     return sum + score * c.weight;
   }, 0) / totalWeight;
 
+  // Attach per-factor contribution score for display (continuousScore × weight)
+  criteria.forEach(c => {
+    const cs = c.continuousScore != null ? c.continuousScore : (c.pass ? 1 : 0);
+    c.factorScore = c.available ? Math.round(cs * c.weight * 10) / 10 : null;
+  });
+
   const rawConf    = Math.round(52 + Math.abs(overScore - 0.5) * 92);
   const confidence = Math.min(98, rawConf);
   const verdict    = confidence < 60 ? 'UNSAFE' : (overScore >= 0.5 ? 'OVER' : 'UNDER');
@@ -344,6 +350,8 @@ function gradeWithContext(prop) {
     lean:          overScore >= 0.5 ? 'OVER' : 'UNDER',
     totalCriteria: criteria.length,
     dataQuality:   hasRealData ? 'full' : 'context',
+    overScore,
+    totalWeight,
   };
 }
 
@@ -363,9 +371,13 @@ function gradeFromMarket(prop) {
     { label: 'Spread / Game Total -- loading...',   detail: 'Fetching spread and total',     pass: false, weight: 0, available: false, pending: true, category: 'rest' },
   ];
 
+  criteria.forEach(c => {
+    c.factorScore = c.available ? (c.pass ? c.weight : Math.round(trueOver * c.weight * 10) / 10) : null;
+  });
+
   const verdict    = trueOver >= 0.5 ? 'OVER' : 'UNDER';
   const confidence = Math.min(54, Math.round(50 + Math.abs(trueOver - 0.5) * 100));
-  return { verdict, confidence, criteria, passCount: trueOver > 0.505 ? 1 : 0, lean: verdict, totalCriteria: 6, dataQuality: 'market' };
+  return { verdict, confidence, criteria, passCount: trueOver > 0.505 ? 1 : 0, lean: verdict, totalCriteria: 6, dataQuality: 'market', overScore: trueOver, totalWeight: 100 };
 }
 
 export function rankScore(prop) {
