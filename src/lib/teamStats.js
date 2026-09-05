@@ -44,3 +44,49 @@ export const NFL_LEAGUE_AVGS = {
   rec_yds_allowed_te:   58,
   rec_yds_allowed_rb:   35,
 };
+
+// QB quality tiers per team — 2025 season baseline
+// 'elite' | 'above' | 'avg' | 'below' | 'poor'
+export const QB_TIER = {
+  BAL: 'elite',  // Lamar Jackson — unanimous MVP 2024
+  BUF: 'elite',  // Josh Allen
+  KC:  'elite',  // Patrick Mahomes
+  DET: 'elite',  // Jared Goff — elite accuracy season
+  PHI: 'above',  // Jalen Hurts
+  TB:  'above',  // Baker Mayfield
+  GB:  'above',  // Jordan Love
+  HOU: 'above',  // CJ Stroud
+  WAS: 'above',  // Jayden Daniels — elite rookie
+  LAC: 'above',  // Justin Herbert
+  SF:  'above',  // Brock Purdy
+  MIN: 'above',  // Sam Darnold / JJ McCarthy
+  CIN: 'avg',    // Joe Burrow
+  DAL: 'avg',    // Dak Prescott
+  CHI: 'avg',    // Caleb Williams — year 2 growth
+  IND: 'avg',    // Anthony Richardson
+  DEN: 'avg',    // Bo Nix
+  MIA: 'avg',    // Tua Tagovailoa
+  ATL: 'avg',    // Michael Penix Jr.
+  LAR: 'avg',    // Matthew Stafford
+  SEA: 'avg',    // Geno Smith
+  JAX: 'avg',    // Trevor Lawrence
+  CAR: 'below',  // Bryce Young
+  NYG: 'below',  // Daniel Jones / successor
+  NE:  'below',  // Drake Maye — developing
+  ARI: 'below',  // Kyler Murray — inconsistent
+  LV:  'below',  // Gardner Minshew / Aaron Rodgers successor
+  PIT: 'below',  // Justin Fields / Russell Wilson
+  NYJ: 'poor',   // Aaron Rodgers / aged/injured
+  CLE: 'poor',   // Deshaun Watson situation
+  TEN: 'poor',   // Will Levis
+  NO:  'poor',   // Derek Carr / successor
+};
+
+// Continuous score per tier (used in OVER probability calculation)
+export const QB_TIER_SCORE = {
+  elite: 0.82,
+  above: 0.68,
+  avg:   0.52,
+  below: 0.32,
+  poor:  0.18,
+};

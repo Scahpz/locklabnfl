@@ -1,17 +1,73 @@
 import { getPrevLines } from '@/lib/liveData';
-import { NFL_LEAGUE_AVGS } from '@/lib/teamStats';
+import { NFL_LEAGUE_AVGS, QB_TIER, QB_TIER_SCORE } from '@/lib/teamStats';
 
-// NFL-specific grading engine
+// ── Helper functions ──────────────────────────────────────────────────────────
+
+// Exponentially weighted moving average (vals[0] = most recent, highest weight)
+function ewmaAvg(vals, decay = 0.18) {
+  if (!vals?.length) return null;
+  let wSum = 0, vSum = 0;
+  vals.forEach((v, i) => {
+    const w = Math.exp(-decay * i);
+    vSum += v * w;
+    wSum += w;
+  });
+  return Math.round(vSum / wSum * 10) / 10;
+}
+
+// Consistency metrics: std dev and coefficient of variation from raw game logs
+function calcConsistency(vals) {
+  if (!vals || vals.length < 4) return null;
+  const mean = vals.reduce((s, v) => s + v, 0) / vals.length;
+  if (mean < 1) return null;
+  const variance = vals.reduce((s, v) => s + (v - mean) ** 2, 0) / vals.length;
+  const stdDev = Math.sqrt(variance);
+  return { stdDev: Math.round(stdDev * 10) / 10, cv: stdDev / mean };
+}
+
+// Position group classifier — drives weight adjustments
+function posGroup(propType, position) {
+  const pos = (position || '').toUpperCase();
+  const isQBProp  = ['passing_yards','passing_tds','completions','passing_ints','pass_rush_yards'].includes(propType);
+  const isRushProp = ['rushing_yards','rushing_tds','rushing_attempts'].includes(propType);
+  const isRecProp  = ['receiving_yards','receptions','receiving_tds','rush_rec_yards','rush_rec_tds'].includes(propType);
+  if (isQBProp) return 'QB';
+  if (isRushProp) return 'RB_RUSH';
+  if (isRecProp && pos === 'TE') return 'TE';
+  if (isRecProp && pos === 'RB') return 'RB_REC';
+  if (isRecProp) return 'WR';
+  return 'FLEX';
+}
+
+// Continuous defensive quality score using z-score (replaces binary above/below avg)
+// Positive oppDefStat means defense allows MORE = weaker = favors OVER
+function defPercentileScore(oppDefStat, leagueAvg) {
+  if (oppDefStat == null || leagueAvg == null) return null;
+  const sd = leagueAvg * 0.115; // ~11.5% CV is typical across NFL team stats
+  const z  = (oppDefStat - leagueAvg) / sd;
+  // z > 0 (allows more than avg) → higher OVER score; z < 0 → lower score
+  return Math.min(0.85, Math.max(0.15, 0.5 + z * 0.19));
+}
+
+// Position-specific weight multipliers per factor category
+const POS_MULT = {
+  QB:      { oppDef: 1.20, gameTotal: 1.50, formL10: 1.00, formL5: 1.00, hitRate: 1.00, season: 0.90, spread: 1.50, usage: 0.30, weather: 1.50, airYards: 0.00, splits: 1.00, h2h: 0.80, epa: 1.00, lineMove: 1.10, consistency: 0.80, qbQuality: 0.00 },
+  RB_RUSH: { oppDef: 1.30, gameTotal: 0.50, formL10: 1.00, formL5: 1.10, hitRate: 1.10, season: 0.90, spread: 1.60, usage: 1.30, weather: 0.60, airYards: 0.00, splits: 1.20, h2h: 1.00, epa: 0.90, lineMove: 1.00, consistency: 1.00, qbQuality: 0.00 },
+  RB_REC:  { oppDef: 1.00, gameTotal: 1.10, formL10: 1.00, formL5: 1.00, hitRate: 1.00, season: 0.90, spread: 1.00, usage: 1.40, weather: 0.80, airYards: 0.80, splits: 1.00, h2h: 0.90, epa: 1.00, lineMove: 1.00, consistency: 1.00, qbQuality: 0.60 },
+  WR:      { oppDef: 1.20, gameTotal: 1.20, formL10: 1.00, formL5: 1.00, hitRate: 1.00, season: 0.90, spread: 0.80, usage: 1.50, weather: 1.10, airYards: 1.40, splits: 1.10, h2h: 1.00, epa: 1.00, lineMove: 1.10, consistency: 1.00, qbQuality: 1.00 },
+  TE:      { oppDef: 1.20, gameTotal: 1.00, formL10: 1.00, formL5: 1.00, hitRate: 1.00, season: 0.90, spread: 0.80, usage: 1.40, weather: 0.90, airYards: 1.10, splits: 1.00, h2h: 1.00, epa: 1.00, lineMove: 1.00, consistency: 1.00, qbQuality: 0.80 },
+  FLEX:    {},
+};
+
+function adjW(base, category, pg) {
+  const m = (POS_MULT[pg] || {})[category] ?? 1.0;
+  return m === 0 ? 0 : Math.max(1, Math.round(base * m));
+}
 
 function formScore(avg, line) {
   if (avg == null) return null;
   const scale = Math.max(avg, line, 1);
   return Math.max(0, Math.min(0.85, 0.5 + (avg - line) / scale));
-}
-
-function defScore(value, leagueAvg) {
-  if (value == null || leagueAvg == null) return null;
-  return Math.max(0, Math.min(0.85, 0.5 + (value - leagueAvg) / (leagueAvg * 0.25)));
 }
 
 function impliedProbability(odds) {
@@ -21,13 +77,12 @@ function impliedProbability(odds) {
     : 100 / (odds + 100);
 }
 
-// Map NFL prop type -> defensive stat key from teamStats
 function getDefStatKey(propType, position) {
   if (propType === 'passing_yards' || propType === 'passing_tds' || propType === 'completions') return 'pass_yds_allowed';
   if (propType === 'rushing_yards' || propType === 'rushing_tds') return 'rush_yds_allowed';
   if (position === 'TE') return 'rec_yds_allowed_te';
   if (position === 'RB') return 'rec_yds_allowed_rb';
-  return 'rec_yds_allowed_wr'; // WR default for receiving props
+  return 'rec_yds_allowed_wr';
 }
 
 function getDefStatLabel(propType, position) {
@@ -46,232 +101,264 @@ export function gradeProp(prop) {
 }
 
 function gradeWithContext(prop) {
-  const line    = prop.line;
-  const l10     = prop.avg_last_10;
-  const l5      = prop.avg_last_5;
-  const hit     = prop.hit_rate_last_10;
-  const noData  = prop.data_unavailable === true;
-  const pendingLabel  = (loading, unavail) => noData ? unavail : loading;
-  const pendingDetail = (loading, unavail) => noData ? unavail : loading;
+  const line = prop.line;
+  const noData = prop.data_unavailable === true;
 
-  const propType   = prop.prop_type;
-  const position   = prop.position;
-  const spread     = prop.spread;
-  const gameTotal  = prop.game_total;
-  const isB2B      = prop.is_back_to_back ?? false;
-  const injNote    = prop.injury_context;
-  const injCount   = prop.injury_count ?? 0;
+  const propType = prop.prop_type;
+  const position = prop.position;
+  const pg       = posGroup(propType, position); // position group for weight adjustments
+
+  // ── Raw game logs → EWMA & variance ──────────────────────────────────────────
+  const rawLogs = prop.last_10_games || [];
+  const hasLogs = rawLogs.length >= 3;
+
+  // Use EWMA when we have raw logs; fall back to flat avg
+  const l10     = hasLogs ? ewmaAvg(rawLogs) : prop.avg_last_10;
+  const l5      = hasLogs ? ewmaAvg(rawLogs.slice(0, 5)) : prop.avg_last_5;
+  const flatL10 = prop.avg_last_10; // used for display alongside EWMA label
+  const hasEWMA = hasLogs && l10 != null;
+
+  const hit       = prop.hit_rate_last_10;
+  const spread    = prop.spread;
+  const gameTotal = prop.game_total;
+  const isB2B     = prop.is_back_to_back ?? false;
+  const injNote   = prop.injury_context;
+  const injCount  = prop.injury_count ?? 0;
   const ownInjStatus = (prop.injury_status || '').toLowerCase();
   const isReturning  = ['questionable','probable','game time decision','gtd','dtd','day-to-day','day to day'].some(s => ownInjStatus.includes(s));
-  const edge         = prop.edge;
+  const edge = prop.edge;
+
+  // Consistency: coefficient of variation from raw logs
+  const cons = calcConsistency(rawLogs);
 
   const criteria = [];
 
-  // -- 1. MATCHUP / OPPONENT DEFENSE (weight 18) --------------------------------
+  // ── 1. OPPONENT DEFENSE (DVOA-like percentile scoring) ── weight adj by position
   const defStatKey   = getDefStatKey(propType, position);
   const defStatLabel = getDefStatLabel(propType, position);
   const leagueAvg    = NFL_LEAGUE_AVGS[defStatKey];
   const oppDefStat   = prop.opp_def_stat ?? null;
+  const defPctScore  = defPercentileScore(oppDefStat, leagueAvg);
+  const defW         = adjW(18, 'oppDef', pg);
 
-  criteria.push({
-    label: oppDefStat != null
-      ? `${defStatLabel}: opp allows ${oppDefStat} (avg ${leagueAvg}) — ${oppDefStat > leagueAvg ? 'weak (OVER)' : 'elite (UNDER)'}`
-      : 'Opponent Defense — loading...',
-    detail: oppDefStat != null
-      ? oppDefStat > leagueAvg
-        ? `Defense allows ${oppDefStat} ${defStatLabel.toLowerCase()} per game (avg ${leagueAvg}) — favorable matchup`
-        : `Defense limits to ${oppDefStat} per game (avg ${leagueAvg}) — tough matchup`
-      : 'Fetching opponent defensive stats',
-    pass:            oppDefStat != null && oppDefStat > leagueAvg,
-    continuousScore: oppDefStat != null ? defScore(oppDefStat, leagueAvg) : null,
-    weight:          18,
-    available:       oppDefStat != null,
-    pending:         oppDefStat == null,
-    category:        'matchup',
-  });
+  if (defW > 0) {
+    const defTierLabel = oppDefStat != null
+      ? defPctScore >= 0.70 ? 'weak (bottom-5)'
+        : defPctScore >= 0.58 ? 'below avg'
+        : defPctScore >= 0.42 ? 'average'
+        : defPctScore >= 0.30 ? 'above avg'
+        : 'elite (top-5)'
+      : null;
+    criteria.push({
+      label: oppDefStat != null
+        ? `Opponent Defense (${defStatLabel}): ${oppDefStat}/g — ${defTierLabel}`
+        : 'Opponent Defense — loading...',
+      detail: oppDefStat != null
+        ? defPctScore >= 0.58
+          ? `Allows ${oppDefStat} ${defStatLabel.toLowerCase()}/g (league avg ${leagueAvg}) — favorable matchup`
+          : `Holds to ${oppDefStat}/g (avg ${leagueAvg}) — tough matchup`
+        : 'Fetching opponent defensive stats',
+      pass:            oppDefStat != null && oppDefStat > leagueAvg,
+      continuousScore: defPctScore,
+      weight:          defW,
+      available:       oppDefStat != null,
+      pending:         oppDefStat == null,
+      category:        'matchup',
+    });
+  }
 
-  // -- 2. GAME TOTAL (weight 6) -------------------------------------------------
-  const AVG_TOTAL = 45.5;
+  // ── 2. GAME TOTAL (O/U) ── QB & weather-sensitive props weighted higher
+  const AVG_TOTAL   = 45.5;
   const highScoring = gameTotal != null && gameTotal >= AVG_TOTAL;
-  criteria.push({
-    label: gameTotal != null
-      ? `Game Total: ${gameTotal} (avg ${AVG_TOTAL}) — ${highScoring ? 'high-scoring' : 'low-scoring'}`
-      : 'Game Total — no data',
-    detail: gameTotal != null
-      ? highScoring
-        ? `O/U ${gameTotal} — high-scoring game, more opportunities for skill players`
-        : `O/U ${gameTotal} — low-total game, fewer scoring chances`
-      : 'No game total available — factor excluded from score',
-    pass:            highScoring,
-    continuousScore: gameTotal != null ? formScore(gameTotal, AVG_TOTAL) : null,
-    weight:          6,
-    available:       gameTotal != null,
-    pending:         gameTotal == null,
-    category:        'matchup',
-  });
+  const totalW      = adjW(6, 'gameTotal', pg);
+  if (totalW > 0) {
+    criteria.push({
+      label: gameTotal != null
+        ? `Game Total: O/U ${gameTotal} (avg ${AVG_TOTAL}) — ${highScoring ? 'high-scoring' : 'low-scoring'}`
+        : 'Game Total — no data',
+      detail: gameTotal != null
+        ? highScoring
+          ? `O/U ${gameTotal} — high-scoring game, more skill-player opportunities`
+          : `O/U ${gameTotal} — low total, fewer volume opportunities`
+        : 'No game total available',
+      pass:            highScoring,
+      continuousScore: gameTotal != null ? formScore(gameTotal, AVG_TOTAL) : null,
+      weight:          totalW,
+      available:       gameTotal != null,
+      pending:         gameTotal == null,
+      category:        'matchup',
+    });
+  }
 
-  // -- 3. RECENT FORM — L10 (weight 22) -----------------------------------------
+  // ── 3. RECENT FORM — L10 EWMA (recency-weighted) ─────────────────────────────
+  const formL10W = adjW(22, 'formL10', pg);
   criteria.push({
     label: l10 != null
-      ? `L10 Avg: ${l10} vs Line ${line}`
-      : pendingLabel('L10 Average — loading game logs...', 'L10 Average — not available'),
+      ? hasEWMA
+        ? `L10 Weighted Avg: ${l10} vs Line ${line}${flatL10 !== l10 ? ` (flat ${flatL10})` : ''}`
+        : `L10 Avg: ${l10} vs Line ${line}`
+      : noData ? 'L10 Average — not available' : 'L10 Average — loading game logs...',
     detail: l10 != null
       ? l10 > line
-        ? `Averaging ${l10} over last 10 games — beats the line by +${(l10 - line).toFixed(1)}`
-        : `Averaging ${l10} over last 10 — below line by ${(line - l10).toFixed(1)}`
-      : pendingDetail('Game log data loading', 'Prior-season stats unavailable for this prop type'),
+        ? hasEWMA
+          ? `Recent-weighted avg ${l10} beats the line — recency-boosted signal`
+          : `Averaging ${l10} over last 10 — beats line by +${(l10 - line).toFixed(1)}`
+        : hasEWMA
+          ? `Recency-weighted avg ${l10} trails the line`
+          : `Averaging ${l10} over last 10 — below line by ${(line - l10).toFixed(1)}`
+      : noData ? 'Prior-season stats unavailable' : 'Game log data loading',
     pass:            l10 != null && l10 > line,
     continuousScore: formScore(l10, line),
-    weight:          22,
+    weight:          formL10W,
     available:       l10 != null,
     pending:         l10 == null && !noData,
     category:        'form',
   });
 
-  // -- 4. RECENT FORM — L5 (weight 13) ------------------------------------------
+  // ── 4. RECENT FORM — L5 EWMA ─────────────────────────────────────────────────
+  const formL5W = adjW(13, 'formL5', pg);
   criteria.push({
     label: l5 != null
-      ? `L5 Avg: ${l5} vs Line ${line}`
-      : pendingLabel('L5 Average — loading...', 'L5 Average — not available'),
+      ? hasEWMA
+        ? `L5 Weighted Avg: ${l5} vs Line ${line}`
+        : `L5 Avg: ${l5} vs Line ${line}`
+      : noData ? 'L5 Average — not available' : 'L5 Average — loading...',
     detail: l5 != null
       ? l5 > line
-        ? `Hot recent form — L5 avg ${l5} beats the line`
-        : `Cold stretch — L5 avg ${l5} below line`
-      : pendingDetail('Loading', 'Stats unavailable'),
+        ? `Hot recent form — weighted L5 avg ${l5} beats the line`
+        : `Cold stretch — weighted L5 avg ${l5} below line`
+      : noData ? 'Stats unavailable' : 'Loading',
     pass:            l5 != null && l5 > line,
     continuousScore: formScore(l5, line),
-    weight:          13,
+    weight:          formL5W,
     available:       l5 != null,
     pending:         l5 == null && !noData,
     category:        'form',
   });
 
-  // -- 5. HIT RATE (weight 12) --------------------------------------------------
+  // ── 5. HIT RATE ───────────────────────────────────────────────────────────────
+  const hitW = adjW(12, 'hitRate', pg);
   criteria.push({
     label: hit != null
-      ? `Hit Rate: ${hit}% (need ≥ 60%)`
-      : pendingLabel('Hit Rate — loading...', 'Hit Rate — not available'),
+      ? `Hit Rate: ${hit}% (threshold ≥ 60%)`
+      : noData ? 'Hit Rate — not available' : 'Hit Rate — loading...',
     detail: hit != null
       ? hit >= 60
         ? `Cleared this line ${hit}% of last 10 games — highly consistent`
-        : `Only ${hit}% hit rate — inconsistent`
-      : pendingDetail('Loading', 'Stats unavailable'),
+        : `Only ${hit}% hit rate — inconsistent performance vs this line`
+      : noData ? 'Stats unavailable' : 'Loading',
     pass:            hit != null && hit >= 60,
     continuousScore: hit != null ? Math.min(0.85, hit / 100) : null,
-    weight:          12,
+    weight:          hitW,
     available:       hit != null,
     pending:         hit == null && !noData,
     category:        'form',
   });
 
-  // -- 6. SEASON STATS (weight 7) -----------------------------------------------
+  // ── 6. SEASON STATS ───────────────────────────────────────────────────────────
   const seasonAvg   = prop.season_avg;
   const seasonGames = prop.season_games;
+  const seasonW     = adjW(7, 'season', pg);
   criteria.push({
     label: seasonAvg != null
       ? `Season Avg: ${seasonAvg} vs Line ${line} (${seasonGames}G)`
-      : pendingLabel('Season Stats — loading...', 'Season Stats — not available'),
+      : noData ? 'Season Stats — not available' : 'Season Stats — loading...',
     detail: seasonAvg != null
       ? seasonAvg > line
-        ? `Season average ${seasonAvg} clears the line — consistent production all season`
+        ? `Season average ${seasonAvg} clears the line`
         : `Season average ${seasonAvg} is below the line`
       : 'Season average unavailable',
     pass:            seasonAvg != null && seasonAvg > line,
     continuousScore: formScore(seasonAvg, line),
-    weight:          7,
+    weight:          seasonW,
     available:       seasonAvg != null,
     pending:         seasonAvg == null && !noData,
     category:        'season',
   });
 
-  // -- 7. TARGET SHARE / USAGE (weight 8) ----------------------------------------
+  // ── 7. USAGE — TARGET SHARE / SNAP % (WR/TE weighted higher) ─────────────────
   const targetShare = prop.target_share;
   const snapPct     = prop.snap_pct;
-  if (injNote) {
-    const injWeight = Math.min(8, injCount >= 2 ? 8 : 6);
-    criteria.push({
-      label: `Usage Boost: ${injNote}`,
-      detail: `${injNote} out — expanded role, more targets/carries expected`,
-      pass: true, continuousScore: 0.85, weight: injWeight, available: true, category: 'usage',
-    });
-  } else if (targetShare != null) {
-    const HIGH_TARGET_SHARE = 0.20;
-    const snapBonus = snapPct != null && snapPct >= 0.85 ? 0.05 : 0;
-    criteria.push({
-      label: `Target Share: ${Math.round(targetShare * 100)}%${snapPct != null ? ` · Snap: ${Math.round(snapPct * 100)}%` : ''}`,
-      detail: targetShare >= HIGH_TARGET_SHARE
-        ? `${Math.round(targetShare * 100)}% target share — strong passing game role${snapPct != null ? `, ${Math.round(snapPct * 100)}% snap rate` : ''}`
-        : `Only ${Math.round(targetShare * 100)}% target share — limited looks`,
-      pass: targetShare >= HIGH_TARGET_SHARE,
-      continuousScore: Math.min(0.85, targetShare / HIGH_TARGET_SHARE * 0.5 + 0.2 + snapBonus),
-      weight: 8,
-      available: true,
-      category: 'usage',
-    });
-  } else if (snapPct != null) {
-    const highSnap = snapPct >= 0.75;
-    criteria.push({
-      label: `Snap Rate: ${Math.round(snapPct * 100)}% (need ≥ 75%)`,
-      detail: highSnap
-        ? `${Math.round(snapPct * 100)}% snap rate — full workload expected`
-        : `Only ${Math.round(snapPct * 100)}% snap rate — rotational role`,
-      pass: highSnap,
-      continuousScore: Math.min(0.85, snapPct * 0.9 + 0.1),
-      weight: 8,
-      available: true,
-      category: 'usage',
-    });
-  } else {
-    // No volume data — neutral signal, not negative
-    const edgeScale = Math.max(Math.abs(l10 ?? line ?? 1), 1);
-    const edgeContinuousScore = edge != null
-      ? Math.min(0.85, Math.max(0.15, 0.5 + edge / edgeScale))
-      : 0.5;
-    criteria.push({
-      label: edge != null ? `Model Edge: ${edge > 0 ? '+' : ''}${edge}` : 'Usage: Normal snap count',
-      detail: edge != null && edge > 0
-        ? `Model projects +${edge} above the line`
-        : 'No major lineup changes — normal role expected',
-      pass: edge != null ? edge > 0 : true,
-      continuousScore: edgeContinuousScore,
-      weight: 8,
-      available: true,
-      category: 'usage',
-    });
+  const usageW      = adjW(8, 'usage', pg);
+  if (usageW > 0) {
+    if (injNote) {
+      const injW2 = Math.min(usageW, injCount >= 2 ? usageW : Math.round(usageW * 0.75));
+      criteria.push({
+        label: `Usage Boost: ${injNote}`,
+        detail: `${injNote} out — expanded role, more targets/carries expected`,
+        pass: true, continuousScore: 0.85, weight: injW2, available: true, category: 'usage',
+      });
+    } else if (targetShare != null) {
+      const HIGH_TS = 0.20;
+      const snapBonus = snapPct != null && snapPct >= 0.85 ? 0.05 : 0;
+      criteria.push({
+        label: `Target Share: ${Math.round(targetShare * 100)}%${snapPct != null ? ` · Snap: ${Math.round(snapPct * 100)}%` : ''}`,
+        detail: targetShare >= HIGH_TS
+          ? `${Math.round(targetShare * 100)}% target share — primary passing-game role${snapPct != null ? `, ${Math.round(snapPct * 100)}% snap rate` : ''}`
+          : `Only ${Math.round(targetShare * 100)}% target share — limited involvement`,
+        pass: targetShare >= HIGH_TS,
+        continuousScore: Math.min(0.85, targetShare / HIGH_TS * 0.5 + 0.2 + snapBonus),
+        weight: usageW, available: true, category: 'usage',
+      });
+    } else if (snapPct != null) {
+      const highSnap = snapPct >= 0.75;
+      criteria.push({
+        label: `Snap Rate: ${Math.round(snapPct * 100)}% (need ≥ 75%)`,
+        detail: highSnap
+          ? `${Math.round(snapPct * 100)}% snap rate — full workload expected`
+          : `Only ${Math.round(snapPct * 100)}% snap rate — rotational role`,
+        pass: highSnap,
+        continuousScore: Math.min(0.85, snapPct * 0.9 + 0.1),
+        weight: usageW, available: true, category: 'usage',
+      });
+    } else {
+      const edgeScale = Math.max(Math.abs(l10 ?? line ?? 1), 1);
+      const edgeCS    = edge != null ? Math.min(0.85, Math.max(0.15, 0.5 + edge / edgeScale)) : 0.5;
+      criteria.push({
+        label: edge != null ? `Model Edge: ${edge > 0 ? '+' : ''}${edge}` : 'Usage: Normal role expected',
+        detail: edge != null && edge > 0
+          ? `Model projects +${edge} above the line`
+          : 'No major lineup changes — normal role expected',
+        pass: edge != null ? edge > 0 : true,
+        continuousScore: edgeCS,
+        weight: usageW, available: true, category: 'usage',
+      });
+    }
   }
 
-  // -- 8. SPREAD / BLOWOUT RISK (weight 8) ----------------------------------------
-  const absSpread    = spread != null ? Math.abs(spread) : null;
-  const blowoutRisk  = absSpread != null && absSpread >= 10;
-  const spreadScore  = absSpread != null ? Math.min(0.85, Math.max(0.15, 0.62 - absSpread / 18)) : null;
+  // ── 8. SPREAD / BLOWOUT RISK (RB rush props weighted highest) ────────────────
+  const absSpread   = spread != null ? Math.abs(spread) : null;
+  const blowoutRisk = absSpread != null && absSpread >= 10;
+  const spreadScore = absSpread != null ? Math.min(0.85, Math.max(0.15, 0.62 - absSpread / 18)) : null;
+  const spreadW     = adjW(8, 'spread', pg);
   criteria.push({
     label: absSpread != null
       ? blowoutRisk
         ? `Blowout Risk: ${absSpread.toFixed(1)}-pt spread`
-        : `Spread: ${spread > 0 ? '+' : ''}${spread.toFixed(1)} — competitive`
+        : `Spread: ${spread > 0 ? '+' : ''}${spread?.toFixed(1)} — competitive`
       : 'Spread — no data',
     detail: absSpread != null
       ? blowoutRisk
         ? `${absSpread}-pt spread — risk of garbage time limiting starter usage`
         : 'Competitive game — full usage expected'
-      : 'No spread data — factor excluded from score',
+      : 'No spread data',
     pass:            absSpread != null && !blowoutRisk,
     continuousScore: spreadScore,
-    weight:          8,
-    available:       absSpread != null, // only count when we have real data
+    weight:          spreadW,
+    available:       absSpread != null,
     pending:         absSpread == null,
     category:        'rest',
   });
 
-  // -- 9. REST (weight 6) --------------------------------------------------------
+  // ── 9. REST / SCHEDULE ────────────────────────────────────────────────────────
   criteria.push({
     label: isB2B ? 'Short Week (Thursday Game)' : 'Rest: Normal week',
-    detail: isB2B ? 'Short week — reduced prep time and fatigue risk' : 'Full week of prep — no schedule concerns',
-    pass:      !isB2B,
+    detail: isB2B ? 'Short week — fatigue and reduced prep risk' : 'Full week of prep — no schedule concerns',
+    pass:            !isB2B,
     continuousScore: isB2B ? 0.25 : 0.75,
-    weight:    6,
-    available: true,
-    category:  'rest',
+    weight:          6,
+    available:       true,
+    category:        'rest',
   });
 
   if (isReturning) {
@@ -287,57 +374,58 @@ function gradeWithContext(prop) {
     });
   }
 
-  // -- 10. WEATHER (weight 5) — only for passing/receiving/combo props ----------
+  // ── 10. WEATHER (QB & WR props weighted highest) ─────────────────────────────
   const weather = prop.weather;
-  const isPassingProp = ['passing_yards', 'receiving_yards', 'receptions', 'passing_tds',
-    'rush_rec_yards', 'pass_rush_yards', 'receiving_tds'].includes(propType);
-  if (weather != null && isPassingProp) {
+  const isPassingProp = ['passing_yards','receiving_yards','receptions','passing_tds',
+    'rush_rec_yards','pass_rush_yards','receiving_tds'].includes(propType);
+  const weatherW = adjW(5, 'weather', pg);
+  if (weatherW > 0 && weather != null && isPassingProp) {
     if (weather.dome) {
       criteria.push({
         label: 'Weather: Indoor stadium',
-        detail: 'Controlled environment — no wind or weather impact',
-        pass: true, continuousScore: 0.75, weight: 5, available: true, category: 'matchup',
+        detail: 'Controlled environment — no weather suppression',
+        pass: true, continuousScore: 0.75, weight: weatherW, available: true, category: 'matchup',
       });
     } else if (weather.wind_mph != null) {
       const veryWindy = weather.wind_mph > 25;
       const windy     = weather.wind_mph > 15;
       const rainy     = weather.is_rainy;
-      const label     = `Weather: ${weather.wind_mph} mph wind${rainy ? ', rain' : ''}${weather.temp_f != null ? `, ${weather.temp_f}°F` : ''}`;
       criteria.push({
-        label,
+        label: `Weather: ${weather.wind_mph} mph wind${rainy ? ', rain' : ''}${weather.temp_f != null ? `, ${weather.temp_f}°F` : ''}`,
         detail: veryWindy
-          ? `Severe wind (${weather.wind_mph} mph) — significantly suppresses passing game`
+          ? `Severe wind (${weather.wind_mph} mph) — significantly suppresses passing`
           : windy
-          ? `Wind (${weather.wind_mph} mph) — may limit deep passing and kicking game`
-          : `Favorable conditions — no weather concern`,
+          ? `Wind (${weather.wind_mph} mph) — may limit deep routes and kicking`
+          : 'Favorable conditions',
         pass:            !windy,
         continuousScore: veryWindy ? 0.10 : windy ? 0.25 : rainy ? 0.60 : 0.80,
-        weight:          5,
+        weight:          weatherW,
         available:       true,
         category:        'matchup',
       });
     }
   }
 
-  // -- AIR YARDS SHARE / aDOT (weight 4) — receiving props only ---------------
-  const adot = prop.adot; // air_yards_share * 100 (% of team's air yards)
-  const isReceivingProp = ['receiving_yards', 'receptions', 'receiving_tds', 'rush_rec_yards', 'rush_rec_tds'].includes(propType);
-  if (adot != null && isReceivingProp) {
-    const highAirYards = adot >= 20;
+  // ── 11. AIR YARDS SHARE / aDOT (WR/TE weighted higher) ───────────────────────
+  const adot = prop.adot;
+  const isRecPropType = ['receiving_yards','receptions','receiving_tds','rush_rec_yards','rush_rec_tds'].includes(propType);
+  const airW = adjW(4, 'airYards', pg);
+  if (airW > 0 && adot != null && isRecPropType) {
+    const highAY = adot >= 20;
     criteria.push({
       label: `Air Yards Share: ${adot.toFixed(0)}% (need ≥ 20%)`,
-      detail: highAirYards
-        ? `${adot.toFixed(0)}% of team air yards — primary downfield target, high ceiling`
+      detail: highAY
+        ? `${adot.toFixed(0)}% of team air yards — primary downfield target`
         : `Only ${adot.toFixed(0)}% of team air yards — underneath/limited aerial role`,
-      pass:            highAirYards,
+      pass:            highAY,
       continuousScore: Math.min(0.85, Math.max(0.15, adot / 20 * 0.5 + 0.2)),
-      weight:          4,
+      weight:          airW,
       available:       true,
       category:        'usage',
     });
   }
 
-  // -- HOME/AWAY SPLIT ----------------------------------------------------------
+  // ── 12. HOME / AWAY SPLITS ────────────────────────────────────────────────────
   const homeAvg = prop.home_avg;
   const awayAvg = prop.away_avg;
   if (homeAvg != null || awayAvg != null) {
@@ -346,6 +434,7 @@ function gradeWithContext(prop) {
     const splitHR  = isHome ? (prop.home_hit_rate ?? prop.away_hit_rate) : (prop.away_hit_rate ?? prop.home_hit_rate);
     const splitG   = isHome ? (prop.home_games_count ?? 0) : (prop.away_games_count ?? 0);
     const locLabel = isHome ? 'Home' : 'Away';
+    const splitsW  = adjW(10, 'splits', pg);
     criteria.push({
       label: splitAvg != null
         ? `${locLabel} Splits: ${splitAvg} avg, ${splitHR ?? '?'}% hit rate (${splitG}G)`
@@ -354,20 +443,21 @@ function gradeWithContext(prop) {
         ? splitAvg > line
           ? `${locLabel} avg of ${splitAvg} exceeds the line — strong ${locLabel.toLowerCase()} performer`
           : `${locLabel} avg of ${splitAvg} is below the line`
-        : `Not enough ${locLabel.toLowerCase()} games`,
+        : `Not enough ${locLabel.toLowerCase()} games to assess split`,
       pass:            splitAvg != null && splitAvg > line,
       continuousScore: splitAvg != null ? formScore(splitAvg, line) : null,
-      weight:          10,
+      weight:          splitsW,
       available:       splitAvg != null,
       pending:         false,
       category:        'form',
     });
   }
 
-  // -- H2H VS TONIGHT'S OPPONENT -----------------------------------------------
+  // ── 13. HEAD-TO-HEAD VS TONIGHT'S OPPONENT ────────────────────────────────────
   const allGameLogs = prop.game_logs_last_20 || prop.game_logs_last_10 || [];
   const opponent    = prop.opponent || '';
   const h2hGames    = allGameLogs.filter(g => g.opp === opponent);
+  const h2hW        = adjW(7, 'h2h', pg);
   if (h2hGames.length >= 2) {
     const h2hVals = h2hGames.map(g => g.value);
     const h2hAvg  = Math.round(h2hVals.reduce((s, v) => s + v, 0) / h2hVals.length * 10) / 10;
@@ -376,65 +466,114 @@ function gradeWithContext(prop) {
     criteria.push({
       label:  `H2H vs ${opponent}: ${h2hAvg} avg, ${h2hHR}% hit rate (${h2hGames.length}G)`,
       detail: h2hAvg > line
-        ? `Averaging ${h2hAvg} in ${h2hGames.length} games vs ${opponent} — strong historical matchup`
-        : `Averaging only ${h2hAvg} vs ${opponent} — tough historical matchup`,
+        ? `Averaging ${h2hAvg} in ${h2hGames.length} matchups vs ${opponent} — strong historical record`
+        : `Averaging only ${h2hAvg} vs ${opponent} — historically tough matchup`,
       pass:            h2hAvg > line,
       continuousScore: formScore(h2hAvg, line),
-      weight:          7,
+      weight:          h2hW,
       available:       true,
       category:        'form',
     });
   }
 
-  // -- EPA PER GAME (weight 6) -------------------------------------------------
+  // ── 14. EPA PER GAME ──────────────────────────────────────────────────────────
   const epaPerGame = prop.epa_per_game;
+  const epaW       = adjW(6, 'epa', pg);
   if (epaPerGame != null) {
-    const goodEpa = epaPerGame > 0;
-    // Scale: most players sit in -5 to +5 range; ±10 maps to ~85%/15%
     const epaScore = Math.min(0.85, Math.max(0.15, 0.5 + epaPerGame / 12));
     criteria.push({
       label: `EPA/Game: ${epaPerGame > 0 ? '+' : ''}${epaPerGame}`,
-      detail: goodEpa
+      detail: epaPerGame > 0
         ? `Averaging +${epaPerGame} EPA/game — producing above expected value`
-        : `Averaging ${epaPerGame} EPA/game — below expected value production`,
-      pass:            goodEpa,
+        : `Averaging ${epaPerGame} EPA/game — below expected value`,
+      pass:            epaPerGame > 0,
       continuousScore: epaScore,
-      weight:          6,
+      weight:          epaW,
       available:       true,
       category:        'form',
     });
   }
 
-  // -- LINE MOVEMENT -----------------------------------------------------------
+  // ── 15. LINE MOVEMENT ─────────────────────────────────────────────────────────
   const prevLines = getPrevLines();
   const prevLine  = prevLines[`${prop.player_name}__${prop.prop_type}`];
+  const lineMoveW = adjW(8, 'lineMove', pg);
   if (prevLine != null && prevLine !== line) {
-    const diff = line - prevLine;
+    const diff        = line - prevLine;
     const sharpOnOver = diff > 0;
     criteria.push({
       label:  `Line Movement: ${prevLine} → ${line} (${diff > 0 ? '+' : ''}${diff.toFixed(1)})`,
-      detail: sharpOnOver ? `Line rose — sharp money on the OVER` : `Line fell — sharp money on the UNDER`,
+      detail: sharpOnOver ? 'Line rose — sharp money on the OVER' : 'Line fell — sharp money on the UNDER',
       pass:      sharpOnOver,
       continuousScore: sharpOnOver ? 0.75 : 0.25,
-      weight:    8,
+      weight:    lineMoveW,
       available: true,
       category:  'matchup',
     });
   }
 
-  // -- SCORING -----------------------------------------------------------------
-  // De-vig market probability as baseline anchor
+  // ── 16. CONSISTENCY (NEW) — bonus/penalty based on floor-ceiling spread ───────
+  const consW = adjW(5, 'consistency', pg);
+  if (cons != null && consW > 0) {
+    // CV < 0.25 = very consistent, CV > 0.55 = boom-or-bust
+    const consistent  = cons.cv < 0.30;
+    const boomOrBust  = cons.cv > 0.55;
+    const consScore   = Math.min(0.85, Math.max(0.15, 0.75 - cons.cv * 0.85));
+    criteria.push({
+      label: `Consistency: ±${cons.stdDev} std dev (${consistent ? 'consistent' : boomOrBust ? 'boom-or-bust' : 'moderate variance'})`,
+      detail: consistent
+        ? `Low game-to-game variance (±${cons.stdDev}) — dependable floor, easier to predict`
+        : boomOrBust
+        ? `High variance (±${cons.stdDev}) — boom-or-bust player, harder to project`
+        : `Moderate variance (±${cons.stdDev}) — some unpredictability`,
+      pass:            consistent,
+      continuousScore: consScore,
+      weight:          consW,
+      available:       true,
+      category:        'form',
+    });
+  }
+
+  // ── 17. QB QUALITY (NEW) — WR / TE / RB receiving props ──────────────────────
+  const qbW = adjW(10, 'qbQuality', pg);
+  if (qbW > 0 && prop.team) {
+    const teamKey  = (prop.team || '').toUpperCase().trim();
+    const qbTier   = QB_TIER[teamKey];
+    const qbScore  = qbTier ? (QB_TIER_SCORE[qbTier] ?? 0.52) : null;
+    const tierLabel = { elite: 'Elite', above: 'Above Average', avg: 'Average', below: 'Below Average', poor: 'Poor' };
+    if (qbScore != null) {
+      criteria.push({
+        label: `QB Quality: ${tierLabel[qbTier] ?? 'Unknown'} (${teamKey})`,
+        detail: qbTier === 'elite' || qbTier === 'above'
+          ? `High-quality QB — enables consistent passing-game volume and opportunity`
+          : qbTier === 'avg'
+          ? `Average QB — neutral signal for receiver props`
+          : `Below-average QB — suppresses receiver ceilings and target quality`,
+        pass:            qbScore >= 0.52,
+        continuousScore: qbScore,
+        weight:          qbW,
+        available:       true,
+        category:        'matchup',
+      });
+    } else {
+      criteria.push({
+        label: 'QB Quality — team not found',
+        detail: 'Unable to determine QB quality tier',
+        pass: true, continuousScore: 0.52, weight: qbW, available: false, pending: false, category: 'matchup',
+      });
+    }
+  }
+
+  // ── SCORING ───────────────────────────────────────────────────────────────────
   const rawOver  = impliedProbability(prop.over_odds ?? -110);
   const rawUnder = impliedProbability(prop.under_odds ?? -110);
-  const marketProb = rawOver / (rawOver + rawUnder); // true market prob, 0-1
+  const marketProb = rawOver / (rawOver + rawUnder);
 
-  // Completeness: fraction of total possible weight that has real data
   const totalPossibleWeight = criteria.reduce((s, c) => s + c.weight, 0) || 100;
   const availableCriteria   = criteria.filter(c => c.available);
   const availableWeight     = availableCriteria.reduce((s, c) => s + c.weight, 0);
-  const completeness        = availableWeight / totalPossibleWeight; // 0-1
+  const completeness        = availableWeight / totalPossibleWeight;
 
-  // Model score from available factors only; individual contribution capped at 85%
   const modelScore = availableWeight > 0
     ? availableCriteria.reduce((sum, c) => {
         const cs = c.continuousScore != null ? c.continuousScore : (c.pass ? 0.85 : 0.15);
@@ -442,19 +581,15 @@ function gradeWithContext(prop) {
       }, 0) / availableWeight
     : marketProb;
 
-  // Blend: when completeness is low, shrink toward market to avoid false confidence
+  // Blend: low completeness shrinks toward market to avoid false confidence
   const overProb = completeness * modelScore + (1 - completeness) * marketProb;
 
-  // Per-factor display score
   criteria.forEach(c => {
     const cs = c.continuousScore != null ? c.continuousScore : (c.pass ? 0.85 : 0.15);
     c.factorScore = c.available ? Math.round(cs * c.weight * 10) / 10 : null;
   });
 
-  // Confidence: how far the model is from 50/50 (max 100)
   const rawConf = Math.round(50 + Math.abs(overProb - 0.5) * 100);
-
-  // Cap based on data completeness — never show A grades when most factors are missing
   const confCap = completeness < 0.25 ? 62
                 : completeness < 0.45 ? 70
                 : completeness < 0.65 ? 80
@@ -472,13 +607,14 @@ function gradeWithContext(prop) {
     criteria,
     passCount,
     lean,
-    overProb:     Math.round(overProb * 100),
-    underProb:    Math.round((1 - overProb) * 100),
-    completeness: Math.round(completeness * 100),
+    overProb:      Math.round(overProb * 100),
+    underProb:     Math.round((1 - overProb) * 100),
+    completeness:  Math.round(completeness * 100),
     totalCriteria: criteria.length,
     dataQuality:   hasRealData ? 'full' : completeness > 0.35 ? 'context' : 'market',
     overScore:     overProb,
     totalWeight:   totalPossibleWeight,
+    posGroup:      pg,
   };
 }
 
@@ -491,11 +627,11 @@ function gradeFromMarket(prop) {
 
   const criteria = [
     { label: `Market Implied OVER: ${(trueOver * 100).toFixed(0)}%`, detail: 'De-vigged from market odds', pass: trueOver > 0.505, weight: 100, available: true, market: true, category: 'market' },
-    { label: 'Opponent Defense — loading...',      detail: 'Fetching defensive stats',    pass: false, weight: 0, available: false, pending: true, category: 'matchup' },
+    { label: 'Opponent Defense — loading...',       detail: 'Fetching defensive stats',    pass: false, weight: 0, available: false, pending: true, category: 'matchup' },
     { label: 'L10 / L5 Game Averages — loading...', detail: 'Game log data loading',       pass: false, weight: 0, available: false, pending: true, category: 'form' },
-    { label: 'Season Stats — loading...',          detail: 'Season average loading',       pass: false, weight: 0, available: false, pending: true, category: 'season' },
-    { label: 'Target Share / Usage — loading...',  detail: 'Checking snap counts',         pass: false, weight: 0, available: false, pending: true, category: 'usage' },
-    { label: 'Spread / Game Total — loading...',   detail: 'Fetching spread and total',    pass: false, weight: 0, available: false, pending: true, category: 'rest' },
+    { label: 'Season Stats — loading...',           detail: 'Season average loading',       pass: false, weight: 0, available: false, pending: true, category: 'season' },
+    { label: 'Target Share / Usage — loading...',   detail: 'Checking snap counts',         pass: false, weight: 0, available: false, pending: true, category: 'usage' },
+    { label: 'Spread / Game Total — loading...',    detail: 'Fetching spread and total',    pass: false, weight: 0, available: false, pending: true, category: 'rest' },
   ];
 
   criteria.forEach(c => {
@@ -523,8 +659,8 @@ export function rankScore(prop) {
   if (logs.length > 0) {
     const hitCount = logs.filter(v => v > prop.line).length;
     const dynamicHitRate = Math.round(hitCount / logs.length * 100);
-    const base = prop.projection ?? prop.avg_last_10 ?? null;
-    const dynamicEdge = base != null ? Math.round((base - prop.line) * 100) / 100 : prop.edge;
+    const ewma = ewmaAvg(logs);
+    const dynamicEdge = ewma != null ? Math.round((ewma - prop.line) * 100) / 100 : prop.edge;
     p = { ...prop, hit_rate_last_10: dynamicHitRate, edge: dynamicEdge };
   }
   const grade = gradeProp(p);
