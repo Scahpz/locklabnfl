@@ -94,12 +94,17 @@ function PropHistoryCard({ entry, onSettle, onDelete }) {
   );
 }
 
-function AccuracyBar({ label, hit, total, color }) {
+function AccuracyBar({ label, hit, total, color, predicted }) {
   const pct = total > 0 ? Math.round((hit / total) * 100) : null;
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between text-xs">
-        <span className="text-muted-foreground font-medium">{label}</span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-muted-foreground font-medium">{label}</span>
+          {predicted && (
+            <span className="text-[9px] text-muted-foreground/40 font-normal">model {predicted}</span>
+          )}
+        </div>
         <span className={cn("font-bold", color)}>
           {pct != null ? `${pct}%` : '—'} <span className="text-muted-foreground/50 font-normal">({total}G)</span>
         </span>
@@ -186,17 +191,17 @@ export default function PropHistory() {
   // fall back to grade_label prefix for backwards-compat with old entries
   const byTier = useMemo(() => {
     const TIERS = [
-      { tier: 'GREEN', label: 'BET IT' },
-      { tier: 'YELLOW', label: 'LEAN' },
-      { tier: 'RED', label: 'SKIP' },
-      { tier: 'TRAP', label: 'TRAP' },
+      { tier: 'GREEN',  label: 'BET IT', predicted: '65-78%' },
+      { tier: 'YELLOW', label: 'LEAN',   predicted: '57-64%' },
+      { tier: 'RED',    label: 'SKIP',   predicted: '<57%'   },
+      { tier: 'TRAP',   label: 'TRAP',   predicted: '~60% (flip dir.)' },
     ];
-    return TIERS.map(({ tier, label }) => {
+    return TIERS.map(({ tier, label, predicted }) => {
       const tierEntries = settled.filter(e =>
         e.tier === tier || (e.grade_label || '').startsWith(label)
       );
       const tierHits = tierEntries.filter(e => e.result === 'hit');
-      return { label, hit: tierHits.length, total: tierEntries.length };
+      return { label, hit: tierHits.length, total: tierEntries.length, predicted };
     }).filter(t => t.total > 0);
   }, [settled]);
 
@@ -281,6 +286,7 @@ export default function PropHistory() {
                         hit={t.hit}
                         total={t.total}
                         color={t.label === 'BET IT' ? 'text-primary' : t.label === 'LEAN' ? 'text-chart-4' : t.label === 'TRAP' ? 'text-orange-400' : 'text-destructive'}
+                        predicted={t.predicted}
                       />
                     ))}
                   </div>

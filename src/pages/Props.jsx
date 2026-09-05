@@ -984,7 +984,7 @@ export default function Props() {
               {tomorrowGames.length > 0 && (
                 <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-1.5">Today</p>
               )}
-              <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 md:mx-0 md:px-0 md:flex-wrap scrollbar-none">
+              <div className="chip-scroll-fade flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 md:mx-0 md:px-0 md:flex-wrap scrollbar-none">
                 {todayGames.map((g, i) => {
                   const key = `${(g.away || '').toUpperCase()}@${(g.home || '').toUpperCase()}`;
                   const active = selectedGames.includes(key);
@@ -1009,7 +1009,7 @@ export default function Props() {
           {tomorrowGames.length > 0 && (
             <div>
               <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-1.5">Tomorrow</p>
-              <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 md:mx-0 md:px-0 md:flex-wrap scrollbar-none">
+              <div className="chip-scroll-fade flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 md:mx-0 md:px-0 md:flex-wrap scrollbar-none">
                 {tomorrowGames.map((g, i) => {
                   const key = `${(g.away || '').toUpperCase()}@${(g.home || '').toUpperCase()}`;
                   const active = selectedGames.includes(key);
@@ -1047,7 +1047,7 @@ export default function Props() {
                 return (
                   <div key={dateKey}>
                     <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-1.5">{label}</p>
-                    <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 md:mx-0 md:px-0 md:flex-wrap scrollbar-none">
+                    <div className="chip-scroll-fade flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 md:mx-0 md:px-0 md:flex-wrap scrollbar-none">
                       {dayGames.map((g, i) => {
                         const key = `${(g.away || '').toUpperCase()}@${(g.home || '').toUpperCase()}`;
                         const active = selectedGames.includes(key);
@@ -1152,7 +1152,7 @@ export default function Props() {
               const activeMeta = selectedSources[0] ? (SOURCE_META[selectedSources[0]] || { label: selectedSources[0] }) : null;
               return (
                 <div className="space-y-1">
-                  <div className="flex items-center gap-1.5 overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0 pb-1 scrollbar-none">
+                  <div className="chip-scroll-fade flex items-center gap-1.5 overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0 pb-1 scrollbar-none">
                     <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50 flex-shrink-0 self-center mr-0.5">
                       Platform
                     </span>
@@ -1195,7 +1195,7 @@ export default function Props() {
             })()}
 
             {/* Prop type pills — dynamically generated from what's in the feed */}
-            <div className="flex gap-1.5 overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0 md:flex-wrap pb-1 scrollbar-none">
+            <div className="chip-scroll-fade flex gap-1.5 overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0 md:flex-wrap pb-1 scrollbar-none">
               <SlidersHorizontal className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0 self-center" />
               {['all', ...propTypeOptions].map(t => (
                 <button
@@ -1346,6 +1346,7 @@ export default function Props() {
                 </button>
               </div>
             </div>
+            <div className="flex flex-wrap gap-1.5">
               {/* Active filter pills */}
               {selectedType !== 'all' && (
                 <button

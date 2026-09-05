@@ -76,8 +76,9 @@ function estimateAdjustedOdds(fairOverProb, originalOverOdds, originalUnderOdds)
 }
 
 function StatBox({ label, value, sub, good, neutral }) {
+  if (value == null) return null;
   return (
-    <div className="bg-secondary/60 rounded-xl p-3 text-center">
+    <div className="bg-secondary/60 rounded-xl p-3 text-center flex-1 min-w-[72px]">
       <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-1">{label}</p>
       <p className={cn('text-base font-bold', neutral ? 'text-foreground' : good ? 'text-primary' : 'text-destructive')}>
         {value}
@@ -238,6 +239,8 @@ export default function PropDetailModal({ prop, onClose }) {
                   <span className="text-[9px] text-emerald-400/70 font-semibold">▲ OVER {grade.overProb}%</span>
                   <span className="text-[9px] text-muted-foreground/30">·</span>
                   <span className="text-[9px] text-rose-400/70 font-semibold">▼ UNDER {grade.underProb}%</span>
+                  <span className="text-[9px] text-muted-foreground/30">·</span>
+                  <span className="text-[9px] text-muted-foreground/40">model estimate</span>
                 </div>
               </div>
               <VerdictBadge
@@ -247,6 +250,14 @@ export default function PropDetailModal({ prop, onClose }) {
                 loading={false}
               />
             </div>
+            {grade.completeness < 40 && (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/8 border border-amber-500/20">
+                <span className="text-amber-400 text-sm leading-none flex-shrink-0">⚠</span>
+                <p className="text-[10px] text-amber-300/80 leading-snug">
+                  <span className="font-semibold">Limited data ({grade.completeness}% completeness)</span> — confidence is partially anchored to market odds. Treat this estimate with caution.
+                </p>
+              </div>
+            )}
 
             {/* Line adjuster */}
             <div className="bg-secondary/40 border border-border/60 rounded-xl p-4 space-y-3">
@@ -394,34 +405,34 @@ export default function PropDetailModal({ prop, onClose }) {
             </div>
 
             {/* Dynamic stats at adjusted line */}
-            <div className="grid grid-cols-4 gap-2">
+            <div className="flex flex-wrap gap-2">
               <StatBox
                 label="Hit Rate"
-                value={dynamicHitRate != null ? `${dynamicHitRate}%` : '—'}
+                value={dynamicHitRate != null ? `${dynamicHitRate}%` : null}
                 sub={gameLogs.length > 0 ? `${hitCount}/${gameLogs.length} games` : null}
                 good={dynamicHitRate != null && dynamicHitRate >= 60}
-                neutral={dynamicHitRate == null}
+                neutral={false}
               />
               <StatBox
                 label="L5 Avg"
-                value={prop.avg_last_5 ?? '—'}
+                value={prop.avg_last_5 ?? null}
                 sub={prop.avg_last_5 != null ? `${prop.avg_last_5 > adjustedLine ? '+' : ''}${(prop.avg_last_5 - adjustedLine).toFixed(1)}` : null}
                 good={prop.avg_last_5 != null && prop.avg_last_5 > adjustedLine}
-                neutral={prop.avg_last_5 == null}
+                neutral={false}
               />
               <StatBox
                 label="L10 Avg"
-                value={prop.avg_last_10 ?? '—'}
+                value={prop.avg_last_10 ?? null}
                 sub={prop.avg_last_10 != null ? `${prop.avg_last_10 > adjustedLine ? '+' : ''}${(prop.avg_last_10 - adjustedLine).toFixed(1)}` : null}
                 good={prop.avg_last_10 != null && prop.avg_last_10 > adjustedLine}
-                neutral={prop.avg_last_10 == null}
+                neutral={false}
               />
               <StatBox
                 label="Projection"
-                value={prop.projection ?? '—'}
+                value={prop.projection ?? null}
                 sub={prop.projection != null ? `${prop.projection > adjustedLine ? '+' : ''}${(prop.projection - adjustedLine).toFixed(1)}` : null}
                 good={prop.projection != null && prop.projection > adjustedLine}
-                neutral={prop.projection == null}
+                neutral={false}
               />
             </div>
 

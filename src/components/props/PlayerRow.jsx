@@ -224,40 +224,56 @@ export default function PlayerRow({ playerName, props, allPlayerProps, rank, tot
 
         {/* Direction banner */}
         <div className={cn(
-          "rounded-xl p-3 flex items-center justify-between mb-2.5",
+          "rounded-xl p-3 mb-2.5",
           isOver
             ? "bg-emerald-500/10 border border-emerald-500/25"
             : "bg-rose-500/10 border border-rose-500/25"
         )}>
-          <div className="flex items-center gap-2.5">
-            {isOver
-              ? <TrendingUp className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-              : <TrendingDown className="w-4 h-4 text-rose-400 flex-shrink-0" />
-            }
-            <div>
-              <div className="flex items-baseline gap-1.5">
-                <p className={cn("text-xl font-black leading-none tracking-tight tabular-nums", isOver ? "text-emerald-400" : "text-rose-400")}>
-                  {isOver ? grade.overProb : grade.underProb}%
-                </p>
-                <p className={cn("text-[11px] font-bold leading-none", isOver ? "text-emerald-400/55" : "text-rose-400/55")}>
-                  {evVerdict.direction}
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2.5">
+              {isOver
+                ? <TrendingUp className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                : <TrendingDown className="w-4 h-4 text-rose-400 flex-shrink-0" />
+              }
+              <div>
+                <div className="flex items-baseline gap-1.5">
+                  <p className={cn("text-xl font-black leading-none tracking-tight tabular-nums", isOver ? "text-emerald-400" : "text-rose-400")}>
+                    {isOver ? grade.overProb : grade.underProb}%
+                  </p>
+                  <p className={cn("text-[11px] font-bold leading-none", isOver ? "text-emerald-400/55" : "text-rose-400/55")}>
+                    {evVerdict.direction}
+                  </p>
+                </div>
+                <p className="text-xs font-semibold text-foreground/55 font-mono leading-tight mt-0.5">
+                  {gradedProp.line ?? '—'}
                 </p>
               </div>
-              <p className="text-xs font-semibold text-foreground/55 font-mono leading-tight mt-0.5">
-                {gradedProp.line ?? '—'}
-              </p>
+            </div>
+            <div className="text-right">
+              <span className={cn(
+                "text-[10px] font-bold px-2.5 py-1.5 rounded-lg border inline-block",
+                TIER_CONFIG[evVerdict.tier]?.badge
+              )}>
+                {displayLabel}
+              </span>
+              {isMarketOnly && (
+                <p className="text-[9px] text-muted-foreground/55 mt-1">Market lean · no history</p>
+              )}
+              {grade.completeness < 40 && !isMarketOnly && (
+                <p className="text-[9px] text-amber-400/75 mt-1 font-semibold">⚠ Low data</p>
+              )}
             </div>
           </div>
-          <div className="text-right">
-            <span className={cn(
-              "text-[10px] font-bold px-2.5 py-1.5 rounded-lg border inline-block",
-              TIER_CONFIG[evVerdict.tier]?.badge
-            )}>
-              {displayLabel}
-            </span>
-            {isMarketOnly && (
-              <p className="text-[9px] text-muted-foreground/40 mt-1">Market lean · no history</p>
-            )}
+          {/* OVER / UNDER probability split bar */}
+          <div className="h-1 bg-white/5 rounded-full overflow-hidden">
+            <div className="h-full flex">
+              <div className="bg-emerald-500/65 transition-all duration-500 rounded-l-full" style={{ width: `${grade.overProb}%` }} />
+              <div className="bg-rose-500/45 flex-1 rounded-r-full" />
+            </div>
+          </div>
+          <div className="flex items-center justify-between mt-0.5">
+            <span className="text-[8px] text-emerald-400/50 font-semibold">▲ OVER {grade.overProb}%</span>
+            <span className="text-[8px] text-rose-400/50 font-semibold">UNDER {grade.underProb}% ▼</span>
           </div>
         </div>
 
@@ -308,7 +324,7 @@ export default function PlayerRow({ playerName, props, allPlayerProps, rank, tot
 
         {/* Expand toggle */}
         <div className="flex items-center justify-end pt-1 border-t border-white/5">
-          <span className="text-[10px] text-muted-foreground/40 flex items-center gap-1">
+          <span className="text-[10px] text-muted-foreground/55 flex items-center gap-1">
             {expanded ? 'Hide breakdown' : 'Grade breakdown'}
             <ChevronDown className={cn("w-3 h-3 transition-transform duration-200", expanded && "rotate-180")} />
           </span>

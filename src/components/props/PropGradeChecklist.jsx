@@ -123,7 +123,7 @@ export default function PropGradeChecklist({ prop, initialOpen = false }) {
             <span className={cn('text-3xl font-black leading-none tabular-nums', lean === 'OVER' ? 'text-emerald-400' : 'text-rose-400')}>
               {primaryProb}%
             </span>
-            <span className="text-sm text-muted-foreground/40">{lean}</span>
+            <span className="text-sm text-muted-foreground/60">{lean}</span>
             {/* Secondary: letter grade */}
             <span className={cn('text-sm font-black px-2 py-0.5 rounded-lg', style.ring)}>
               {letter}
