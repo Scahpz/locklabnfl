@@ -126,22 +126,18 @@ def _load_nfl_data():
                 print(f"[nfl_data_py] {yr}: load error — {e}")
                 return -1
 
-        seasons: list[int] = []
-
-        # Step 1 — primary season (2025)
+        # 2025 is the ONLY acceptable primary season — never fall back to 2024.
+        # If nfl_data_py can't provide 2025, we call _load_sleeper_fallback() immediately.
         weeks_2025 = reg_weeks_for_year(2025)
-        if weeks_2025 > 0:
-            seasons.append(2025)
-        else:
-            # Emergency fallback: 2025 not yet in nfl_data_py
-            print("[nfl_data_py] WARNING: 2025 data unavailable — falling back to most recent available season")
-            for fallback_yr in [2024, 2023]:
-                if reg_weeks_for_year(fallback_yr) > 0:
-                    seasons.append(fallback_yr)
-                    break
+        if weeks_2025 <= 0:
+            print("[nfl_data_py] 2025 data unavailable — switching to Sleeper API (never fall back to 2024)")
+            _load_sleeper_fallback()
+            return
 
-        # Step 2 — current season (only if it isn't 2025 and has enough weeks)
-        MIN_CURRENT_WEEKS = 5   # need ≥5 completed weeks for L5 to be fully current-season
+        seasons: list[int] = [2025]
+
+        # Also include the current season (2026+) once ≥5 weeks are completed
+        MIN_CURRENT_WEEKS = 5
         if current_year > 2025:
             weeks_curr = reg_weeks_for_year(current_year)
             if weeks_curr >= MIN_CURRENT_WEEKS:
@@ -149,11 +145,7 @@ def _load_nfl_data():
                 print(f"[nfl_data_py] Including {current_year}: {weeks_curr} completed weeks")
             else:
                 wk_str = str(weeks_curr) if weeks_curr >= 0 else "none"
-                print(f"[nfl_data_py] Skipping {current_year}: {wk_str} week(s) completed, need ≥{MIN_CURRENT_WEEKS}")
-
-        if not seasons:
-            print("[nfl_data_py] No regular-season data found — giving up")
-            return
+                print(f"[nfl_data_py] Skipping {current_year}: {wk_str} week(s), need ≥{MIN_CURRENT_WEEKS}")
 
         seasons = sorted(seasons)
         print(f"[nfl_data_py] Requesting seasons from nfl_data_py: {seasons}")
@@ -171,8 +163,8 @@ def _load_nfl_data():
             after = len(df)
             actual = sorted([int(s) for s in df["season"].unique()]) if after > 0 else []
             print(f"[nfl_data_py] After season filter: {before}→{after} rows, actual seasons={actual}")
-            if not actual:
-                print("[nfl_data_py] ERROR: data is empty after filtering — nfl_data_py returned wrong seasons; trying Sleeper fallback")
+            if not actual or 2025 not in actual:
+                print(f"[nfl_data_py] ERROR: 2025 not in actual data {actual} — switching to Sleeper fallback")
                 _load_sleeper_fallback()
                 return
             # Record what we actually have, not just what we requested
