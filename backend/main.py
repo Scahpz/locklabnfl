@@ -823,6 +823,124 @@ async def odds_games(bookmakers: str = "draftkings,fanduel,betmgm,caesars,points
 
 
 # ── Team Context ──────────────────────────────────────────────────────────────
+
+# Cache computed defensive stats so we don't reprocess on every request
+_defense_cache: dict | None = None
+
+# nfl_data_py → frontend team abbreviation normalization
+_TEAM_ABBREV = {
+    "JAC": "JAX", "WSH": "WAS", "OAK": "LV",
+    "SD":  "LAC", "STL": "LAR", "ARZ": "ARI",
+}
+
+def _compute_team_defense(df):
+    """
+    Compute real per-game defensive stats for every team from the loaded weekly data.
+    Uses only the most recent season in the dataset (typically 2025).
+
+    Returns (teams_dict, league_avgs_dict).
+    """
+    import pandas as pd
+
+    if df is None or len(df) == 0:
+        return {}, {}
+    if "opponent_team" not in df.columns or "position" not in df.columns:
+        return {}, {}
+
+    # Only the most recently loaded regular season
+    latest = int(df["season"].max())
+    sdf = df[df["season"] == latest].copy()
+    if sdf.empty:
+        sdf = df.copy()
+
+    # Normalise opponent abbreviations
+    def norm_abbrev(t):
+        if not t or (isinstance(t, float)):
+            return None
+        t = str(t).strip().upper()
+        return _TEAM_ABBREV.get(t, t) if t else None
+
+    sdf["_opp"] = sdf["opponent_team"].apply(norm_abbrev)
+    sdf = sdf[sdf["_opp"].notna() & (sdf["_opp"] != "")]
+
+    def per_game_avg(pos_list, stat_cols):
+        """
+        For the given positions, sum each stat within each (opponent, week) pair
+        (= one game's worth of yards allowed), then average across all games in the season.
+        """
+        sub = sdf[sdf["position"].isin(pos_list)]
+        valid = [c for c in stat_cols if c in sub.columns]
+        if sub.empty or not valid:
+            return {}
+        game_totals = sub.groupby(["_opp", "week"])[valid].sum().reset_index()
+        avgs = game_totals.groupby("_opp")[valid].mean()
+        return {
+            team: {col: round(float(val), 2) for col, val in row.items()}
+            for team, row in avgs.iterrows()
+        }
+
+    pass_avgs = per_game_avg(["QB"],                   ["passing_yards",  "passing_tds"])
+    rush_avgs = per_game_avg(["QB","RB","WR","TE","FB"],["rushing_yards",  "rushing_tds"])
+    wr_avgs   = per_game_avg(["WR"],                   ["receiving_yards", "receiving_tds"])
+    te_avgs   = per_game_avg(["TE"],                   ["receiving_yards", "receiving_tds"])
+    rb_avgs   = per_game_avg(["RB","FB"],              ["receiving_yards", "receiving_tds"])
+
+    # Static fallbacks (league-average estimates) used when a team has no data
+    FALLBACK = {
+        "pass_yds_allowed": 229, "pass_tds_allowed": 1.18,
+        "rush_yds_allowed": 117, "rush_tds_allowed": 0.90,
+        "rec_yds_allowed_wr": 151, "rec_yds_allowed_te": 58,
+        "rec_yds_allowed_rb": 35,  "rec_tds_allowed": 1.18,
+    }
+
+    all_teams = set()
+    for d in (pass_avgs, rush_avgs, wr_avgs, te_avgs, rb_avgs):
+        all_teams.update(d.keys())
+
+    teams: dict = {}
+    for team in sorted(all_teams):
+        teams[team] = {
+            "pass_yds_allowed":   pass_avgs.get(team, {}).get("passing_yards",   FALLBACK["pass_yds_allowed"]),
+            "pass_tds_allowed":   pass_avgs.get(team, {}).get("passing_tds",     FALLBACK["pass_tds_allowed"]),
+            "rush_yds_allowed":   rush_avgs.get(team, {}).get("rushing_yards",   FALLBACK["rush_yds_allowed"]),
+            "rush_tds_allowed":   rush_avgs.get(team, {}).get("rushing_tds",     FALLBACK["rush_tds_allowed"]),
+            "rec_yds_allowed_wr": wr_avgs.get(team,  {}).get("receiving_yards",  FALLBACK["rec_yds_allowed_wr"]),
+            "rec_tds_allowed":    wr_avgs.get(team,  {}).get("receiving_tds",    FALLBACK["rec_tds_allowed"]),
+            "rec_yds_allowed_te": te_avgs.get(team,  {}).get("receiving_yards",  FALLBACK["rec_yds_allowed_te"]),
+            "rec_yds_allowed_rb": rb_avgs.get(team,  {}).get("receiving_yards",  FALLBACK["rec_yds_allowed_rb"]),
+        }
+
+    # League averages derived from the real computed team values
+    league_avgs: dict = {}
+    if teams:
+        for key in FALLBACK:
+            vals = [t[key] for t in teams.values() if t.get(key) is not None]
+            league_avgs[key] = round(sum(vals) / len(vals), 2) if vals else FALLBACK[key]
+    else:
+        league_avgs = dict(FALLBACK)
+
+    print(f"[team-context] Computed defense for {len(teams)} teams from {latest} season data")
+    return teams, league_avgs
+
+
 @app.get("/api/team-context")
 async def team_context():
-    return {"teams": {}, "injuries": {}, "game_spreads": {}}
+    global _defense_cache
+    if not _data_loaded or _weekly_df is None:
+        return {"teams": {}, "injuries": {}, "game_spreads": {}, "league_avgs": {}, "data_loaded": False}
+
+    if _defense_cache is None:
+        try:
+            teams, league_avgs = _compute_team_defense(_weekly_df)
+            _defense_cache = {"teams": teams, "league_avgs": league_avgs}
+        except Exception as exc:
+            print(f"[team-context] Error: {exc}")
+            _defense_cache = {"teams": {}, "league_avgs": {}}
+
+    return {
+        "teams":        _defense_cache["teams"],
+        "league_avgs":  _defense_cache["league_avgs"],
+        "injuries":     {},
+        "game_spreads": {},
+        "data_loaded":  True,
+    }

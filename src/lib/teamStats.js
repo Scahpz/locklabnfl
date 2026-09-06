@@ -36,7 +36,8 @@ export const TEAM_STATS = {
   WAS: { pass_yds_allowed: 228, rush_yds_allowed: 118, rec_yds_allowed_wr: 150, rec_yds_allowed_te: 57, rec_yds_allowed_rb: 34, pass_tds_allowed: 1.15, rush_tds_allowed: 0.90, rec_tds_allowed: 1.15 },
 };
 
-// 2025-26 season league averages
+// 2025-26 season league averages — seeded with estimates; overwritten at runtime
+// by /api/team-context once the backend computes real averages from nfl_data_py.
 export const NFL_LEAGUE_AVGS = {
   pass_yds_allowed:    229,
   rush_yds_allowed:    117,
@@ -94,3 +95,13 @@ export const QB_TIER_SCORE = {
   below: 0.32,
   poor:  0.18,
 };
+
+/**
+ * Called once when /api/team-context returns real computed league averages.
+ * Mutates NFL_LEAGUE_AVGS in place so grading.js (which imports by reference)
+ * automatically picks up the live values without a re-import.
+ */
+export function updateLeagueAvgs(avgs) {
+  if (!avgs || typeof avgs !== 'object') return;
+  Object.assign(NFL_LEAGUE_AVGS, avgs);
+}

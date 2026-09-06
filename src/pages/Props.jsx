@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils';
 import { rankScore, gradeProp } from '@/lib/grading';
 import { formatMarket, toLetterGrade } from '@/lib/propLabels';
 import { NFL_API } from '@/lib/config';
-import { TEAM_STATS } from '@/lib/teamStats';
+import { TEAM_STATS, updateLeagueAvgs } from '@/lib/teamStats';
 import PropDetailModal from '@/components/props/PropDetailModal';
 import { useParlay } from '@/lib/ParlayContext';
 
@@ -297,6 +297,10 @@ export default function Props() {
           back_to_back: ctx.back_to_back || [],
           game_spreads: ctx.game_spreads || {},
         }));
+        // Update the grading engine's league-average baselines with real computed values
+        if (ctx.league_avgs && Object.keys(ctx.league_avgs).length) {
+          updateLeagueAvgs(ctx.league_avgs);
+        }
       })
       .catch(() => {})
       .finally(() => clearTimeout(timer));
