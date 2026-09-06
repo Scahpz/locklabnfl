@@ -98,8 +98,7 @@ const PROP_GROUPS = [
 ];
 
 function toLetterGrade(confidence, completeness) {
-  const eff = completeness < 25 ? Math.min(confidence, 62)
-    : completeness < 45 ? Math.min(confidence, 70)
+  const eff = completeness < 40 ? Math.min(confidence, 60)
     : completeness < 65 ? Math.min(confidence, 80)
     : confidence;
   if (eff >= 88) return 'A+';
@@ -224,7 +223,7 @@ export default function Props() {
     }));
   }, [selectedGames, selectedTypes, selectedPositions, listHomeAway, sortBy, selectedPlayers, selectedSources]);
 
-  // Sync filter state to URL query string for shareable/refreshable links
+  // Sync filter state + open modal to URL for shareable/refreshable links
   useEffect(() => {
     const params = new URLSearchParams();
     if (selectedTypes.length > 0) params.set('types', selectedTypes.join(','));
@@ -233,9 +232,22 @@ export default function Props() {
     if (selectedGames.length > 0) params.set('games', selectedGames.join(','));
     if (sortBy !== 'ai_rank') params.set('sort', sortBy);
     if (selectedPlayers.length > 0) params.set('players', selectedPlayers.join(','));
+    if (detailKey) { params.set('player', detailKey.player_name); params.set('prop', detailKey.prop_type); }
     const qs = params.toString();
     navigate({ search: qs ? `?${qs}` : '' }, { replace: true });
-  }, [selectedTypes, selectedPositions, listHomeAway, selectedGames, sortBy, selectedPlayers]);
+  }, [selectedTypes, selectedPositions, listHomeAway, selectedGames, sortBy, selectedPlayers, detailKey]);
+
+  // Open modal from URL params once data is loaded
+  useEffect(() => {
+    if (!enrichedProps.length) return;
+    const params = new URLSearchParams(window.location.search);
+    const player = params.get('player');
+    const propType = params.get('prop');
+    if (player && propType && !detailKey) {
+      const found = enrichedProps.find(p => p.player_name === player && p.prop_type === propType);
+      if (found) setDetailKey({ player_name: player, prop_type: propType });
+    }
+  }, [enrichedProps.length]);
 
   const applyData = (data, skipAI = false) => {
     if (!data?.props?.length) return false;

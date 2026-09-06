@@ -18,11 +18,8 @@ const PROP_LABELS = {
 };
 
 function toLetterGrade(confidence, completeness) {
-  // Cap grade when data completeness is low
-  const effectiveConf = completeness < 25
-    ? Math.min(confidence, 62)
-    : completeness < 45
-    ? Math.min(confidence, 70)
+  const effectiveConf = completeness < 40
+    ? Math.min(confidence, 60)
     : completeness < 65
     ? Math.min(confidence, 80)
     : confidence;
@@ -141,12 +138,6 @@ export default function PropGradeChecklist({ prop, initialOpen = false }) {
               className={cn('h-full rounded-full transition-all duration-500', barColor)}
               style={{ width: `${primaryProb}%` }}
             />
-          </div>
-          {/* Split display: OVER X% · UNDER Y% */}
-          <div className="flex items-center gap-2 mt-1">
-            <span className="text-[9px] text-emerald-400/70 font-semibold">▲ OVER {overProb}%</span>
-            <span className="text-[9px] text-muted-foreground/30">·</span>
-            <span className="text-[9px] text-rose-400/70 font-semibold">▼ UNDER {underProb}%</span>
           </div>
         </div>
 

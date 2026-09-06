@@ -1,7 +1,8 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { X, Check, Clock, Zap, Home, Plane, ChevronUp, ChevronDown, RotateCcw } from 'lucide-react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { X, Check, Clock, Zap, Home, Plane, ChevronUp, ChevronDown, RotateCcw, Info } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { gradeProp } from '@/lib/grading';
+import { gradeProp, calcConsistency } from '@/lib/grading';
+import { TEAM_STATS } from '@/lib/teamStats';
 import TeamLogo from '@/components/common/TeamLogo';
 import VerdictBadge from '@/components/props/VerdictBadge';
 import PlayerTrendChart from '@/components/trends/PlayerTrendChart';
@@ -26,10 +27,9 @@ function fmtOdds(n) {
   return n > 0 ? `+${n}` : `${n}`;
 }
 
-// Same formula as PropGradeChecklist — uses confidence + completeness cap
+// Completeness cap: < 40% → max C+ (60), < 65% → max B (80)
 function toLetterGrade(confidence, completeness) {
-  const eff = completeness < 25 ? Math.min(confidence, 62)
-    : completeness < 45 ? Math.min(confidence, 70)
+  const eff = completeness < 40 ? Math.min(confidence, 60)
     : completeness < 65 ? Math.min(confidence, 80)
     : confidence;
   if (eff >= 88) return 'A+';
@@ -95,6 +95,99 @@ function StatBox({ label, value, sub, good, neutral }) {
   );
 }
 
+// Normal distribution bell curve — shades OVER (emerald) and UNDER (rose) regions relative to line
+function DistributionCurve({ mean, stdDev, line, overProb, underProb }) {
+  if (!mean || !stdDev || stdDev < 0.1) return null;
+  const W = 260, H = 64, PX = 8, PY = 8;
+  const iH = H - PY * 2;
+  const lo = mean - 3.2 * stdDev, hi = mean + 3.2 * stdDev;
+  const rng = hi - lo;
+  const pdf = x => Math.exp(-0.5 * ((x - mean) / stdDev) ** 2);
+  const toX = v => PX + ((v - lo) / rng) * (W - 2 * PX);
+  const toY = p => H - PY - p * iH;
+  const baseY = H - PY;
+  const N = 80;
+  const pts = Array.from({ length: N + 1 }, (_, i) => {
+    const v = lo + (i / N) * rng;
+    return { v, x: toX(v), y: toY(pdf(v)) };
+  });
+  const lineX = Math.max(PX + 4, Math.min(W - PX - 4, toX(line)));
+  const polyline = pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+  const areaD = (section, x0, x1) => {
+    if (section.length < 2) return '';
+    const curve = section.map(p => `${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' L ');
+    return `M ${x0.toFixed(1)} ${baseY} L ${curve} L ${x1.toFixed(1)} ${baseY} Z`;
+  };
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: H }}>
+      <path d={areaD(pts.filter(p => p.v <= line), PX, lineX)} fill="hsl(0 84% 60% / 0.12)" />
+      <path d={areaD(pts.filter(p => p.v >= line), lineX, W - PX)} fill="hsl(142 71% 45% / 0.12)" />
+      <polyline points={polyline} fill="none" stroke="hsl(215 20% 50%)" strokeWidth={1.5} strokeLinejoin="round" />
+      <line x1={lineX} y1={PY} x2={lineX} y2={baseY} stroke="hsl(142 71% 45%)" strokeWidth={1.5} strokeDasharray="3 2" />
+      {lineX > PX + 32 && (
+        <text x={(lineX + PX) / 2} y={H - 1} textAnchor="middle" fontSize={8} fill="hsl(0 84% 60% / 0.65)" fontWeight="600">{underProb}% UNDER</text>
+      )}
+      {lineX < W - PX - 32 && (
+        <text x={(lineX + W - PX) / 2} y={H - 1} textAnchor="middle" fontSize={8} fill="hsl(142 71% 45% / 0.65)" fontWeight="600">{overProb}% OVER</text>
+      )}
+    </svg>
+  );
+}
+
+// Hit rate vs line curve — shows how hit rate changes as line moves
+function ProbVsLineCurve({ gameLogs, sliderMin, sliderMax, adjustedLine, originalLine }) {
+  if (!gameLogs || gameLogs.length < 4) return null;
+  const W = 260, H = 72;
+  const PAD = { t: 6, r: 8, b: 20, l: 28 };
+  const iW = W - PAD.l - PAD.r, iH = H - PAD.t - PAD.b;
+  const points = [];
+  for (let v = sliderMin; v <= sliderMax + 0.001; v += 0.5) {
+    const lv = Math.round(v * 2) / 2;
+    const hits = gameLogs.filter(val => val > lv).length;
+    points.push({ line: lv, rate: Math.round(hits / gameLogs.length * 100) });
+  }
+  if (points.length < 2) return null;
+  const xMin = points[0].line, xMax = points[points.length - 1].line;
+  const toX = v => PAD.l + ((v - xMin) / (xMax - xMin)) * iW;
+  const toY = r => PAD.t + ((100 - r) / 100) * iH;
+  const baseY = PAD.t + iH;
+  const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${toX(p.line).toFixed(1)} ${toY(p.rate).toFixed(1)}`).join(' ');
+  const areaD = `${pathD} L ${toX(xMax).toFixed(1)} ${baseY} L ${toX(xMin).toFixed(1)} ${baseY} Z`;
+  const adjX = toX(adjustedLine);
+  const mktX = toX(originalLine);
+  const lineChanged = adjustedLine !== originalLine;
+  const uniqueLabels = [xMin, originalLine, ...(lineChanged ? [adjustedLine] : []), xMax].filter((v, i, a) => a.indexOf(v) === i);
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: H }}>
+      {[25, 50, 75].map(r => (
+        <g key={r}>
+          <line x1={PAD.l} y1={toY(r)} x2={W - PAD.r} y2={toY(r)} stroke="hsl(217 33% 17%)" strokeWidth={0.5} />
+          <text x={PAD.l - 3} y={toY(r) + 3} textAnchor="end" fontSize={7} fill="hsl(215 20% 35%)">{r}%</text>
+        </g>
+      ))}
+      <path d={areaD} fill="hsl(142 71% 45% / 0.07)" />
+      <path d={pathD} fill="none" stroke="hsl(142 71% 45%)" strokeWidth={1.5} strokeLinejoin="round" />
+      <line x1={adjX} y1={PAD.t} x2={adjX} y2={baseY} stroke="hsl(142 71% 45%)" strokeWidth={1.5} strokeDasharray="4 2" />
+      {lineChanged && <line x1={mktX} y1={PAD.t} x2={mktX} y2={baseY} stroke="hsl(263 70% 58%)" strokeWidth={1} strokeDasharray="3 2" />}
+      {uniqueLabels.map(v => (
+        <text key={v} x={toX(v)} y={H - 3} textAnchor="middle" fontSize={7} fill="hsl(215 20% 40%)">{v}</text>
+      ))}
+    </svg>
+  );
+}
+
+function getDefStatKeyModal(propType, position) {
+  const pos = (position || '').toUpperCase();
+  if (['passing_yards','completions','pass_rush_yards'].includes(propType)) return 'pass_yds_allowed';
+  if (propType === 'passing_tds') return 'pass_tds_allowed';
+  if (['rushing_yards','rushing_attempts'].includes(propType)) return 'rush_yds_allowed';
+  if (propType === 'rushing_tds') return 'rush_tds_allowed';
+  if (['receiving_tds','rush_rec_tds'].includes(propType)) return 'rec_tds_allowed';
+  if (pos === 'TE') return 'rec_yds_allowed_te';
+  if (pos === 'RB') return 'rec_yds_allowed_rb';
+  return 'rec_yds_allowed_wr';
+}
+
 export default function PropDetailModal({ prop, onClose }) {
   const { addLeg, isSelected } = useParlay();
   const originalLine = prop.line;
@@ -107,6 +200,29 @@ export default function PropDetailModal({ prop, onClose }) {
   const [adjustedLine, setAdjustedLine] = useState(originalLine);
   const [chartWindow, setChartWindow] = useState('l10'); // 'l5' | 'l10' | 'l20'
   const [locationFilter, setLocationFilter] = useState('all'); // 'all' | 'home' | 'away'
+  const [oppFilter, setOppFilter] = useState(null); // opponent abbreviation or null
+  const [showVerdictInfo, setShowVerdictInfo] = useState(false);
+  const verdictInfoRef = useRef(null);
+
+  // Defensive rank map for this prop type — rank 1 = toughest, N = easiest
+  const defRankMap = useMemo(() => {
+    const statKey = getDefStatKeyModal(prop.prop_type, prop.position);
+    const ranked = Object.entries(TEAM_STATS)
+      .map(([abbr, data]) => ({ abbr: abbr.toUpperCase(), val: data[statKey] }))
+      .filter(x => x.val != null)
+      .sort((a, b) => a.val - b.val); // ascending: toughest (allows fewest) = rank 1
+    const map = {};
+    ranked.forEach(({ abbr }, i) => { map[abbr] = i + 1; });
+    return { map, total: ranked.length };
+  }, [prop.prop_type, prop.position]);
+
+  // Close verdict popover on outside click
+  useEffect(() => {
+    if (!showVerdictInfo) return;
+    const handle = (e) => { if (verdictInfoRef.current && !verdictInfoRef.current.contains(e.target)) setShowVerdictInfo(false); };
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, [showVerdictInfo]);
 
   // Close on Escape
   useEffect(() => {
@@ -249,12 +365,39 @@ export default function PropDetailModal({ prop, onClose }) {
                   <span className="text-[9px] text-muted-foreground/40">model estimate</span>
                 </div>
               </div>
-              <VerdictBadge
-                verdict={grade.verdict}
-                ai_confidence={grade.confidence}
-                dataQuality={grade.dataQuality}
-                loading={false}
-              />
+              <div className="flex items-start gap-1.5 flex-shrink-0">
+                <VerdictBadge
+                  verdict={grade.verdict}
+                  ai_confidence={grade.confidence}
+                  dataQuality={grade.dataQuality}
+                  loading={false}
+                />
+                {/* Verdict legend */}
+                <div className="relative" ref={verdictInfoRef}>
+                  <button
+                    onClick={() => setShowVerdictInfo(v => !v)}
+                    className="w-5 h-5 flex items-center justify-center rounded-full text-muted-foreground/30 hover:text-muted-foreground transition-colors mt-0.5"
+                  >
+                    <Info className="w-3.5 h-3.5" />
+                  </button>
+                  {showVerdictInfo && (
+                    <div className="absolute right-0 top-6 w-56 bg-popover border border-border rounded-xl shadow-xl z-10 p-3 text-[11px] space-y-2">
+                      <p className="font-bold text-foreground text-xs mb-1">Verdict Guide</p>
+                      {[
+                        { label: 'BET IT', color: 'text-emerald-400', desc: '≥75% confidence + strong data — model strongly agrees' },
+                        { label: 'LEAN', color: 'text-amber-400', desc: '65–74% confidence — favorable signal, less certainty' },
+                        { label: 'SKIP', color: 'text-rose-400', desc: '<65% confidence or conflicting factors — avoid' },
+                        { label: 'TRAP', color: 'text-orange-400', desc: 'Market implies opposite side — potential fade opportunity' },
+                      ].map(({ label, color, desc }) => (
+                        <div key={label}>
+                          <span className={cn('font-black', color)}>{label}</span>
+                          <span className="text-muted-foreground/70"> — {desc}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
             {grade.completeness < 40 && (
               <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/8 border border-amber-500/20">
@@ -408,6 +551,23 @@ export default function PropDetailModal({ prop, onClose }) {
                   )}
                 </div>
               )}
+
+              {/* Prob-vs-line curve — hit rate at each possible line value */}
+              {gameLogs.length >= 4 && (
+                <div>
+                  <p className="text-[9px] text-muted-foreground/40 font-semibold uppercase tracking-widest mb-1">
+                    Hit Rate vs Line
+                    {adjustedLine !== originalLine && <span className="text-purple-400/60 ml-2">· purple = market</span>}
+                  </p>
+                  <ProbVsLineCurve
+                    gameLogs={gameLogs}
+                    sliderMin={sliderMin}
+                    sliderMax={sliderMax}
+                    adjustedLine={adjustedLine}
+                    originalLine={originalLine}
+                  />
+                </div>
+              )}
             </div>
 
             {/* Dynamic stats at adjusted line */}
@@ -471,6 +631,29 @@ export default function PropDetailModal({ prop, onClose }) {
               />
             </div>
 
+            {/* Distribution curve — shown when we have enough game logs for a meaningful std dev */}
+            {gameLogs.length >= 4 && (() => {
+              let wSum = 0, vSum = 0;
+              gameLogs.forEach((v, i) => { const w = Math.exp(-0.18 * i); vSum += v * w; wSum += w; });
+              const mu = vSum / wSum;
+              const cons = calcConsistency([...gameLogs]);
+              if (!cons) return null;
+              return (
+                <div>
+                  <p className="text-[9px] font-semibold text-muted-foreground/40 uppercase tracking-widest mb-1.5">
+                    Probability Distribution (σ = {cons.stdDev})
+                  </p>
+                  <DistributionCurve
+                    mean={mu}
+                    stdDev={cons.stdDev}
+                    line={adjustedLine}
+                    overProb={grade.overProb}
+                    underProb={grade.underProb}
+                  />
+                </div>
+              );
+            })()}
+
             {/* Chart: window + location filters */}
             {(gameLogs.length > 0 || prop.game_logs_last_20?.length > 0) && (() => {
               // allDetailLogs: most-recent-first from backend (index 0 = most recent)
@@ -505,11 +688,19 @@ export default function PropDetailModal({ prop, onClose }) {
                 : allDetailLogs.slice(0, 10);
 
               // Step 2: apply location filter
-              const activeDetail = locationFilter === 'home'
+              const locationFiltered = locationFilter === 'home'
                 ? windowLogs.filter(g => isHomeGame(g))
                 : locationFilter === 'away'
                 ? windowLogs.filter(g => !isHomeGame(g))
                 : windowLogs;
+
+              // Step 3: apply opponent filter (vs this opp only)
+              const activeDetail = oppFilter
+                ? locationFiltered.filter(g => (g.opp || '').toUpperCase() === oppFilter.toUpperCase())
+                : locationFiltered;
+
+              // Unique opponents in this window for filter chips
+              const uniqueOpps = [...new Set(windowLogs.map(g => (g.opp || '').toUpperCase()).filter(Boolean))];
 
               // For chart: reverse to oldest-first so oldest is leftmost point
               const chartDetail = [...activeDetail].reverse();
@@ -557,7 +748,7 @@ export default function PropDetailModal({ prop, onClose }) {
                     ].map(t => (
                       <button
                         key={t.key}
-                        onClick={() => { setChartWindow(t.key); setLocationFilter('all'); }}
+                        onClick={() => { setChartWindow(t.key); setLocationFilter('all'); setOppFilter(null); }}
                         className={cn(
                           "text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-all",
                           chartWindow === t.key
@@ -579,10 +770,10 @@ export default function PropDetailModal({ prop, onClose }) {
                     ].map(f => (
                       <button
                         key={f.key}
-                        onClick={() => setLocationFilter(f.key)}
+                        onClick={() => { setLocationFilter(f.key); setOppFilter(null); }}
                         className={cn(
                           "text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-all",
-                          locationFilter === f.key
+                          locationFilter === f.key && !oppFilter
                             ? "bg-chart-4/20 border-chart-4/40 text-chart-4"
                             : "bg-secondary/40 border-border/50 text-muted-foreground hover:text-foreground"
                         )}
@@ -597,6 +788,34 @@ export default function PropDetailModal({ prop, onClose }) {
                       </span>
                     )}
                   </div>
+
+                  {/* Opponent filter — "vs DAL", "vs PHI", etc. */}
+                  {uniqueOpps.length > 1 && (
+                    <div className="flex items-center gap-1 flex-wrap mb-2">
+                      <span className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/40 flex-shrink-0 self-center">vs</span>
+                      <button
+                        onClick={() => setOppFilter(null)}
+                        className={cn(
+                          "text-[9px] font-bold px-2 py-0.5 rounded-lg border transition-all",
+                          !oppFilter
+                            ? "bg-primary/15 border-primary/30 text-primary"
+                            : "bg-secondary/30 border-border/30 text-muted-foreground/50 hover:text-muted-foreground"
+                        )}
+                      >All</button>
+                      {uniqueOpps.map(opp => (
+                        <button
+                          key={opp}
+                          onClick={() => setOppFilter(oppFilter === opp ? null : opp)}
+                          className={cn(
+                            "text-[9px] font-bold px-2 py-0.5 rounded-lg border transition-all",
+                            oppFilter === opp
+                              ? "bg-primary/15 border-primary/30 text-primary"
+                              : "bg-secondary/30 border-border/30 text-muted-foreground/50 hover:text-muted-foreground"
+                          )}
+                        >{opp}</button>
+                      ))}
+                    </div>
+                  )}
 
                   {/* Empty state for location filter */}
                   {activeDetail.length === 0 && (
@@ -625,18 +844,35 @@ export default function PropDetailModal({ prop, onClose }) {
                         <span className="text-center">{propTypeLabels[prop.prop_type] || prop.prop_type.replace(/_/g, ' ')}</span>
                         <span className="text-right">Result</span>
                       </div>
-                      {tableDetail.map((g, i) => (
-                        <div key={i} className={cn('grid grid-cols-4 text-xs px-4 py-2.5 items-center', i % 2 === 1 ? 'bg-secondary/20' : '')}>
-                          <span className="text-muted-foreground text-[10px]">{getWeekLabel(g)}</span>
-                          <span className="text-foreground text-[10px]">{isHomeGame(g) ? 'vs' : '@'} {g.opp}</span>
-                          <span className={cn('text-center font-bold text-sm', g.value > adjustedLine ? 'text-emerald-400' : 'text-rose-400')}>
-                            {g.value}
-                          </span>
-                          <span className={cn('text-right text-[10px] font-semibold', g.value > adjustedLine ? 'text-emerald-400' : 'text-rose-400')}>
-                            {g.value > adjustedLine ? '✓ HIT' : '✗ MISS'}
-                          </span>
-                        </div>
-                      ))}
+                      {tableDetail.map((g, i) => {
+                        const oppUpper = (g.opp || '').toUpperCase();
+                        const defRank = defRankMap.map[oppUpper];
+                        const isEasyDef = defRank != null && defRank > defRankMap.total * 0.65;
+                        const isToughDef = defRank != null && defRank <= defRankMap.total * 0.35;
+                        return (
+                          <div key={i} className={cn('grid grid-cols-4 text-xs px-4 py-2.5 items-center', i % 2 === 1 ? 'bg-secondary/20' : '')}>
+                            <span className="text-muted-foreground text-[10px]">{getWeekLabel(g)}</span>
+                            <span className="text-foreground text-[10px] flex items-center gap-1">
+                              {isHomeGame(g) ? 'vs' : '@'} {g.opp}
+                              {defRank != null && (
+                                <span className={cn('text-[8px] font-bold px-1 py-0.5 rounded leading-none',
+                                  isEasyDef ? 'text-emerald-400/80 bg-emerald-500/10' :
+                                  isToughDef ? 'text-rose-400/80 bg-rose-500/10' :
+                                  'text-muted-foreground/35 bg-white/4'
+                                )}>
+                                  DEF #{defRank}
+                                </span>
+                              )}
+                            </span>
+                            <span className={cn('text-center font-bold text-sm', g.value > adjustedLine ? 'text-emerald-400' : 'text-rose-400')}>
+                              {g.value}
+                            </span>
+                            <span className={cn('text-right text-[10px] font-semibold', g.value > adjustedLine ? 'text-emerald-400' : 'text-rose-400')}>
+                              {g.value > adjustedLine ? '✓ HIT' : '✗ MISS'}
+                            </span>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>

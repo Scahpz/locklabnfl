@@ -16,7 +16,7 @@ function ewmaAvg(vals, decay = 0.18) {
 }
 
 // Consistency metrics: std dev and coefficient of variation from raw game logs
-function calcConsistency(vals) {
+export function calcConsistency(vals) {
   if (!vals || vals.length < 4) return null;
   const mean = vals.reduce((s, v) => s + v, 0) / vals.length;
   if (mean < 1) return null;
