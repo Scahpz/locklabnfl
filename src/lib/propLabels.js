@@ -21,3 +21,20 @@ export const PROP_LABELS = {
 export function formatMarket(propType) {
   return PROP_LABELS[propType] || propType.replace(/_/g, ' ');
 }
+
+/** Converts a numeric confidence + completeness into a letter grade (A+ → C-).
+ *  Completeness cap: < 40% → max C+ (60), < 65% → max B (80). */
+export function toLetterGrade(confidence, completeness) {
+  const eff = completeness < 40 ? Math.min(confidence, 60)
+    : completeness < 65 ? Math.min(confidence, 80)
+    : confidence;
+  if (eff >= 88) return 'A+';
+  if (eff >= 83) return 'A';
+  if (eff >= 78) return 'A-';
+  if (eff >= 74) return 'B+';
+  if (eff >= 70) return 'B';
+  if (eff >= 65) return 'B-';
+  if (eff >= 61) return 'C+';
+  if (eff >= 57) return 'C';
+  return 'C-';
+}

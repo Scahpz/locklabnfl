@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { Check, X, Clock, ChevronDown, ChevronUp } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { gradeProp, toLetterGrade } from '@/lib/grading';
-import { formatMarket } from '@/lib/propLabels';
+import { gradeProp } from '@/lib/grading';
+import { formatMarket, toLetterGrade } from '@/lib/propLabels';
 
 
 

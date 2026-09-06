@@ -1,24 +1,6 @@
 import { getPrevLines } from '@/lib/liveData';
 import { NFL_LEAGUE_AVGS, QB_TIER, QB_TIER_SCORE } from '@/lib/teamStats';
 
-// ── Shared grade utilities ────────────────────────────────────────────────────
-
-// Completeness cap: < 40% → max C+ (60), < 65% → max B (80)
-export function toLetterGrade(confidence, completeness) {
-  const eff = completeness < 40 ? Math.min(confidence, 60)
-    : completeness < 65 ? Math.min(confidence, 80)
-    : confidence;
-  if (eff >= 88) return 'A+';
-  if (eff >= 83) return 'A';
-  if (eff >= 78) return 'A-';
-  if (eff >= 74) return 'B+';
-  if (eff >= 70) return 'B';
-  if (eff >= 65) return 'B-';
-  if (eff >= 61) return 'C+';
-  if (eff >= 57) return 'C';
-  return 'C-';
-}
-
 // ── Helper functions ──────────────────────────────────────────────────────────
 
 // Exponentially weighted moving average (vals[0] = most recent, highest weight)

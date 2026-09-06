@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { X, Check, Clock, Zap, Home, Plane, ChevronUp, ChevronDown, RotateCcw, Info } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { gradeProp, calcConsistency, toLetterGrade } from '@/lib/grading';
-import { formatMarket } from '@/lib/propLabels';
+import { gradeProp, calcConsistency } from '@/lib/grading';
+import { formatMarket, toLetterGrade } from '@/lib/propLabels';
 import { TEAM_STATS } from '@/lib/teamStats';
 import TeamLogo from '@/components/common/TeamLogo';
 import VerdictBadge from '@/components/props/VerdictBadge';
