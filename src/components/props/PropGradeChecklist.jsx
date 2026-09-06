@@ -1,39 +1,10 @@
 import React, { useState } from 'react';
 import { Check, X, Clock, ChevronDown, ChevronUp } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { gradeProp } from '@/lib/grading';
+import { gradeProp, toLetterGrade } from '@/lib/grading';
+import { formatMarket } from '@/lib/propLabels';
 
-const PROP_LABELS = {
-  passing_yards: 'Pass Yds', passing_tds: 'Pass TDs', completions: 'Completions',
-  rushing_yards: 'Rush Yds', rushing_tds: 'Rush TDs', rushing_attempts: 'Rush Att',
-  receiving_yards: 'Rec Yds', receiving_tds: 'Rec TDs', receptions: 'Receptions',
-  fantasy_points: 'Fantasy Pts', kicking_points: 'Kick Pts',
-  tackles: 'Tackles', sacks: 'Sacks', passing_ints: 'INTs Thrown',
-  rush_rec_tds: 'Rush+Rec TDs', rush_rec_yards: 'Rush+Rec Yds',
-  pass_rush_yards: 'Pass+Rush Yds', passing_long: 'Long Comp', rushing_long: 'Long Rush',
-  q1_rush_rec_tds: '1Q R+R TDs', q1_receptions: '1Q Rec',
-  h1_rush_rec_tds: '1H R+R TDs', h1_receptions: '1H Rec',
-  q1_passing_yards: '1Q Pass Yds', q1_rushing_yards: '1Q Rush Yds', q1_receiving_yards: '1Q Rec Yds',
-  h1_passing_yards: '1H Pass Yds', h1_rushing_yards: '1H Rush Yds', h1_receiving_yards: '1H Rec Yds',
-};
 
-function toLetterGrade(confidence, completeness) {
-  const effectiveConf = completeness < 40
-    ? Math.min(confidence, 60)
-    : completeness < 65
-    ? Math.min(confidence, 80)
-    : confidence;
-
-  if (effectiveConf >= 88) return 'A+';
-  if (effectiveConf >= 83) return 'A';
-  if (effectiveConf >= 78) return 'A-';
-  if (effectiveConf >= 74) return 'B+';
-  if (effectiveConf >= 70) return 'B';
-  if (effectiveConf >= 65) return 'B-';
-  if (effectiveConf >= 61) return 'C+';
-  if (effectiveConf >= 57) return 'C';
-  return 'C-';
-}
 
 function gradeStyle(letter) {
   const g = letter[0];
@@ -43,7 +14,7 @@ function gradeStyle(letter) {
 }
 
 function buildNarrative(prop, grade) {
-  const propLabel = PROP_LABELS[prop.prop_type] || prop.prop_type;
+  const propLabel = formatMarket(prop.prop_type);
   const { lean, overProb, underProb, criteria, dataQuality, completeness } = grade;
 
   const dirText = lean === 'OVER'

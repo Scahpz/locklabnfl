@@ -205,14 +205,19 @@ export default function PropHistory() {
     }).filter(t => t.total > 0);
   }, [settled]);
 
-  // Accuracy by stat type
+  // Accuracy by stat type — derive from actual settled props
   const byStat = useMemo(() => {
-    const types = ['points', 'rebounds', 'assists', '3PM', 'PRA', 'steals', 'blocks'];
-    return types.map(t => {
-      const typeEntries = settled.filter(e => e.prop_type === t);
-      const typeHits    = typeEntries.filter(e => e.result === 'hit');
-      return { label: propTypeLabels[t] || t, hit: typeHits.length, total: typeEntries.length };
-    }).filter(t => t.total > 0);
+    const typeCounts = {};
+    settled.forEach(e => {
+      if (!e.prop_type) return;
+      if (!typeCounts[e.prop_type]) typeCounts[e.prop_type] = { hit: 0, total: 0 };
+      typeCounts[e.prop_type].total += 1;
+      if (e.result === 'hit') typeCounts[e.prop_type].hit += 1;
+    });
+    return Object.entries(typeCounts)
+      .map(([t, { hit, total }]) => ({ label: propTypeLabels[t] || t.replace(/_/g, ' '), hit, total }))
+      .filter(t => t.total >= 2)
+      .sort((a, b) => b.total - a.total);
   }, [settled]);
 
   const visible = filter === 'all' ? entries : entries.filter(e => e.result === filter);
@@ -259,7 +264,7 @@ export default function PropHistory() {
       </div>
 
       {/* Model Accuracy Dashboard */}
-      {settled.length >= 3 && (
+      {settled.length >= 5 && (
         <div className="bg-white/3 border border-white/6 rounded-2xl overflow-hidden">
           <button
             onClick={() => setShowAccuracy(a => !a)}
@@ -340,7 +345,7 @@ export default function PropHistory() {
         <div className="rounded-2xl border border-dashed border-white/10 p-14 text-center text-muted-foreground">
           <ClipboardList className="w-12 h-12 mx-auto mb-3 opacity-20" />
           <p className="text-sm font-medium">No tracked props yet</p>
-          <p className="text-xs mt-1 opacity-60">Click "Track" on any prop card to start logging grades vs results</p>
+          <p className="text-xs mt-1 opacity-60">Bookmark any prop from the Props page to start logging grades vs results</p>
         </div>
       ) : visible.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-white/10 p-10 text-center text-muted-foreground">

@@ -10,7 +10,8 @@ import TeamLogo from '@/components/common/TeamLogo';
 import { calcEVVerdict, TIER_CONFIG } from '@/lib/verdict';
 import PlayerRow from '@/components/props/PlayerRow';
 import { cn } from '@/lib/utils';
-import { rankScore, gradeProp } from '@/lib/grading';
+import { rankScore, gradeProp, toLetterGrade } from '@/lib/grading';
+import { formatMarket } from '@/lib/propLabels';
 import { NFL_API } from '@/lib/config';
 import { TEAM_STATS } from '@/lib/teamStats';
 import PropDetailModal from '@/components/props/PropDetailModal';
@@ -54,31 +55,6 @@ async function fetchBulkGameLogs(playerProps) {
   finally { clearTimeout(timer); }
 }
 
-const propTypeLabels = {
-  // Full-game
-  passing_yards: 'Pass Yds', passing_tds: 'Pass TDs', completions: 'Comp',
-  rushing_yards: 'Rush Yds', rushing_tds: 'Rush TDs', rushing_attempts: 'Rush Att',
-  receiving_yards: 'Rec Yds', receiving_tds: 'Rec TDs', receptions: 'Rec',
-  fantasy_points: 'Fantasy Pts', sacks: 'Sacks', tackles: 'Tackles',
-  kicking_points: 'Kick Pts', interceptions: 'INTs',
-  passing_ints: 'INTs Thrown',
-  rush_rec_tds: 'Rush+Rec TDs',
-  rush_rec_yards: 'Rush+Rec Yds',
-  pass_rush_yards: 'Pass+Rush Yds',
-  q1_receptions: '1Q Rec', q1_rush_rec_tds: '1Q Rush+Rec TDs',
-  h1_receptions: '1H Rec', h1_rush_rec_tds: '1H Rush+Rec TDs',
-  passing_long: 'Long Comp',
-  rushing_long: 'Long Rush',
-  // 1st quarter
-  q1_passing_yards: '1Q Pass Yds', q1_rushing_yards: '1Q Rush Yds', q1_receiving_yards: '1Q Rec Yds',
-  // 1st half
-  h1_passing_yards: '1H Pass Yds', h1_rushing_yards: '1H Rush Yds', h1_receiving_yards: '1H Rec Yds',
-  // Season-long futures / best-ball markets
-  season_passing_yards: 'Pass Yds (Season)', season_passing_tds: 'Pass TDs (Season)',
-  season_rushing_yards: 'Rush Yds (Season)', season_rushing_tds: 'Rush TDs (Season)',
-  season_receiving_yards: 'Rec Yds (Season)', season_receiving_tds: 'Rec TDs (Season)',
-  season_receptions: 'Rec (Season)', season_sacks: 'Sacks (Season)',
-};
 
 // PROP_TYPES is now derived dynamically from loaded props — see propTypeOptions useMemo below.
 const SORT_OPTIONS = [
@@ -97,26 +73,11 @@ const PROP_GROUPS = [
   { key: '1h', label: '1H', types: ['h1_passing_yards','h1_rushing_yards','h1_receiving_yards','h1_receptions','h1_rush_rec_tds'] },
 ];
 
-function toLetterGrade(confidence, completeness) {
-  const eff = completeness < 40 ? Math.min(confidence, 60)
-    : completeness < 65 ? Math.min(confidence, 80)
-    : confidence;
-  if (eff >= 88) return 'A+';
-  if (eff >= 83) return 'A';
-  if (eff >= 78) return 'A-';
-  if (eff >= 74) return 'B+';
-  if (eff >= 70) return 'B';
-  if (eff >= 65) return 'B-';
-  if (eff >= 61) return 'C+';
-  if (eff >= 57) return 'C';
-  return 'C-';
-}
-
-function strengthDotClass(completeness) {
-  if (completeness == null || completeness < 20) return 'bg-white/20';
-  if (completeness < 50) return 'bg-rose-500';
-  if (completeness < 80) return 'bg-amber-500';
-  return 'bg-emerald-500';
+function dataStrengthLabel(completeness) {
+  if (completeness == null || completeness < 20) return { label: 'None', cls: 'text-white/25' };
+  if (completeness < 50) return { label: 'Low', cls: 'text-rose-400/70' };
+  if (completeness < 80) return { label: 'Mid', cls: 'text-amber-400/70' };
+  return { label: 'High', cls: 'text-emerald-400/70' };
 }
 
 function letterGradeStyle(letter) {
@@ -755,7 +716,7 @@ export default function Props() {
       .map(p => {
         const underMatch = (p.streak_info || '').match(/^(\d+) game under streak/i);
         const coldStreakLen = underMatch ? parseInt(underMatch[1], 10) : 0;
-        const label = (propTypeLabels[p.prop_type] || p.prop_type).toUpperCase();
+        const label = formatMarket(p.prop_type).toUpperCase();
         const boomLine = Math.round(p.season_avg * 2) / 2;
         const gap = +(p.season_avg - p.line).toFixed(1);
 
@@ -1349,7 +1310,7 @@ export default function Props() {
                       : "bg-secondary/60 border-border text-muted-foreground hover:text-foreground"
                   )}
                 >
-                  {propTypeLabels[t] || t}
+                  {formatMarket(t)}
                 </button>
               ))}
             </div>
@@ -1501,11 +1462,19 @@ export default function Props() {
           {/* Ranked props list — collapsed by player */}
           <div>
             <div className="flex items-center gap-2 mb-3 flex-wrap">
-              <p className="text-xs text-muted-foreground flex-1 min-w-0">
-                {playerGroups.length} players · {filteredAndRanked.length} props · ranked by {SORT_OPTIONS.find(o => o.value === sortBy)?.label}
+              <p className="text-xs text-muted-foreground flex-1 min-w-0 flex items-center gap-1 flex-wrap">
+                <span>{playerGroups.length} players · {filteredAndRanked.length} props · ranked by {SORT_OPTIONS.find(o => o.value === sortBy)?.label}</span>
+                {sortBy === 'ai_rank' && (
+                  <span
+                    className="inline-flex items-center"
+                    title="AI Rank = data quality tier (full > context > market) + model confidence score. Full historical data ranks above market-only props regardless of confidence."
+                  >
+                    <Info className="w-3 h-3 text-muted-foreground/30 hover:text-muted-foreground/60 transition-colors cursor-help" />
+                  </span>
+                )}
                 {lastFetchedAt && (() => {
                   const mins = Math.round((Date.now() - lastFetchedAt.getTime()) / 60000);
-                  return <span className="text-muted-foreground/40 ml-1">· odds {mins <= 0 ? 'just updated' : `updated ${mins}m ago`}</span>;
+                  return <span className="text-muted-foreground/40">· odds {mins <= 0 ? 'just updated' : `updated ${mins}m ago`}</span>;
                 })()}
               </p>
               {/* View toggle */}
@@ -1535,7 +1504,7 @@ export default function Props() {
                     onClick={() => toggleType(t)}
                     className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-primary/12 border border-primary/25 text-primary hover:bg-primary/20 transition-colors"
                   >
-                    {propTypeLabels[t] || t} <X className="w-2.5 h-2.5" />
+                    {formatMarket(t)} <X className="w-2.5 h-2.5" />
                   </button>
                 ))}
                 {selectedPositions.map(pos => (
@@ -1633,8 +1602,8 @@ export default function Props() {
                         const prob = isOver ? g.overProb : g.underProb;
                         const lg = toLetterGrade(g.confidence, g.completeness);
                         const lgCls = letterGradeStyle(lg);
-                        const dotCls = strengthDotClass(g.completeness);
-                        const propLabel = propTypeLabels[prop.prop_type] || prop.prop_type;
+                        const dataStr = dataStrengthLabel(g.completeness);
+                        const propLabel = formatMarket(prop.prop_type);
                         return (
                           <tr
                             key={`${prop.player_name}-${prop.prop_type}`}
@@ -1691,10 +1660,9 @@ export default function Props() {
                               )}
                             </td>
                             <td className="px-3 py-2.5">
-                              <div className="flex items-center gap-1.5" title={`${g.completeness}% data completeness`}>
-                                <div className={cn('w-2 h-2 rounded-full flex-shrink-0', dotCls)} />
-                                <span className="text-[10px] text-muted-foreground/40">{g.completeness}%</span>
-                              </div>
+                              <span className={cn('text-[10px] font-semibold', dataStr.cls)} title={`${g.completeness}% data completeness`}>
+                                {dataStr.label}
+                              </span>
                             </td>
                             <td className="px-3 py-2.5 pr-4" onClick={e => e.stopPropagation()}>
                               <div className="flex items-center gap-1">

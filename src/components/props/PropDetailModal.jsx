@@ -1,46 +1,18 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { X, Check, Clock, Zap, Home, Plane, ChevronUp, ChevronDown, RotateCcw, Info } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { gradeProp, calcConsistency } from '@/lib/grading';
+import { gradeProp, calcConsistency, toLetterGrade } from '@/lib/grading';
+import { formatMarket } from '@/lib/propLabels';
 import { TEAM_STATS } from '@/lib/teamStats';
 import TeamLogo from '@/components/common/TeamLogo';
 import VerdictBadge from '@/components/props/VerdictBadge';
 import PlayerTrendChart from '@/components/trends/PlayerTrendChart';
 import { useParlay } from '@/lib/ParlayContext';
 
-const propTypeLabels = {
-  passing_yards: 'Pass Yds', passing_tds: 'Pass TDs', completions: 'Comp',
-  rushing_yards: 'Rush Yds', rushing_tds: 'Rush TDs', rushing_attempts: 'Rush Att',
-  receiving_yards: 'Rec Yds', receiving_tds: 'Rec TDs', receptions: 'Rec',
-  fantasy_points: 'Fantasy Pts', kicking_points: 'Kick Pts',
-  tackles: 'Tackles', sacks: 'Sacks', passing_ints: 'INTs Thrown',
-  rush_rec_tds: 'Rush+Rec TDs', rush_rec_yards: 'Rush+Rec Yds',
-  pass_rush_yards: 'Pass+Rush Yds', passing_long: 'Long Comp', rushing_long: 'Long Rush',
-  q1_rush_rec_tds: '1Q R+R TDs', q1_receptions: '1Q Rec',
-  h1_rush_rec_tds: '1H R+R TDs', h1_receptions: '1H Rec',
-  q1_passing_yards: '1Q Pass Yds', q1_rushing_yards: '1Q Rush Yds', q1_receiving_yards: '1Q Rec Yds',
-  h1_passing_yards: '1H Pass Yds', h1_rushing_yards: '1H Rush Yds', h1_receiving_yards: '1H Rec Yds',
-};
 
 function fmtOdds(n) {
   if (n == null) return '—';
   return n > 0 ? `+${n}` : `${n}`;
-}
-
-// Completeness cap: < 40% → max C+ (60), < 65% → max B (80)
-function toLetterGrade(confidence, completeness) {
-  const eff = completeness < 40 ? Math.min(confidence, 60)
-    : completeness < 65 ? Math.min(confidence, 80)
-    : confidence;
-  if (eff >= 88) return 'A+';
-  if (eff >= 83) return 'A';
-  if (eff >= 78) return 'A-';
-  if (eff >= 74) return 'B+';
-  if (eff >= 70) return 'B';
-  if (eff >= 65) return 'B-';
-  if (eff >= 61) return 'C+';
-  if (eff >= 57) return 'C';
-  return 'C-';
 }
 
 /** Convert American odds → implied probability (includes vig) */
@@ -322,7 +294,7 @@ export default function PropDetailModal({ prop, onClose }) {
             <div>
               <p className="font-bold text-foreground leading-tight">{prop.player_name}</p>
               <p className="text-xs text-muted-foreground">
-                {prop.team} vs {prop.opponent} · {prop.position} · {propTypeLabels[prop.prop_type] || prop.prop_type.replace(/_/g, ' ')}
+                {prop.team} vs {prop.opponent} · {prop.position} · {formatMarket(prop.prop_type)}
               </p>
             </div>
           </div>
@@ -659,13 +631,14 @@ export default function PropDetailModal({ prop, onClose }) {
               // allDetailLogs: most-recent-first from backend (index 0 = most recent)
               const allDetailLogs = prop.game_logs_last_20 || prop.game_logs_last_10 || [];
 
-              // Home/away detection — checks matchup string then falls back to isHome field
+              // Home/away detection — isHome null means unknown (backend had no home_team data)
               const isHomeGame = (g) => {
                 const m = (g.matchup || '').trim().toLowerCase();
                 if (m.startsWith('vs.') || m.includes(' vs. ')) return true;
                 if (m.startsWith('@') || m.includes(' @ ')) return false;
-                return g.isHome ?? true;
+                return g.isHome ?? null;
               };
+              const homeAwayUnknown = allDetailLogs.some(g => isHomeGame(g) === null);
 
               // NFL week helper for table/header labels
               const getWeekLabel = (g) => {
@@ -687,11 +660,11 @@ export default function PropDetailModal({ prop, onClose }) {
                 ? allDetailLogs
                 : allDetailLogs.slice(0, 10);
 
-              // Step 2: apply location filter
+              // Step 2: apply location filter (null isHome = unknown, excluded from Home/Away splits)
               const locationFiltered = locationFilter === 'home'
-                ? windowLogs.filter(g => isHomeGame(g))
+                ? windowLogs.filter(g => isHomeGame(g) === true)
                 : locationFilter === 'away'
-                ? windowLogs.filter(g => !isHomeGame(g))
+                ? windowLogs.filter(g => isHomeGame(g) === false)
                 : windowLogs;
 
               // Step 3: apply opponent filter (vs this opp only)
@@ -836,12 +809,17 @@ export default function PropDetailModal({ prop, onClose }) {
                   )}
 
                   {/* Game log table — newest at top */}
+                  {homeAwayUnknown && (
+                    <p className="text-[9px] text-muted-foreground/35 italic mt-2">
+                      Home/away unknown for some games — 2025 logs may reflect a different team or role.
+                    </p>
+                  )}
                   {activeDetail.length > 0 && (
                     <div className="mt-3 bg-secondary/30 rounded-xl overflow-hidden border border-border/40">
                       <div className="grid grid-cols-4 text-[9px] text-muted-foreground uppercase px-4 py-2 border-b border-border/40 bg-secondary/40">
                         <span>Wk</span>
                         <span>Matchup</span>
-                        <span className="text-center">{propTypeLabels[prop.prop_type] || prop.prop_type.replace(/_/g, ' ')}</span>
+                        <span className="text-center">{formatMarket(prop.prop_type)}</span>
                         <span className="text-right">Result</span>
                       </div>
                       {tableDetail.map((g, i) => {
@@ -853,7 +831,7 @@ export default function PropDetailModal({ prop, onClose }) {
                           <div key={i} className={cn('grid grid-cols-4 text-xs px-4 py-2.5 items-center', i % 2 === 1 ? 'bg-secondary/20' : '')}>
                             <span className="text-muted-foreground text-[10px]">{getWeekLabel(g)}</span>
                             <span className="text-foreground text-[10px] flex items-center gap-1">
-                              {isHomeGame(g) ? 'vs' : '@'} {g.opp}
+                              {isHomeGame(g) === null ? '' : isHomeGame(g) ? 'vs ' : '@ '}{g.opp}
                               {defRank != null && (
                                 <span className={cn('text-[8px] font-bold px-1 py-0.5 rounded leading-none',
                                   isEasyDef ? 'text-emerald-400/80 bg-emerald-500/10' :

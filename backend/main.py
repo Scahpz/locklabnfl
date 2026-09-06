@@ -215,9 +215,10 @@ def _player_analytics(name: str, prop_type: str, line, df) -> dict | None:
         team      = str(row.get("team", "") or "")
         home_team = str(row.get("home_team", "") or "")
         opp       = str(row.get("opponent_team", "") or "")
-        is_home   = (team == home_team) if home_team else True
+        is_home   = (team == home_team) if home_team else None
         logs.append({
             "value":  float(row["_val"]),
+            "team":   team,
             "opp":    opp,
             "date":   f"{int(row['season'])}-W{int(row['week'])}",
             "isHome": is_home,

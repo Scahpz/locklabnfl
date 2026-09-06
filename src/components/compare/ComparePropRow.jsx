@@ -2,11 +2,7 @@ import React, { useState } from 'react';
 import { TrendingUp, ChevronDown, ChevronUp, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { LineChart, Line, ReferenceLine, ResponsiveContainer, Tooltip } from 'recharts';
-
-const propLabels = {
-  points: 'PTS', rebounds: 'REB', assists: 'AST', PRA: 'PRA', '3PM': '3PM',
-  steals: 'STL', blocks: 'BLK', turnovers: 'TO',
-};
+import { formatMarket } from '@/lib/propLabels';
 
 const COLORS = ['hsl(142 71% 45%)', 'hsl(263 70% 58%)', 'hsl(199 89% 48%)'];
 
@@ -129,7 +125,7 @@ export default function ComparePropRow({ propType, players }) {
       >
         <div className="flex items-center gap-2">
           <span className="text-xs font-bold text-foreground uppercase tracking-wider">
-            {propLabels[propType] || propType}
+            {formatMarket(propType)}
           </span>
           {winnerIdx >= 0 && (
             <span className="text-[10px] text-primary font-medium flex items-center gap-1">

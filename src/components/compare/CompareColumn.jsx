@@ -1,5 +1,5 @@
 import React from 'react';
-import { Clock, Activity, Gauge, Target } from 'lucide-react';
+import { Zap, Crosshair, Activity, Target } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const matchupColors = {
@@ -13,11 +13,25 @@ const matchupColors = {
 export default function CompareColumn({ player }) {
   const firstProp = player.props[0];
 
+  // Derive target/carry share from any prop on this player
+  const shareVal = (() => {
+    const p = player.props.find(pr => pr.target_share != null || pr.snap_pct != null);
+    if (!p) return '—';
+    if (p.target_share != null) return `${Math.round(p.target_share * 100)}%`;
+    if (p.snap_pct != null) return `${Math.round(p.snap_pct * 100)}%`;
+    return '—';
+  })();
+
+  const snapVal = (() => {
+    const p = player.props.find(pr => pr.snap_pct != null);
+    return p ? `${Math.round(p.snap_pct * 100)}%` : '—';
+  })();
+
   const stats = [
-    { icon: Clock, label: 'Min/G', value: firstProp?.minutes_avg ?? '—', color: 'text-chart-3' },
-    { icon: Activity, label: 'Usage', value: firstProp?.usage_rate ? `${firstProp.usage_rate}%` : '—', color: 'text-accent' },
-    { icon: Gauge, label: 'Pace', value: firstProp?.pace_rating ?? '—', color: 'text-chart-4' },
-    { icon: Target, label: 'O/U', value: firstProp?.game_total ?? '—', color: 'text-primary' },
+    { icon: Zap,       label: 'Snap %',      value: snapVal,                                               color: 'text-chart-3' },
+    { icon: Crosshair, label: 'Tgt/Carry %', value: shareVal,                                              color: 'text-accent'  },
+    { icon: Activity,  label: 'Snap Trend',  value: firstProp?.snap_trend ?? '—',                          color: 'text-chart-4' },
+    { icon: Target,    label: 'Implied Tot', value: firstProp?.game_total != null ? firstProp.game_total : (firstProp?.over_odds != null ? '—' : '—'), color: 'text-primary' },
   ];
 
   const matchupKey = firstProp?.matchup_rating || 'neutral';
