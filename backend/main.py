@@ -39,12 +39,19 @@ async def get_settings():
 @app.get("/health")
 async def health():
     import datetime
+    actual_seasons = []
+    row_count = 0
+    if _weekly_df is not None and "season" in _weekly_df.columns:
+        actual_seasons = sorted([int(s) for s in _weekly_df["season"].unique()])
+        row_count = len(_weekly_df)
     return {
         "status": "ok",
         "sport": "nfl",
         "data_loaded": _data_loaded,
         "data_loading": _data_loading,
-        "loaded_seasons": _loaded_seasons,
+        "loaded_seasons": _loaded_seasons,       # what we requested
+        "actual_seasons_in_df": actual_seasons,  # what nfl_data_py actually returned
+        "row_count": row_count,
         "current_year": datetime.datetime.now().year,
     }
 
@@ -149,14 +156,29 @@ def _load_nfl_data():
             return
 
         seasons = sorted(seasons)
-        print(f"[nfl_data_py] Loading seasons {seasons}")
+        print(f"[nfl_data_py] Requesting seasons from nfl_data_py: {seasons}")
         df = nfl.import_weekly_data(seasons)
 
         # Keep regular season only (handle both "REG" and "Regular Season" formats)
         if "season_type" in df.columns:
             df = df[df["season_type"].str.upper().str.startswith("REG")]
 
-        _loaded_seasons = seasons
+        # Explicit guard: strip any rows from years we didn't ask for.
+        # If nfl_data_py returned 2024 rows when we asked for 2025, this removes them.
+        if "season" in df.columns:
+            before = len(df)
+            df = df[df["season"].isin(seasons)]
+            after = len(df)
+            actual = sorted([int(s) for s in df["season"].unique()]) if after > 0 else []
+            print(f"[nfl_data_py] After season filter: {before}→{after} rows, actual seasons={actual}")
+            if not actual:
+                print("[nfl_data_py] ERROR: data is empty after filtering — nfl_data_py returned wrong seasons; trying Sleeper fallback")
+                _load_sleeper_fallback()
+                return
+            # Record what we actually have, not just what we requested
+            _loaded_seasons = actual
+        else:
+            _loaded_seasons = seasons
 
         # Normalise 'recent_team' → 'team' when needed
         if "recent_team" in df.columns and "team" not in df.columns:
@@ -201,11 +223,126 @@ def _load_nfl_data():
             print(f"[nfl_data_py] Snap counts failed: {snap_err}")
 
         _data_loaded = True
-        print(f"[nfl_data_py] Ready — {len(df):,} player-weeks across seasons {seasons}")
+        print(f"[nfl_data_py] Ready — {len(df):,} player-weeks across seasons {_loaded_seasons}")
     except Exception as exc:
         print(f"[nfl_data_py] Load error: {exc}")
+        # Attempt Sleeper API fallback so 2025 data is always available
+        _load_sleeper_fallback()
     finally:
         _data_loading = False
+
+
+def _load_sleeper_fallback():
+    """
+    Fetch 2025 NFL regular-season player stats from the Sleeper API.
+    Used when nfl_data_py cannot provide 2025 data (old library version, network
+    issue, or data not yet published).  The frontend already uses Sleeper for the
+    fantasy/start-sit section, so this source is confirmed to have 2025 data.
+    """
+    global _weekly_df, _data_loaded, _loaded_seasons
+    import urllib.request
+    import json
+    import pandas as pd
+
+    print("[sleeper] nfl_data_py unavailable — falling back to Sleeper stats API for 2025")
+
+    # ── 1. Player roster (name, team, position) ──────────────────────────────
+    try:
+        with urllib.request.urlopen(
+            "https://api.sleeper.app/v1/players/nfl", timeout=30
+        ) as resp:
+            players: dict = json.loads(resp.read())
+    except Exception as e:
+        print(f"[sleeper] Failed to fetch player list: {e}")
+        return
+
+    player_info: dict[str, dict] = {}
+    for pid, p in players.items():
+        if p.get("active") and p.get("full_name") and p.get("position") in (
+            "QB", "RB", "WR", "TE", "FB", "K", "DEF"
+        ):
+            player_info[pid] = {
+                "name":     p["full_name"],
+                "team":     p.get("team") or "",
+                "position": p.get("position") or "",
+            }
+
+    # ── 2. Weekly stats for all 18 weeks of the 2025 regular season ──────────
+    rows: list[dict] = []
+    for week in range(1, 19):
+        url = f"https://api.sleeper.app/v1/stats/nfl/regular/2025/{week}"
+        try:
+            with urllib.request.urlopen(url, timeout=30) as resp:
+                week_stats: dict = json.loads(resp.read())
+        except Exception as e:
+            print(f"[sleeper] Week {week} failed: {e}")
+            continue
+
+        if not week_stats:
+            continue
+
+        fetched = 0
+        for pid, stats in week_stats.items():
+            if pid not in player_info or not stats:
+                continue
+            info = player_info[pid]
+
+            def s(key, default=0.0):
+                v = stats.get(key)
+                try:
+                    return float(v) if v is not None else default
+                except (TypeError, ValueError):
+                    return default
+
+            rows.append({
+                "season":               2025,
+                "week":                 week,
+                "season_type":          "REG",
+                "player_display_name":  info["name"],
+                "team":                 info["team"],
+                "position":             info["position"],
+                "opponent_team":        stats.get("opp") or "",
+                "home_team":            stats.get("home_team") or "",
+                "passing_yards":        s("pass_yd"),
+                "passing_tds":          s("pass_td"),
+                "completions":          s("pass_cmp"),
+                "attempts":             s("pass_att"),
+                "interceptions":        s("pass_int"),
+                "rushing_yards":        s("rush_yd"),
+                "rushing_tds":          s("rush_td"),
+                "carries":              s("rush_att"),
+                "receiving_yards":      s("rec_yd"),
+                "receiving_tds":        s("rec_td"),
+                "receptions":           s("rec"),
+                "targets":              s("rec_tgt"),
+                "target_share":         stats.get("tgt_sh"),
+                "air_yards_share":      stats.get("ay_sh"),
+                "fantasy_points_ppr":   s("pts_ppr"),
+                "sacks":                s("sack"),
+                "tackles_combined":     s("tkl_solo") + s("tkl_ast"),
+            })
+            fetched += 1
+
+        print(f"[sleeper] 2025 Week {week}: {fetched} player rows")
+
+    if not rows:
+        print("[sleeper] No data collected — both nfl_data_py and Sleeper unavailable")
+        return
+
+    df = pd.DataFrame(rows)
+
+    # Combo columns to match nfl_data_py schema
+    df["rush_rec_yards"]  = df["rushing_yards"].fillna(0) + df["receiving_yards"].fillna(0)
+    df["rush_rec_tds"]    = df["rushing_tds"].fillna(0)   + df["receiving_tds"].fillna(0)
+    df["pass_rush_yards"] = df["passing_yards"].fillna(0) + df["rushing_yards"].fillna(0)
+
+    # Normalised name for fuzzy matching
+    df["_norm_name"] = df["player_display_name"].fillna("").apply(_norm)
+
+    _weekly_df      = df
+    _loaded_seasons = [2025]
+    _data_loaded    = True
+    print(f"[sleeper] Ready — {len(df):,} player-weeks for 2025 season")
 
 
 @app.on_event("startup")
