@@ -642,7 +642,7 @@ export default function PropDetailModal({ prop, onClose }) {
 
               // NFL week helper for table/header labels
               const getWeekLabel = (g) => {
-                if (g?.week) return `'25 W${g.week}`;
+                if (g?.week) return `'${(g.season ?? 2025).toString().slice(-2)} W${g.week}`;
                 if (g?.date) {
                   try {
                     const d = new Date(g.date);
@@ -690,13 +690,14 @@ export default function PropDetailModal({ prop, onClose }) {
 
               const hasL20 = allDetailLogs.length > 10;
 
-              // Season header — derive week range from windowLogs
+              // Season header — derive week range and year from actual log data
               const weeks = windowLogs.map(g => g.week).filter(Boolean);
               const minWk = weeks.length ? Math.min(...weeks) : null;
               const maxWk = weeks.length ? Math.max(...weeks) : null;
+              const logSeason = allDetailLogs.find(g => g.season)?.season ?? 2025;
               const seasonLabel = minWk && maxWk
-                ? `2025 Regular Season · Weeks ${minWk}–${maxWk}`
-                : '2025 Regular Season';
+                ? `${logSeason} Regular Season · Weeks ${minWk}–${maxWk}`
+                : `${logSeason} Regular Season`;
 
               const tabHR = activeDetail.length > 0
                 ? Math.round(activeDetail.filter(g => g.value > adjustedLine).length / activeDetail.length * 100)
@@ -811,7 +812,7 @@ export default function PropDetailModal({ prop, onClose }) {
                   {/* Game log table — newest at top */}
                   {homeAwayUnknown && (
                     <p className="text-[9px] text-muted-foreground/35 italic mt-2">
-                      Home/away unknown for some games — 2025 logs may reflect a different team or role.
+                      Home/away unknown for some games — logs may reflect a different team or role.
                     </p>
                   )}
                   {activeDetail.length > 0 && (

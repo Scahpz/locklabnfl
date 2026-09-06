@@ -13,9 +13,14 @@ import { TEAM_STATS, NFL_LEAGUE_AVGS } from '@/lib/teamStats';
 import TeamLogo from '@/components/common/TeamLogo';
 import { cn } from '@/lib/utils';
 
-// ─── Season history (2025 regular season) ─────────────────────────────────────
+// ─── Season history (dynamic — current NFL season) ────────────────────────────
 
-const HIST_CACHE_KEY = 'locklab_nfl_hist_2025';
+// NFL season year = current calendar year if Sept+, else previous year
+const _now = new Date();
+const NFL_SEASON_YEAR = _now.getMonth() >= 8 ? _now.getFullYear() : _now.getFullYear() - 1;
+const HIST_CACHE_KEY = `locklab_nfl_hist_${NFL_SEASON_YEAR}`;
+const _dateStart = `${NFL_SEASON_YEAR}0901`;
+const _dateEnd   = `${NFL_SEASON_YEAR + 1}0115`;
 
 async function fetchSeasonHistory() {
   try {
@@ -25,7 +30,7 @@ async function fetchSeasonHistory() {
   try {
     const res = await fetch(
       'https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard' +
-      '?dates=20250901-20260115&limit=300&seasontype=2'
+      `?dates=${_dateStart}-${_dateEnd}&limit=300&seasontype=2`
     );
     if (!res.ok) return null;
     const data = await res.json();
@@ -440,7 +445,7 @@ export default function GameBreakdownModal({ game, onClose, liveStats = null }) 
                       </div>
                     </div>
                   )}
-                  <p className="text-[9px] text-muted-foreground">Source: ESPN · 2025 NFL regular season · H2H = direct matchups only</p>
+                  <p className="text-[9px] text-muted-foreground">Source: ESPN · {NFL_SEASON_YEAR} NFL regular season · H2H = direct matchups only</p>
                 </div>
               </SectionToggle>
             )}

@@ -87,38 +87,58 @@ def _load_nfl_data():
         import nfl_data_py as nfl  # type: ignore
         import pandas as pd
 
-        # Discover which seasons actually have regular-season data (try last 3 years).
-        # The current year may only have preseason data if the season hasn't started —
-        # we include it only if it has actual REG rows.
+        # Discover which seasons have regular-season data.
+        # Always target 2025 (the most recently completed full NFL season) + 2024 as supplement.
+        # Fall back to dynamic detection if 2025 isn't available yet.
         import datetime
         current_year = datetime.datetime.now().year
-        available = []
-        for yr in [current_year - 2, current_year - 1, current_year]:
+
+        def has_reg_data(yr):
+            """Return True if nfl_data_py has regular-season rows for this year."""
             try:
                 tmp = nfl.import_weekly_data([yr])
                 if tmp is None or len(tmp) == 0:
-                    continue
-                # Only count a year if it has at least one regular-season row
+                    print(f"[nfl_data_py] {yr}: no data returned")
+                    return False
                 if "season_type" in tmp.columns:
-                    if len(tmp[tmp["season_type"] == "REG"]) > 0:
-                        available.append(yr)
+                    # Accept "REG", "Regular Season", or any case variant
+                    reg = tmp[tmp["season_type"].str.upper().str.startswith("REG")]
+                    has = len(reg) > 0
+                    print(f"[nfl_data_py] {yr}: {len(reg)} REG rows (season_type column present)")
+                    return has
                 else:
+                    # Older schema without season_type — trust the data
+                    print(f"[nfl_data_py] {yr}: {len(tmp)} rows (no season_type column)")
+                    return len(tmp) > 0
+            except Exception as e:
+                print(f"[nfl_data_py] {yr}: failed to load — {e}")
+                return False
+
+        # Explicit priority: 2025 season is what current props are graded against.
+        # Include 2024 for players who changed teams or have limited 2025 games.
+        preferred = [2025, 2024]
+        available = [yr for yr in preferred if has_reg_data(yr)]
+
+        # If neither preferred year has data, fall back to recent detection
+        if not available:
+            print("[nfl_data_py] Preferred seasons unavailable — falling back to dynamic detection")
+            for yr in range(current_year, current_year - 3, -1):
+                if has_reg_data(yr):
                     available.append(yr)
-            except Exception:
-                pass
+                if len(available) >= 2:
+                    break
 
         if not available:
             print("[nfl_data_py] No regular-season data found — giving up")
             return
 
-        # Use the two most recent seasons with real data (crosses season boundary cleanly)
-        seasons = sorted(available)[-2:]
+        seasons = sorted(available)
         print(f"[nfl_data_py] Loading seasons {seasons}")
         df = nfl.import_weekly_data(seasons)
 
-        # Keep regular season only
+        # Keep regular season only (handle both "REG" and "Regular Season" formats)
         if "season_type" in df.columns:
-            df = df[df["season_type"] == "REG"]
+            df = df[df["season_type"].str.upper().str.startswith("REG")]
 
         _loaded_seasons = seasons
 

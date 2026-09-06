@@ -444,7 +444,7 @@ function SeasonStatsSection({ lsLog, onRetryLS, pos, score, opponent = '—' }) 
         /* ── no games ── */
         <div className="rounded-xl bg-white/3 border border-white/8 px-4 py-6 text-center">
           <Calendar className="w-6 h-6 text-muted-foreground/40 mx-auto mb-2" />
-          <p className="text-[11px] text-muted-foreground">No 2025 regular season games found.</p>
+          <p className="text-[11px] text-muted-foreground">No {new Date().getMonth() >= 8 ? new Date().getFullYear() : new Date().getFullYear() - 1} regular season games found.</p>
           <p className="text-[10px] text-muted-foreground/60 mt-1">
             Player may have been injured, on a practice squad, or inactive most of the year.
           </p>
@@ -523,7 +523,7 @@ function SeasonStatsSection({ lsLog, onRetryLS, pos, score, opponent = '—' }) 
           </ResponsiveContainer>
 
           <p className="text-[10px] text-muted-foreground">
-            Real 2025 half-PPR stats · Source: Sleeper · Def rank = current season · Hover for game details
+            Real {new Date().getMonth() >= 8 ? new Date().getFullYear() : new Date().getFullYear() - 1} half-PPR stats · Source: Sleeper · Def rank = current season · Hover for game details
           </p>
 
           {/* Avg stats line */}
