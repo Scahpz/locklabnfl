@@ -87,52 +87,68 @@ def _load_nfl_data():
         import nfl_data_py as nfl  # type: ignore
         import pandas as pd
 
-        # Discover which seasons have regular-season data.
-        # Always target 2025 (the most recently completed full NFL season) + 2024 as supplement.
-        # Fall back to dynamic detection if 2025 isn't available yet.
+        # Season selection rules:
+        #   1. 2025 is ALWAYS the primary source — the most recently completed full season.
+        #      Mixing in 2024 would contaminate L10/L5 with stale roster/scheme data.
+        #   2. Add the current season (2026+) only once it has ≥5 completed regular-season
+        #      weeks so that L5 can be entirely current-season and L10 is a meaningful blend.
+        #   3. 2024 and older are never loaded unless 2025 itself is unavailable.
         import datetime
         current_year = datetime.datetime.now().year
 
-        def has_reg_data(yr):
-            """Return True if nfl_data_py has regular-season rows for this year."""
+        def reg_weeks_for_year(yr):
+            """
+            Return the number of distinct completed regular-season weeks for `yr`,
+            or -1 if the data can't be loaded at all.
+            """
             try:
                 tmp = nfl.import_weekly_data([yr])
                 if tmp is None or len(tmp) == 0:
                     print(f"[nfl_data_py] {yr}: no data returned")
-                    return False
+                    return -1
                 if "season_type" in tmp.columns:
-                    # Accept "REG", "Regular Season", or any case variant
                     reg = tmp[tmp["season_type"].str.upper().str.startswith("REG")]
-                    has = len(reg) > 0
-                    print(f"[nfl_data_py] {yr}: {len(reg)} REG rows (season_type column present)")
-                    return has
+                    n = int(reg["week"].nunique()) if "week" in reg.columns else 0
+                    print(f"[nfl_data_py] {yr}: {len(reg)} REG rows, {n} distinct weeks")
+                    return n
                 else:
-                    # Older schema without season_type — trust the data
-                    print(f"[nfl_data_py] {yr}: {len(tmp)} rows (no season_type column)")
-                    return len(tmp) > 0
+                    n = int(tmp["week"].nunique()) if "week" in tmp.columns else len(tmp)
+                    print(f"[nfl_data_py] {yr}: {len(tmp)} rows (no season_type), {n} weeks")
+                    return n
             except Exception as e:
-                print(f"[nfl_data_py] {yr}: failed to load — {e}")
-                return False
+                print(f"[nfl_data_py] {yr}: load error — {e}")
+                return -1
 
-        # Explicit priority: 2025 season is what current props are graded against.
-        # Include 2024 for players who changed teams or have limited 2025 games.
-        preferred = [2025, 2024]
-        available = [yr for yr in preferred if has_reg_data(yr)]
+        seasons: list[int] = []
 
-        # If neither preferred year has data, fall back to recent detection
-        if not available:
-            print("[nfl_data_py] Preferred seasons unavailable — falling back to dynamic detection")
-            for yr in range(current_year, current_year - 3, -1):
-                if has_reg_data(yr):
-                    available.append(yr)
-                if len(available) >= 2:
+        # Step 1 — primary season (2025)
+        weeks_2025 = reg_weeks_for_year(2025)
+        if weeks_2025 > 0:
+            seasons.append(2025)
+        else:
+            # Emergency fallback: 2025 not yet in nfl_data_py
+            print("[nfl_data_py] WARNING: 2025 data unavailable — falling back to most recent available season")
+            for fallback_yr in [2024, 2023]:
+                if reg_weeks_for_year(fallback_yr) > 0:
+                    seasons.append(fallback_yr)
                     break
 
-        if not available:
+        # Step 2 — current season (only if it isn't 2025 and has enough weeks)
+        MIN_CURRENT_WEEKS = 5   # need ≥5 completed weeks for L5 to be fully current-season
+        if current_year > 2025:
+            weeks_curr = reg_weeks_for_year(current_year)
+            if weeks_curr >= MIN_CURRENT_WEEKS:
+                seasons.append(current_year)
+                print(f"[nfl_data_py] Including {current_year}: {weeks_curr} completed weeks")
+            else:
+                wk_str = str(weeks_curr) if weeks_curr >= 0 else "none"
+                print(f"[nfl_data_py] Skipping {current_year}: {wk_str} week(s) completed, need ≥{MIN_CURRENT_WEEKS}")
+
+        if not seasons:
             print("[nfl_data_py] No regular-season data found — giving up")
             return
 
-        seasons = sorted(available)
+        seasons = sorted(seasons)
         print(f"[nfl_data_py] Loading seasons {seasons}")
         df = nfl.import_weekly_data(seasons)
 
