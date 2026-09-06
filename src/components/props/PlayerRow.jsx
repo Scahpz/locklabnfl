@@ -334,7 +334,7 @@ export default function PlayerRow({ playerName, props, allPlayerProps, rank, tot
       {/* ── Expanded: grade checklist + analysis button (no duplicate header) ── */}
       {expanded && (
         <div className="border-t border-white/6 bg-black/10">
-          <PropGradeChecklist prop={activeProp} initialOpen={true} />
+          <PropGradeChecklist prop={gradedProp} initialOpen={true} />
           <div className="px-4 pb-4">
             <button
               onClick={(e) => { e.stopPropagation(); onOpenDetail(activeProp.player_name, activeProp.prop_type); }}

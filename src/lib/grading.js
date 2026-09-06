@@ -78,19 +78,27 @@ function impliedProbability(odds) {
 }
 
 function getDefStatKey(propType, position) {
-  if (propType === 'passing_yards' || propType === 'passing_tds' || propType === 'completions') return 'pass_yds_allowed';
-  if (propType === 'rushing_yards' || propType === 'rushing_tds') return 'rush_yds_allowed';
+  // TD props use TD-allowed per game, not yardage
+  if (propType === 'passing_tds') return 'pass_tds_allowed';
+  if (propType === 'rushing_tds') return 'rush_tds_allowed';
+  if (propType === 'receiving_tds' || propType === 'rush_rec_tds') return 'rec_tds_allowed';
+  // Yardage / volume props
+  if (propType === 'passing_yards' || propType === 'completions' || propType === 'pass_rush_yards') return 'pass_yds_allowed';
+  if (propType === 'rushing_yards' || propType === 'rushing_attempts') return 'rush_yds_allowed';
   if (position === 'TE') return 'rec_yds_allowed_te';
   if (position === 'RB') return 'rec_yds_allowed_rb';
   return 'rec_yds_allowed_wr';
 }
 
 function getDefStatLabel(propType, position) {
-  if (propType === 'passing_yards' || propType === 'passing_tds') return 'Pass Yds Allowed';
-  if (propType === 'rushing_yards' || propType === 'rushing_tds') return 'Rush Yds Allowed';
-  if (position === 'TE') return 'TE Rec Yds Allowed';
-  if (position === 'RB') return 'RB Rec Yds Allowed';
-  return 'WR Rec Yds Allowed';
+  if (propType === 'passing_tds') return 'Pass TDs Allowed/G';
+  if (propType === 'rushing_tds') return 'Rush TDs Allowed/G';
+  if (propType === 'receiving_tds' || propType === 'rush_rec_tds') return 'Rec TDs Allowed/G';
+  if (propType === 'passing_yards' || propType === 'completions') return 'Pass Yds/G';
+  if (propType === 'rushing_yards' || propType === 'rushing_attempts') return 'Rush Yds/G';
+  if (position === 'TE') return 'TE Rec Yds/G';
+  if (position === 'RB') return 'RB Rec Yds/G';
+  return 'WR Rec Yds/G';
 }
 
 export function gradeProp(prop) {
@@ -155,8 +163,8 @@ function gradeWithContext(prop) {
         : 'Opponent Defense — loading...',
       detail: oppDefStat != null
         ? defPctScore >= 0.58
-          ? `Allows ${oppDefStat} ${defStatLabel.toLowerCase()}/g (league avg ${leagueAvg}) — favorable matchup`
-          : `Holds to ${oppDefStat}/g (avg ${leagueAvg}) — tough matchup`
+          ? `Allows ${oppDefStat} ${defStatLabel} (league avg ${leagueAvg}) — favorable matchup`
+          : `Limits to ${oppDefStat} ${defStatLabel} (avg ${leagueAvg}) — tough matchup`
         : 'Fetching opponent defensive stats',
       pass:            oppDefStat != null && oppDefStat > leagueAvg,
       continuousScore: defPctScore,

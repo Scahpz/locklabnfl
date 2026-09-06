@@ -8,9 +8,17 @@ import PlayerTrendChart from '@/components/trends/PlayerTrendChart';
 import { useParlay } from '@/lib/ParlayContext';
 
 const propTypeLabels = {
-  points: 'PTS', rebounds: 'REB', assists: 'AST',
-  PRA: 'PRA', '3PM': '3PM', steals: 'STL', blocks: 'BLK',
-  'P+R': 'P+R', 'P+A': 'P+A', 'A+R': 'A+R',
+  passing_yards: 'Pass Yds', passing_tds: 'Pass TDs', completions: 'Comp',
+  rushing_yards: 'Rush Yds', rushing_tds: 'Rush TDs', rushing_attempts: 'Rush Att',
+  receiving_yards: 'Rec Yds', receiving_tds: 'Rec TDs', receptions: 'Rec',
+  fantasy_points: 'Fantasy Pts', kicking_points: 'Kick Pts',
+  tackles: 'Tackles', sacks: 'Sacks', passing_ints: 'INTs Thrown',
+  rush_rec_tds: 'Rush+Rec TDs', rush_rec_yards: 'Rush+Rec Yds',
+  pass_rush_yards: 'Pass+Rush Yds', passing_long: 'Long Comp', rushing_long: 'Long Rush',
+  q1_rush_rec_tds: '1Q R+R TDs', q1_receptions: '1Q Rec',
+  h1_rush_rec_tds: '1H R+R TDs', h1_receptions: '1H Rec',
+  q1_passing_yards: '1Q Pass Yds', q1_rushing_yards: '1Q Rush Yds', q1_receiving_yards: '1Q Rec Yds',
+  h1_passing_yards: '1H Pass Yds', h1_rushing_yards: '1H Rush Yds', h1_receiving_yards: '1H Rec Yds',
 };
 
 function fmtOdds(n) {
@@ -18,22 +26,21 @@ function fmtOdds(n) {
   return n > 0 ? `+${n}` : `${n}`;
 }
 
-function toLetterGrade(pass, available) {
-  if (available === 0) return '?';
-  const r = pass / available;
-  if (r >= 0.92) return 'A+';
-  if (r >= 0.83) return 'A';
-  if (r >= 0.75) return 'A-';
-  if (r >= 0.68) return 'B+';
-  if (r >= 0.60) return 'B';
-  if (r >= 0.55) return 'B-';
-  if (r >= 0.48) return 'C+';
-  if (r >= 0.42) return 'C';
-  if (r >= 0.35) return 'C-';
-  if (r >= 0.30) return 'D+';
-  if (r >= 0.25) return 'D';
-  if (r >= 0.20) return 'D-';
-  return 'F';
+// Same formula as PropGradeChecklist — uses confidence + completeness cap
+function toLetterGrade(confidence, completeness) {
+  const eff = completeness < 25 ? Math.min(confidence, 62)
+    : completeness < 45 ? Math.min(confidence, 70)
+    : completeness < 65 ? Math.min(confidence, 80)
+    : confidence;
+  if (eff >= 88) return 'A+';
+  if (eff >= 83) return 'A';
+  if (eff >= 78) return 'A-';
+  if (eff >= 74) return 'B+';
+  if (eff >= 70) return 'B';
+  if (eff >= 65) return 'B-';
+  if (eff >= 61) return 'C+';
+  if (eff >= 57) return 'C';
+  return 'C-';
 }
 
 /** Convert American odds → implied probability (includes vig) */
@@ -199,7 +206,7 @@ export default function PropDetailModal({ prop, onClose }) {
             <div>
               <p className="font-bold text-foreground leading-tight">{prop.player_name}</p>
               <p className="text-xs text-muted-foreground">
-                {prop.team} vs {prop.opponent} · {prop.position} · {propTypeLabels[prop.prop_type] || prop.prop_type}
+                {prop.team} vs {prop.opponent} · {prop.position} · {propTypeLabels[prop.prop_type] || prop.prop_type.replace(/_/g, ' ')}
               </p>
             </div>
           </div>
@@ -221,8 +228,7 @@ export default function PropDetailModal({ prop, onClose }) {
                   </span>
                   <span className="text-sm text-muted-foreground/50">{isOverFavorable ? 'OVER' : 'UNDER'}</span>
                   {(() => {
-                    const avail = grade.criteria.filter(c => c.available).length;
-                    const lg = toLetterGrade(grade.passCount, avail);
+                    const lg = toLetterGrade(grade.confidence, grade.completeness);
                     const lgStyle = lg[0] === 'A' ? 'bg-emerald-500/15 text-emerald-400'
                       : lg[0] === 'B' ? 'bg-primary/20 text-primary'
                       : 'bg-amber-500/15 text-amber-400';
@@ -413,20 +419,49 @@ export default function PropDetailModal({ prop, onClose }) {
                 good={dynamicHitRate != null && dynamicHitRate >= 60}
                 neutral={false}
               />
-              <StatBox
-                label="L5 Avg"
-                value={prop.avg_last_5 ?? null}
-                sub={prop.avg_last_5 != null ? `${prop.avg_last_5 > adjustedLine ? '+' : ''}${(prop.avg_last_5 - adjustedLine).toFixed(1)}` : null}
-                good={prop.avg_last_5 != null && prop.avg_last_5 > adjustedLine}
-                neutral={false}
-              />
-              <StatBox
-                label="L10 Avg"
-                value={prop.avg_last_10 ?? null}
-                sub={prop.avg_last_10 != null ? `${prop.avg_last_10 > adjustedLine ? '+' : ''}${(prop.avg_last_10 - adjustedLine).toFixed(1)}` : null}
-                good={prop.avg_last_10 != null && prop.avg_last_10 > adjustedLine}
-                neutral={false}
-              />
+              {/* L5: prefer EWMA from raw logs so this tile matches the grading engine */}
+              {(() => {
+                const ewmaL5 = gameLogs.length >= 3
+                  ? (() => {
+                      const vals = gameLogs.slice(0, 5);
+                      let wSum = 0, vSum = 0;
+                      vals.forEach((v, i) => { const w = Math.exp(-0.18 * i); vSum += v * w; wSum += w; });
+                      return Math.round(vSum / wSum * 10) / 10;
+                    })()
+                  : null;
+                const display = ewmaL5 ?? prop.avg_last_5;
+                const label = ewmaL5 != null ? 'L5 Wtd' : 'L5 Avg';
+                return display != null ? (
+                  <StatBox
+                    label={label}
+                    value={display}
+                    sub={`${display > adjustedLine ? '+' : ''}${(display - adjustedLine).toFixed(1)}`}
+                    good={display > adjustedLine}
+                    neutral={false}
+                  />
+                ) : null;
+              })()}
+              {/* L10: prefer EWMA from raw logs */}
+              {(() => {
+                const ewmaL10 = gameLogs.length >= 3
+                  ? (() => {
+                      let wSum = 0, vSum = 0;
+                      gameLogs.forEach((v, i) => { const w = Math.exp(-0.18 * i); vSum += v * w; wSum += w; });
+                      return Math.round(vSum / wSum * 10) / 10;
+                    })()
+                  : null;
+                const display = ewmaL10 ?? prop.avg_last_10;
+                const label = ewmaL10 != null ? 'L10 Wtd' : 'L10 Avg';
+                return display != null ? (
+                  <StatBox
+                    label={label}
+                    value={display}
+                    sub={`${display > adjustedLine ? '+' : ''}${(display - adjustedLine).toFixed(1)}`}
+                    good={display > adjustedLine}
+                    neutral={false}
+                  />
+                ) : null;
+              })()}
               <StatBox
                 label="Projection"
                 value={prop.projection ?? null}
@@ -580,14 +615,13 @@ export default function PropDetailModal({ prop, onClose }) {
               <div className="flex items-center justify-between mb-2">
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Grade Breakdown</p>
                 {(() => {
-                  const avail = grade.criteria.filter(c => c.available).length;
-                  const lg = toLetterGrade(grade.passCount, avail);
+                  const lg = toLetterGrade(grade.confidence, grade.completeness);
                   return (
                     <span className={cn(
                       'text-xs font-bold px-2 py-0.5 rounded-full',
-                      lg[0] === 'A' || lg === 'B+' || lg === 'B' ? 'bg-primary/20 text-primary' :
-                      lg[0] === 'C' || lg === 'B-' ? 'bg-chart-4/20 text-chart-4' :
-                      'bg-destructive/20 text-destructive'
+                      lg[0] === 'A' ? 'bg-emerald-500/15 text-emerald-400' :
+                      lg[0] === 'B' ? 'bg-primary/20 text-primary' :
+                      'bg-amber-500/15 text-amber-400'
                     )}>
                       {lg}
                     </span>
@@ -621,7 +655,7 @@ export default function PropDetailModal({ prop, onClose }) {
                         )}>
                           {c.label}
                         </p>
-                        <span className="text-[9px] text-muted-foreground flex-shrink-0">{c.weight}%</span>
+                        <span className="text-[9px] text-muted-foreground flex-shrink-0">{Math.round(c.weight / (grade.totalWeight || 100) * 100)}%</span>
                       </div>
                       <p className="text-[10px] text-muted-foreground mt-0.5 leading-relaxed">{c.detail}</p>
                     </div>
@@ -645,16 +679,16 @@ export default function PropDetailModal({ prop, onClose }) {
                 className={cn(
                   'flex flex-col items-center rounded-xl p-4 border transition-all',
                   isSelected(prop.player_name, prop.prop_type, 'over')
-                    ? 'bg-primary border-primary'
+                    ? 'bg-emerald-500 border-emerald-500 text-white shadow-[0_0_14px_rgba(16,185,129,0.35)]'
                     : isOverFavorable
-                    ? 'bg-primary/10 border-primary/30 hover:bg-primary/20'
+                    ? 'bg-emerald-500/10 border-emerald-500/30 hover:bg-emerald-500/20'
                     : 'bg-secondary border-border hover:bg-secondary/80'
                 )}
               >
-                <span className={cn('text-xs font-medium', isOverFavorable ? 'text-primary' : 'text-muted-foreground')}>
+                <span className={cn('text-xs font-medium', isOverFavorable ? 'text-emerald-400' : 'text-muted-foreground')}>
                   OVER {adjustedLine}
                 </span>
-                <span className={cn('text-xl font-bold mt-0.5', isOverFavorable ? 'text-primary' : 'text-foreground')}>
+                <span className={cn('text-xl font-bold mt-0.5', isOverFavorable ? 'text-emerald-400' : 'text-foreground')}>
                   {fmtOdds(adjustedOdds.over)}
                 </span>
                 {lineChanged && <span className="text-[9px] text-muted-foreground/60 mt-0.5">est. odds</span>}
@@ -664,16 +698,16 @@ export default function PropDetailModal({ prop, onClose }) {
                 className={cn(
                   'flex flex-col items-center rounded-xl p-4 border transition-all',
                   isSelected(prop.player_name, prop.prop_type, 'under')
-                    ? 'bg-destructive border-destructive'
+                    ? 'bg-rose-500 border-rose-500 text-white shadow-[0_0_14px_rgba(239,68,68,0.35)]'
                     : !isOverFavorable
-                    ? 'bg-destructive/10 border-destructive/30 hover:bg-destructive/20'
+                    ? 'bg-rose-500/10 border-rose-500/30 hover:bg-rose-500/20'
                     : 'bg-secondary border-border hover:bg-secondary/80'
                 )}
               >
-                <span className={cn('text-xs font-medium', !isOverFavorable ? 'text-destructive' : 'text-muted-foreground')}>
+                <span className={cn('text-xs font-medium', !isOverFavorable ? 'text-rose-400' : 'text-muted-foreground')}>
                   UNDER {adjustedLine}
                 </span>
-                <span className={cn('text-xl font-bold mt-0.5', !isOverFavorable ? 'text-destructive' : 'text-foreground')}>
+                <span className={cn('text-xl font-bold mt-0.5', !isOverFavorable ? 'text-rose-400' : 'text-foreground')}>
                   {fmtOdds(adjustedOdds.under)}
                 </span>
                 {lineChanged && <span className="text-[9px] text-muted-foreground/60 mt-0.5">est. odds</span>}

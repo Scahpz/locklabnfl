@@ -13,6 +13,7 @@ import { rankScore, gradeProp } from '@/lib/grading';
 import { NFL_API } from '@/lib/config';
 import { TEAM_STATS } from '@/lib/teamStats';
 import PropDetailModal from '@/components/props/PropDetailModal';
+import { useParlay } from '@/lib/ParlayContext';
 
 // ── Game-log localStorage cache ───────────────────────────────────────────────
 const GL_CACHE_PREFIX = 'locklab_gl_v9_';
@@ -149,6 +150,7 @@ const todayLocalStr    = new Date().toLocaleDateString('en-CA');
 const tomorrowLocalStr = new Date(Date.now() + 86400000).toLocaleDateString('en-CA');
 
 export default function Props() {
+  const { addLeg: parlayAddLeg } = useParlay();
   const [rawProps, setRawProps] = useState([]);
   const [gameDate, setGameDate] = useState(null);
   const [gamesSummary, setGamesSummary] = useState([]);
@@ -1422,8 +1424,14 @@ export default function Props() {
                     </thead>
                     <tbody className="divide-y divide-white/4">
                       {filteredAndRanked.map((prop, i) => {
-                        const g = gradeProp(prop);
-                        const ev = calcEVVerdict(prop, g);
+                        // Apply same dynamic hit_rate / edge recalculation as PlayerRow and PropDetailModal
+                        const logs = prop.last_10_games || [];
+                        const hitCount = logs.filter(v => v > prop.line).length;
+                        const gradedProp = logs.length > 0
+                          ? { ...prop, hit_rate_last_10: Math.round(hitCount / logs.length * 100), edge: prop.projection != null ? Math.round((prop.projection - prop.line) * 100) / 100 : prop.edge }
+                          : prop;
+                        const g = gradeProp(gradedProp);
+                        const ev = calcEVVerdict(gradedProp, g);
                         const isOver = ev.direction === 'OVER';
                         const prob = isOver ? g.overProb : g.underProb;
                         const lg = toLetterGrade(g.confidence, g.completeness);
@@ -1484,14 +1492,23 @@ export default function Props() {
                                 <span className="text-[10px] text-muted-foreground/40">{g.completeness}%</span>
                               </div>
                             </td>
-                            <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
+                            <td className="px-3 py-2.5 pr-4" onClick={e => e.stopPropagation()}>
                               <div className="flex items-center gap-1">
-                                <button
-                                  onClick={() => {}}
-                                  className="text-[10px] font-bold px-2 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 hover:bg-emerald-500/20 transition-colors whitespace-nowrap"
-                                >
-                                  OVER {prop.over_odds > 0 ? '+' : ''}{prop.over_odds ?? ''}
-                                </button>
+                                {isOver ? (
+                                  <button
+                                    onClick={() => parlayAddLeg(gradedProp, 'over')}
+                                    className="text-[10px] font-bold px-2 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 hover:bg-emerald-500/20 transition-colors whitespace-nowrap"
+                                  >
+                                    OVER {prop.over_odds > 0 ? '+' : ''}{prop.over_odds ?? ''}
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => parlayAddLeg(gradedProp, 'under')}
+                                    className="text-[10px] font-bold px-2 py-1 rounded-lg bg-rose-500/10 border border-rose-500/25 text-rose-400 hover:bg-rose-500/20 transition-colors whitespace-nowrap"
+                                  >
+                                    UNDER {prop.under_odds > 0 ? '+' : ''}{prop.under_odds ?? ''}
+                                  </button>
+                                )}
                               </div>
                             </td>
                           </tr>

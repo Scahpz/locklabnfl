@@ -5,8 +5,14 @@ function fmtDate(dateStr) {
   if (!dateStr) return null;
   try {
     const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return null;
     return `${d.getMonth() + 1}/${d.getDate()}`;
   } catch { return null; }
+}
+
+function fmtWeek(log, index) {
+  if (log?.week) return `W${log.week}`;
+  return `G${index + 1}`;
 }
 
 export default function PlayerTrendChart({ games, line, propType, gameLogs }) {
@@ -16,8 +22,9 @@ export default function PlayerTrendChart({ games, line, propType, gameLogs }) {
     const prefix = log?.isHome ? 'vs' : '@';
     const opp = log?.opp || `G${i + 1}`;
     const date = log?.date ? fmtDate(log.date) : null;
-    const topLine = date || (log ? `${prefix}` : `G${i + 1}`);
-    const botLine = log ? opp : null;
+    // Fall back to week label or game index when date is missing/invalid
+    const topLine = date || fmtWeek(log, i);
+    const botLine = log?.opp ? opp : null;
     return {
       game: botLine ? `${topLine}\n${botLine}` : topLine,
       label: log ? `${prefix} ${opp}${date ? ` (${date})` : ''}` : `Game ${i + 1}`,
