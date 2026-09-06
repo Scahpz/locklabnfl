@@ -473,50 +473,83 @@ export default function PropDetailModal({ prop, onClose }) {
 
             {/* Chart: window + location filters */}
             {(gameLogs.length > 0 || prop.game_logs_last_20?.length > 0) && (() => {
+              // allDetailLogs: most-recent-first from backend (index 0 = most recent)
               const allDetailLogs = prop.game_logs_last_20 || prop.game_logs_last_10 || [];
 
-              // Derive home/away from matchup string — handles both NBA API ("LAL vs. BOS")
-              // and ESPN fallback ("vs. BOS" / "@ LAL") formats
+              // Home/away detection — checks matchup string then falls back to isHome field
               const isHomeGame = (g) => {
                 const m = (g.matchup || '').trim().toLowerCase();
-                if (m.startsWith('vs.')) return true;
-                if (m.includes(' vs. ')) return true;
+                if (m.startsWith('vs.') || m.includes(' vs. ')) return true;
                 if (m.startsWith('@') || m.includes(' @ ')) return false;
-                return g.isHome ?? false;
+                return g.isHome ?? true;
               };
 
-              // Step 1: pick the time window
+              // NFL week helper for table/header labels
+              const getWeekLabel = (g) => {
+                if (g?.week) return `'25 W${g.week}`;
+                if (g?.date) {
+                  try {
+                    const d = new Date(g.date);
+                    if (isNaN(d.getTime())) return g.date?.replace(/^\d{4}-/, '') || '—';
+                    return `${d.getMonth() + 1}/${d.getDate()}`;
+                  } catch { return '—'; }
+                }
+                return '—';
+              };
+
+              // Step 1: pick the time window (still most-recent-first)
               const windowLogs = chartWindow === 'l5'
-                ? allDetailLogs.slice(-5)
+                ? allDetailLogs.slice(0, 5)
                 : chartWindow === 'l20'
                 ? allDetailLogs
-                : (prop.game_logs_last_10 || allDetailLogs.slice(-10));
+                : allDetailLogs.slice(0, 10);
 
-              // Step 2: apply location filter on top of the window
+              // Step 2: apply location filter
               const activeDetail = locationFilter === 'home'
                 ? windowLogs.filter(g => isHomeGame(g))
                 : locationFilter === 'away'
                 ? windowLogs.filter(g => !isHomeGame(g))
                 : windowLogs;
 
-              const chartValues = activeDetail.map(g => g.value);
-              const activeChartMeta = activeDetail.map(g => ({ isHome: g.isHome, opp: g.opp, date: g.date }));
+              // For chart: reverse to oldest-first so oldest is leftmost point
+              const chartDetail = [...activeDetail].reverse();
+              const chartValues = chartDetail.map(g => g.value);
+              const activeChartMeta = chartDetail.map(g => ({
+                isHome: isHomeGame(g),
+                opp: g.opp,
+                date: g.date,
+                week: g.week,
+              }));
+
+              // For table: newest-first (most recent at top)
+              const tableDetail = [...activeDetail]; // already most-recent-first
 
               const hasL20 = allDetailLogs.length > 10;
-              const hasHome = windowLogs.some(g => g.isHome);
-              const hasAway = windowLogs.some(g => !g.isHome);
 
-              const tabHR = chartValues.length > 0
-                ? Math.round(chartValues.filter(v => v > adjustedLine).length / chartValues.length * 100)
+              // Season header — derive week range from windowLogs
+              const weeks = windowLogs.map(g => g.week).filter(Boolean);
+              const minWk = weeks.length ? Math.min(...weeks) : null;
+              const maxWk = weeks.length ? Math.max(...weeks) : null;
+              const seasonLabel = minWk && maxWk
+                ? `2025 Regular Season · Weeks ${minWk}–${maxWk}`
+                : '2025 Regular Season';
+
+              const tabHR = activeDetail.length > 0
+                ? Math.round(activeDetail.filter(g => g.value > adjustedLine).length / activeDetail.length * 100)
                 : null;
-              const tabAvg = chartValues.length > 0
-                ? Math.round(chartValues.reduce((s, v) => s + v, 0) / chartValues.length * 10) / 10
+              const tabAvg = activeDetail.length > 0
+                ? Math.round(activeDetail.reduce((s, g) => s + g.value, 0) / activeDetail.length * 10) / 10
                 : null;
 
               return (
                 <div>
-                  {/* Row 1: window selector */}
-                  <div className="flex items-center gap-1.5 mb-2">
+                  {/* Season header */}
+                  <p className="text-[9px] font-semibold text-muted-foreground/40 uppercase tracking-widest mb-2">
+                    {seasonLabel}
+                  </p>
+
+                  {/* Window + location filter row */}
+                  <div className="flex items-center gap-1.5 mb-2 flex-wrap">
                     {[
                       { key: 'l5',  label: 'L5' },
                       { key: 'l10', label: 'L10' },
@@ -536,14 +569,13 @@ export default function PropDetailModal({ prop, onClose }) {
                       </button>
                     ))}
 
-                    {/* Divider */}
                     <span className="w-px h-4 bg-white/10 mx-0.5" />
 
-                    {/* Row 2 inline: location filter */}
+                    {/* Always show All / Home / Away */}
                     {[
                       { key: 'all',  label: 'All' },
-                      ...(hasHome ? [{ key: 'home', label: '🏠 Home' }] : []),
-                      ...(hasAway ? [{ key: 'away', label: '✈ Away' }] : []),
+                      { key: 'home', label: '🏠 Home' },
+                      { key: 'away', label: '✈ Away' },
                     ].map(f => (
                       <button
                         key={f.key}
@@ -566,40 +598,41 @@ export default function PropDetailModal({ prop, onClose }) {
                     )}
                   </div>
 
-                  {/* No games for this filter */}
+                  {/* Empty state for location filter */}
                   {activeDetail.length === 0 && (
                     <div className="text-center py-6 text-[11px] text-muted-foreground/50">
-                      No {locationFilter === 'home' ? 'home' : 'away'} games in this window
+                      No {locationFilter} games in this window
                     </div>
                   )}
 
-                  {/* Chart */}
+                  {/* Chart — receives oldest-first data */}
                   {chartValues.length > 0 && (
                     <PlayerTrendChart
                       games={chartValues}
                       line={adjustedLine}
+                      originalLine={lineChanged ? originalLine : undefined}
                       propType={prop.prop_type}
                       gameLogs={activeChartMeta}
                     />
                   )}
 
-                  {/* Game log table */}
+                  {/* Game log table — newest at top */}
                   {activeDetail.length > 0 && (
                     <div className="mt-3 bg-secondary/30 rounded-xl overflow-hidden border border-border/40">
                       <div className="grid grid-cols-4 text-[9px] text-muted-foreground uppercase px-4 py-2 border-b border-border/40 bg-secondary/40">
-                        <span>Date</span>
+                        <span>Wk</span>
                         <span>Matchup</span>
-                        <span className="text-center">{propTypeLabels[prop.prop_type] || prop.prop_type}</span>
+                        <span className="text-center">{propTypeLabels[prop.prop_type] || prop.prop_type.replace(/_/g, ' ')}</span>
                         <span className="text-right">Result</span>
                       </div>
-                      {[...activeDetail].reverse().map((g, i) => (
+                      {tableDetail.map((g, i) => (
                         <div key={i} className={cn('grid grid-cols-4 text-xs px-4 py-2.5 items-center', i % 2 === 1 ? 'bg-secondary/20' : '')}>
-                          <span className="text-muted-foreground text-[10px]">{g.date ? g.date.replace(/^\d{4}-/, '') : '—'}</span>
+                          <span className="text-muted-foreground text-[10px]">{getWeekLabel(g)}</span>
                           <span className="text-foreground text-[10px]">{isHomeGame(g) ? 'vs' : '@'} {g.opp}</span>
-                          <span className={cn('text-center font-bold text-sm', g.value > adjustedLine ? 'text-primary' : 'text-destructive')}>
+                          <span className={cn('text-center font-bold text-sm', g.value > adjustedLine ? 'text-emerald-400' : 'text-rose-400')}>
                             {g.value}
                           </span>
-                          <span className={cn('text-right text-[10px] font-semibold', g.value > adjustedLine ? 'text-primary' : 'text-destructive')}>
+                          <span className={cn('text-right text-[10px] font-semibold', g.value > adjustedLine ? 'text-emerald-400' : 'text-rose-400')}>
                             {g.value > adjustedLine ? '✓ HIT' : '✗ MISS'}
                           </span>
                         </div>

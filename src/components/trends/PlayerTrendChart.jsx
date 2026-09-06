@@ -1,6 +1,13 @@
 import React from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 
+// Count-based props: integer values — use step line, not smooth spline
+const COUNT_PROPS = new Set([
+  'passing_tds','rushing_tds','receiving_tds','rush_rec_tds',
+  'receptions','rushing_attempts',
+  'q1_receptions','h1_receptions','q1_rush_rec_tds','h1_rush_rec_tds',
+]);
+
 function fmtDate(dateStr) {
   if (!dateStr) return null;
   try {
@@ -15,14 +22,16 @@ function fmtWeek(log, index) {
   return `G${index + 1}`;
 }
 
-export default function PlayerTrendChart({ games, line, propType, gameLogs }) {
-  // games and gameLogs are already in chronological order (oldest first, newest last)
+// games and gameLogs must arrive oldest-first (index 0 = oldest game)
+export default function PlayerTrendChart({ games, line, originalLine, propType, gameLogs }) {
+  const isCount = COUNT_PROPS.has(propType);
+  const lineChanged = originalLine != null && originalLine !== line;
+
   const data = games.map((val, i) => {
     const log = gameLogs?.[i];
     const prefix = log?.isHome ? 'vs' : '@';
     const opp = log?.opp || `G${i + 1}`;
     const date = log?.date ? fmtDate(log.date) : null;
-    // Fall back to week label or game index when date is missing/invalid
     const topLine = date || fmtWeek(log, i);
     const botLine = log?.opp ? opp : null;
     return {
@@ -35,9 +44,9 @@ export default function PlayerTrendChart({ games, line, propType, gameLogs }) {
 
   return (
     <div className="w-full">
-      <div className="h-48 w-full">
+      <div className="h-52 w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={data} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+          <LineChart data={data} margin={{ top: 8, right: 16, left: -20, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="hsl(217 33% 20%)" />
             <XAxis
               dataKey="game"
@@ -55,7 +64,11 @@ export default function PlayerTrendChart({ games, line, propType, gameLogs }) {
               height={40}
               interval={0}
             />
-            <YAxis tick={{ fill: 'hsl(215 20% 55%)', fontSize: 11 }} />
+            {/* Domain: 0 to data max + 1 — prevent over-scaling */}
+            <YAxis
+              tick={{ fill: 'hsl(215 20% 55%)', fontSize: 11 }}
+              domain={[0, dataMax => Math.ceil(dataMax) + 1]}
+            />
             <Tooltip
               contentStyle={{
                 background: 'hsl(222 47% 9%)',
@@ -65,11 +78,26 @@ export default function PlayerTrendChart({ games, line, propType, gameLogs }) {
                 fontSize: 12,
               }}
               labelFormatter={(_, payload) => payload?.[0]?.payload?.label || ''}
-              formatter={(value) => [value, propType?.toUpperCase() || 'Value']}
+              formatter={(value) => [value, propType?.replace(/_/g, ' ').toUpperCase() || 'Value']}
             />
-            <ReferenceLine y={line} stroke="hsl(263 70% 58%)" strokeDasharray="5 5" label={{ value: `Line: ${line}`, fill: 'hsl(263 70% 58%)', fontSize: 10, position: 'right' }} />
+            {/* Current line (adjusted) */}
+            <ReferenceLine
+              y={line}
+              stroke="hsl(142 71% 45%)"
+              strokeDasharray="5 5"
+              label={{ value: `Line ${line}`, fill: 'hsl(142 71% 45%)', fontSize: 10, position: 'right' }}
+            />
+            {/* Original market line — only shown when line is adjusted */}
+            {lineChanged && (
+              <ReferenceLine
+                y={originalLine}
+                stroke="hsl(263 70% 58%)"
+                strokeDasharray="3 3"
+                label={{ value: `Mkt ${originalLine}`, fill: 'hsl(263 70% 58%)', fontSize: 10, position: 'right' }}
+              />
+            )}
             <Line
-              type="monotone"
+              type={isCount ? 'stepAfter' : 'monotone'}
               dataKey="value"
               stroke="hsl(142 71% 45%)"
               strokeWidth={2}
@@ -83,7 +111,7 @@ export default function PlayerTrendChart({ games, line, propType, gameLogs }) {
           </LineChart>
         </ResponsiveContainer>
       </div>
-      <p className="text-[10px] text-muted-foreground text-right mt-1 pr-1">older ← → most recent</p>
+      <p className="text-[10px] text-muted-foreground/40 text-center mt-1">oldest ← · · · → newest</p>
     </div>
   );
 }
