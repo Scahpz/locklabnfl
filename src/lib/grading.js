@@ -673,5 +673,22 @@ export function rankScore(prop) {
   }
   const grade = gradeProp(p);
   const base  = grade.dataQuality === 'full' ? 1000 : grade.dataQuality === 'context' ? 500 : 0;
-  return base + grade.confidence;
+  const raw   = base + grade.confidence;
+
+  // Penalize props with extreme odds imbalance — e.g., 5th-string WR +1730 to score TD.
+  // When the over is priced at >+500, the sportsbook considers it near-impossible;
+  // betting the under at -110 on a near-certain event is terrible value regardless of hit rate.
+  const ov = prop.over_odds ?? -110;
+  const un = prop.under_odds ?? -110;
+  const ovImplied = ov > 0 ? 100 / (100 + ov) : Math.abs(ov) / (Math.abs(ov) + 100);
+  const unImplied = un > 0 ? 100 / (100 + un) : Math.abs(un) / (Math.abs(un) + 100);
+
+  let mult = 1.0;
+  if      (ovImplied < 0.05) mult = 0.05;  // +1900+ : near-impossible over, no value either side
+  else if (ovImplied < 0.10) mult = 0.20;  // +900–+1900
+  else if (ovImplied < 0.18) mult = 0.45;  // +456–+900 : unlikely over
+  else if (unImplied < 0.05) mult = 0.05;  // mirrored: near-impossible under
+  else if (unImplied < 0.10) mult = 0.20;
+
+  return raw * mult;
 }

@@ -14,16 +14,17 @@ import { rankScore, gradeProp } from '@/lib/grading';
 import { formatMarket, toLetterGrade } from '@/lib/propLabels';
 import { NFL_API } from '@/lib/config';
 import { TEAM_STATS, updateLeagueAvgs } from '@/lib/teamStats';
+import { loadSleeperHistory, computeAnalyticsFromSleeper } from '@/lib/sleeperHistory';
 import PropDetailModal from '@/components/props/PropDetailModal';
 import { useParlay } from '@/lib/ParlayContext';
 
 // ── Game-log localStorage cache ───────────────────────────────────────────────
-const GL_CACHE_PREFIX = 'locklab_gl_v9_';
+const GL_CACHE_PREFIX = 'locklab_gl_v10_';
 const GL_TTL_MS = 2 * 60 * 60 * 1000; // 2-hour TTL per entry
 // Wipe all older cache versions on load
 for (let i = localStorage.length - 1; i >= 0; i--) {
   const k = localStorage.key(i);
-  if (k && k.startsWith('locklab_gl_') && !k.startsWith('locklab_gl_v9_')) {
+  if (k && k.startsWith('locklab_gl_') && !k.startsWith('locklab_gl_v10_')) {
     localStorage.removeItem(k);
   }
 }
@@ -38,23 +39,6 @@ function glCacheGet(name) {
 function glCacheSet(name, data) {
   try { localStorage.setItem(GL_CACHE_PREFIX + name, JSON.stringify({ data, ts: Date.now() })); } catch {}
 }
-// playerProps: [{name, prop_type, line}]
-async function fetchBulkGameLogs(playerProps) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 8000);
-  try {
-    const res = await fetch(`${NFL_API}/api/player-gamelogs-bulk`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ playerProps }),
-      signal: ctrl.signal,
-    });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch { return null; }
-  finally { clearTimeout(timer); }
-}
-
 
 // PROP_TYPES is now derived dynamically from loaded props — see propTypeOptions useMemo below.
 const SORT_OPTIONS = [
@@ -159,6 +143,7 @@ export default function Props() {
   const [verdicts, setVerdicts] = useState({});
   const [aiLoading, setAiLoading] = useState(false);
   const [playerAnalytics, setPlayerAnalytics] = useState({});
+  const [sleeperHistory, setSleeperHistory] = useState(null);
   const [playerSearch, setPlayerSearch] = useState('');
   const [showPlayerDrop, setShowPlayerDrop] = useState(false);
   const [selectedPlayers, setSelectedPlayers] = useState(() => {
@@ -197,6 +182,11 @@ export default function Props() {
     const qs = params.toString();
     navigate({ search: qs ? `?${qs}` : '' }, { replace: true });
   }, [selectedTypes, selectedPositions, listHomeAway, selectedGames, sortBy, selectedPlayers, detailKey]);
+
+  // Load 2025 season stats from Sleeper on mount — same source as the start/sit section
+  useEffect(() => {
+    loadSleeperHistory().then(setSleeperHistory).catch(() => {});
+  }, []);
 
   const applyData = (data, skipAI = false) => {
     if (!data?.props?.length) return false;
@@ -320,60 +310,43 @@ export default function Props() {
     });
   }, [rawProps]);
 
-  // Auto-fetch game logs for all players in one bulk request
+  // Compute player analytics from 2025 Sleeper data — runs once both rawProps and sleeperHistory are ready
   useEffect(() => {
-    if (!rawProps.length || isDemoMode()) return;
+    if (!rawProps.length || isDemoMode() || !sleeperHistory) return;
+
     const names = [...new Set(rawProps.map(p => p.player_name))];
     const pending = names.filter(n => !fetchedPlayers.current.has(n));
     if (!pending.length) return;
 
-    // Apply cached data immediately
+    // Serve from localStorage cache immediately (v10 cache contains only Sleeper-sourced data)
     const withCache = pending.filter(n => glCacheGet(n));
     if (withCache.length) {
       const updates = {};
-      withCache.forEach(n => { updates[n] = glCacheGet(n).analytics; fetchedPlayers.current.add(n); });
+      withCache.forEach(n => {
+        updates[n] = glCacheGet(n).analytics;
+        fetchedPlayers.current.add(n);
+      });
       setPlayerAnalytics(prev => ({ ...prev, ...updates }));
     }
 
-    const needsFetch = pending.filter(n => !glCacheGet(n));
-    if (!needsFetch.length) return;
-    needsFetch.forEach(n => fetchedPlayers.current.add(n));
+    const needsCompute = pending.filter(n => !glCacheGet(n));
+    if (!needsCompute.length) return;
+    needsCompute.forEach(n => fetchedPlayers.current.add(n));
 
-    // Single batch: fetch the first 50 visible players, mark the rest null immediately
-    // so factors never stay on "loading…" when the backend returns empty analytics.
-    const TOP = 50;
-    const batch = needsFetch.slice(0, TOP);
-
-    if (needsFetch.length > TOP) {
-      const skipUpdates = {};
-      needsFetch.slice(TOP).forEach(n => { skipUpdates[n] = null; });
-      setPlayerAnalytics(prev => ({ ...prev, ...skipUpdates }));
-    }
-
-    // Build playerProps: every prop row for players in this batch
-    const playerProps = rawProps
-      .filter(p => batch.includes(p.player_name))
-      .map(p => ({ name: p.player_name, prop_type: p.prop_type, line: p.line }));
-
-    fetchBulkGameLogs(playerProps).then(data => {
-      const updates = {};
-      if (data?.analytics) {
-        Object.entries(data.analytics).forEach(([name, playerData]) => {
-          // playerData is {prop_type: analyticsObj, ...}
-          if (playerData && typeof playerData === 'object' && Object.keys(playerData).length > 0) {
-            updates[name] = playerData;
-            glCacheSet(name, { analytics: playerData });
-          }
-        });
+    // Compute analytics from Sleeper history for each player + their prop types
+    const updates = {};
+    for (const name of needsCompute) {
+      const propsForPlayer = rawProps.filter(p => p.player_name === name);
+      const playerData = {};
+      for (const p of propsForPlayer) {
+        const analytics = computeAnalyticsFromSleeper(name, p.prop_type, p.line, sleeperHistory);
+        if (analytics) playerData[p.prop_type] = analytics;
       }
-      batch.forEach(n => { if (!(n in updates)) updates[n] = null; });
-      setPlayerAnalytics(prev => ({ ...prev, ...updates }));
-    }).catch(() => {
-      const updates = {};
-      batch.forEach(n => { updates[n] = null; });
-      setPlayerAnalytics(prev => ({ ...prev, ...updates }));
-    });
-  }, [rawProps]);
+      updates[name] = Object.keys(playerData).length ? playerData : null;
+      if (updates[name]) glCacheSet(name, { analytics: updates[name] });
+    }
+    setPlayerAnalytics(prev => ({ ...prev, ...updates }));
+  }, [rawProps, sleeperHistory]);
 
   // Merge game logs + team context + injury data into each prop
   const enrichedProps = useMemo(() => {
