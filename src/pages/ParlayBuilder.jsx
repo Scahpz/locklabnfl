@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Layers, X, TrendingUp, TrendingDown, Trophy, Loader2, History, ArrowRight } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { Layers, X, TrendingUp, TrendingDown, Trophy, Loader2, History, ArrowRight, AlertTriangle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { gradeProp } from '@/lib/grading';
 import { Button } from '@/components/ui/button';
@@ -53,6 +53,27 @@ export default function ParlayBuilder() {
 
   const combinedOdds = calculateCombinedOdds(legs);
   const riskLevel = getRiskLevel(legs);
+
+  // Detect correlated legs: same game (opponent match) or same player
+  const correlationWarnings = useMemo(() => {
+    const warnings = [];
+    const propLegs = legs.filter(l => !l.is_game_bet);
+    for (let i = 0; i < propLegs.length; i++) {
+      for (let j = i + 1; j < propLegs.length; j++) {
+        const a = propLegs[i];
+        const b = propLegs[j];
+        if (a.player_name === b.player_name) {
+          warnings.push(`${a.player_name} has multiple legs — same-player correlation`);
+        } else if (
+          a.opponent && b.opponent &&
+          ((a.team === b.opponent && a.opponent === b.team) || (a.opponent === b.opponent && a.team === b.team))
+        ) {
+          warnings.push(`${a.player_name} & ${b.player_name} share the same game — correlated legs`);
+        }
+      }
+    }
+    return [...new Set(warnings)];
+  }, [legs]);
 
   const payout = (() => {
     if (legs.length === 0) return 0;
@@ -215,6 +236,17 @@ export default function ParlayBuilder() {
                 })}
               </div>
             )}
+
+          {correlationWarnings.length > 0 && (
+            <div className="space-y-1.5 mb-3">
+              {correlationWarnings.map((w, i) => (
+                <div key={i} className="flex items-start gap-2 rounded-lg bg-amber-500/8 border border-amber-500/25 px-3 py-2 text-[11px] text-amber-400">
+                  <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                  <span>⚠ {w}</span>
+                </div>
+              ))}
+            </div>
+          )}
 
           {legs.length > 0 && (
             <div className="border-t border-border pt-3 space-y-3">

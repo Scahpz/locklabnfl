@@ -7,7 +7,7 @@ import LockCards from '@/components/props/LockCards';
 import DemonPickCard from '@/components/props/DemonPickCard';
 import { RefreshCw, Wifi, WifiOff, Zap, SlidersHorizontal, Search, X, Info, LayoutGrid, List, TrendingUp, TrendingDown } from 'lucide-react';
 import TeamLogo from '@/components/common/TeamLogo';
-import { calcEVVerdict } from '@/lib/verdict';
+import { calcEVVerdict, TIER_CONFIG } from '@/lib/verdict';
 import PlayerRow from '@/components/props/PlayerRow';
 import { cn } from '@/lib/utils';
 import { rankScore, gradeProp } from '@/lib/grading';
@@ -1389,7 +1389,7 @@ export default function Props() {
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
                 <input
                   type="text"
-                  placeholder={selectedPlayers.length > 0 ? 'Add player…' : 'Search player…'}
+                  placeholder={selectedPlayers.length > 0 ? 'Add player or team…' : 'Search players or teams…'}
                   value={playerSearch}
                   onChange={e => { setPlayerSearch(e.target.value); setShowPlayerDrop(true); }}
                   onFocus={() => setShowPlayerDrop(true)}
@@ -1600,6 +1600,7 @@ export default function Props() {
                         <th className="text-left px-3 py-2.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">Player</th>
                         <th className="text-left px-3 py-2.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">Prop · Line</th>
                         <th className="text-left px-3 py-2.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">Probability</th>
+                        <th className="text-left px-3 py-2.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">Verdict</th>
                         <th className="text-left px-3 py-2.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">Grade</th>
                         <th className="text-left px-3 py-2.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">Edge</th>
                         <th className="text-left px-3 py-2.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">Data</th>
@@ -1653,10 +1654,17 @@ export default function Props() {
                                 <span className={cn('font-black tabular-nums', isOver ? 'text-emerald-400' : 'text-rose-400')}>
                                   {prob}%
                                 </span>
-                                <span className={cn('text-[10px] font-semibold', isOver ? 'text-emerald-400/50' : 'text-rose-400/50')}>
-                                  {ev.direction}
-                                </span>
                               </div>
+                            </td>
+                            <td className="px-3 py-2.5">
+                              {(() => {
+                                const cfg = TIER_CONFIG[ev.tier] || TIER_CONFIG.RED;
+                                return (
+                                  <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full border whitespace-nowrap', cfg.badge)}>
+                                    {ev.label}
+                                  </span>
+                                );
+                              })()}
                             </td>
                             <td className="px-3 py-2.5">
                               <span className={cn('font-black text-sm', lgCls)}>{lg}</span>
