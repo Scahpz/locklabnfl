@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { fetchLiveProps, getCachedProps, isCacheValid, clearLiveCache, SOURCE_META } from '@/lib/liveData';
 import { isDemoMode } from '@/lib/mockData';
 import { getAIVerdicts } from '@/lib/aiVerdicts';
@@ -87,6 +88,15 @@ const SORT_OPTIONS = [
   { value: 'hit_rate', label: 'Hit Rate' },
 ];
 
+const PROP_GROUPS = [
+  { key: 'passing', label: 'Passing', types: ['passing_yards','passing_tds','completions','passing_ints','pass_rush_yards','passing_long'] },
+  { key: 'rushing', label: 'Rushing', types: ['rushing_yards','rushing_tds','rushing_attempts','rushing_long'] },
+  { key: 'receiving', label: 'Receiving', types: ['receiving_yards','receiving_tds','receptions','rush_rec_yards','rush_rec_tds'] },
+  { key: 'tds', label: 'TDs', types: ['passing_tds','rushing_tds','receiving_tds','rush_rec_tds','q1_rush_rec_tds','h1_rush_rec_tds'] },
+  { key: '1q', label: '1Q', types: ['q1_passing_yards','q1_rushing_yards','q1_receiving_yards','q1_receptions','q1_rush_rec_tds'] },
+  { key: '1h', label: '1H', types: ['h1_passing_yards','h1_rushing_yards','h1_receiving_yards','h1_receptions','h1_rush_rec_tds'] },
+];
+
 function toLetterGrade(confidence, completeness) {
   const eff = completeness < 25 ? Math.min(confidence, 62)
     : completeness < 45 ? Math.min(confidence, 70)
@@ -151,6 +161,7 @@ const tomorrowLocalStr = new Date(Date.now() + 86400000).toLocaleDateString('en-
 
 export default function Props() {
   const { addLeg: parlayAddLeg } = useParlay();
+  const navigate = useNavigate();
   const [rawProps, setRawProps] = useState([]);
   const [gameDate, setGameDate] = useState(null);
   const [gamesSummary, setGamesSummary] = useState([]);
@@ -160,17 +171,40 @@ export default function Props() {
   const [retryIn, setRetryIn] = useState(null); // countdown seconds until auto-retry, null = not retrying
   const retryTimerRef = useRef(null);
   const [isLive, setIsLive] = useState(false);
-  // Restore filter state from sessionStorage so navigating away and back preserves selections
+  // Restore filter state from URL params first, then sessionStorage
+  const _urlInit = (() => {
+    try { return new URLSearchParams(window.location.search); } catch { return new URLSearchParams(); }
+  })();
   const savedFilters = (() => { try { return JSON.parse(sessionStorage.getItem('props_filters') || '{}'); } catch { return {}; } })();
-  const [selectedGames, setSelectedGames] = useState(savedFilters.selectedGames ?? []);
-  const [selectedType, setSelectedType] = useState(savedFilters.selectedType ?? 'all');
-  const [sortBy, setSortBy] = useState(savedFilters.sortBy ?? 'ai_rank');
+  const [selectedGames, setSelectedGames] = useState(() => {
+    const u = _urlInit.get('games'); if (u) return u.split(',').filter(Boolean);
+    return savedFilters.selectedGames ?? [];
+  });
+  const [selectedTypes, setSelectedTypes] = useState(() => {
+    const u = _urlInit.get('types'); if (u) return u.split(',').filter(Boolean);
+    return savedFilters.selectedTypes ?? [];
+  });
+  const [selectedPositions, setSelectedPositions] = useState(() => {
+    const u = _urlInit.get('pos'); if (u) return u.split(',').filter(Boolean);
+    return savedFilters.selectedPositions ?? [];
+  });
+  const [listHomeAway, setListHomeAway] = useState(() => {
+    const u = _urlInit.get('ha'); if (u === 'home' || u === 'away') return u;
+    return savedFilters.listHomeAway ?? 'all';
+  });
+  const [sortBy, setSortBy] = useState(() => {
+    const u = _urlInit.get('sort'); if (u) return u;
+    return savedFilters.sortBy ?? 'ai_rank';
+  });
   const [verdicts, setVerdicts] = useState({});
   const [aiLoading, setAiLoading] = useState(false);
   const [playerAnalytics, setPlayerAnalytics] = useState({});
   const [playerSearch, setPlayerSearch] = useState('');
   const [showPlayerDrop, setShowPlayerDrop] = useState(false);
-  const [selectedPlayers, setSelectedPlayers] = useState(savedFilters.selectedPlayers ?? []);
+  const [selectedPlayers, setSelectedPlayers] = useState(() => {
+    const u = _urlInit.get('players'); if (u) return u.split(',').filter(Boolean);
+    return savedFilters.selectedPlayers ?? [];
+  });
   const [selectedSources, setSelectedSources] = useState(savedFilters.selectedSources ?? []);
   const [selectedWeeks, setSelectedWeeks] = useState(savedFilters.selectedWeeks ?? [1]);
   const [detailKey, setDetailKey] = useState(null); // { player_name, prop_type }
@@ -185,8 +219,23 @@ export default function Props() {
 
   // Persist filter state to sessionStorage so it survives navigation
   useEffect(() => {
-    sessionStorage.setItem('props_filters', JSON.stringify({ selectedGames, selectedType, sortBy, selectedPlayers, selectedSources, selectedWeeks }));
-  }, [selectedGames, selectedType, sortBy, selectedPlayers, selectedSources]);
+    sessionStorage.setItem('props_filters', JSON.stringify({
+      selectedGames, selectedTypes, selectedPositions, listHomeAway, sortBy, selectedPlayers, selectedSources, selectedWeeks,
+    }));
+  }, [selectedGames, selectedTypes, selectedPositions, listHomeAway, sortBy, selectedPlayers, selectedSources]);
+
+  // Sync filter state to URL query string for shareable/refreshable links
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (selectedTypes.length > 0) params.set('types', selectedTypes.join(','));
+    if (selectedPositions.length > 0) params.set('pos', selectedPositions.join(','));
+    if (listHomeAway !== 'all') params.set('ha', listHomeAway);
+    if (selectedGames.length > 0) params.set('games', selectedGames.join(','));
+    if (sortBy !== 'ai_rank') params.set('sort', sortBy);
+    if (selectedPlayers.length > 0) params.set('players', selectedPlayers.join(','));
+    const qs = params.toString();
+    navigate({ search: qs ? `?${qs}` : '' }, { replace: true });
+  }, [selectedTypes, selectedPositions, listHomeAway, selectedGames, sortBy, selectedPlayers]);
 
   const applyData = (data, skipAI = false) => {
     if (!data?.props?.length) return false;
@@ -551,6 +600,32 @@ export default function Props() {
     setSelectedGames(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]);
   };
 
+  const toggleType = (t) => {
+    setSelectedTypes(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]);
+  };
+
+  const togglePosition = (pos) => {
+    setSelectedPositions(prev => prev.includes(pos) ? prev.filter(x => x !== pos) : [...prev, pos]);
+  };
+
+  const toggleGroup = (group, available) => {
+    if (!available.length) return;
+    setSelectedTypes(prev => {
+      const allActive = available.every(t => prev.includes(t));
+      if (allActive) return prev.filter(t => !available.includes(t));
+      return [...prev, ...available.filter(t => !prev.includes(t))];
+    });
+  };
+
+  const clearAllFilters = () => {
+    setSelectedTypes([]);
+    setSelectedPositions([]);
+    setListHomeAway('all');
+    setSelectedGames([]);
+    setSelectedPlayers([]);
+    setSelectedSources([]);
+  };
+
   // Derive games from week-filtered props so game filter only shows relevant matchups
   const sortedGames = useMemo(() => {
     const seen = new Map();
@@ -822,8 +897,18 @@ export default function Props() {
       });
     }
 
-    if (selectedType !== 'all' && propTypeOptions.includes(selectedType)) {
-      result = result.filter(p => p.prop_type === selectedType);
+    if (selectedTypes.length > 0) {
+      result = result.filter(p => selectedTypes.includes(p.prop_type));
+    }
+
+    if (selectedPositions.length > 0) {
+      result = result.filter(p => selectedPositions.includes((p.position || '').toUpperCase()));
+    }
+
+    if (listHomeAway === 'home') {
+      result = result.filter(p => p.is_home === true);
+    } else if (listHomeAway === 'away') {
+      result = result.filter(p => p.is_home === false);
     }
 
     result = [...result].sort((a, b) => {
@@ -836,7 +921,7 @@ export default function Props() {
 
     // Diversity cap: max 3 props per team so a single favorable matchup can't
     // flood the top of the list. Only applies to AI Rank sort with no active filters.
-    const isUnfiltered = selectedGames.length === 0 && selectedPlayers.length === 0 && selectedType === 'all' && selectedSources.length === 0;
+    const isUnfiltered = selectedGames.length === 0 && selectedPlayers.length === 0 && selectedTypes.length === 0 && selectedSources.length === 0 && selectedPositions.length === 0 && listHomeAway === 'all';
     if (sortBy === 'ai_rank' && isUnfiltered) {
       const teamCount = {};
       const capped = [];
@@ -852,7 +937,7 @@ export default function Props() {
     }
 
     return result;
-  }, [weekFilteredProps, selectedGames, selectedType, sortBy, selectedPlayers, selectedSources]);
+  }, [weekFilteredProps, selectedGames, selectedTypes, selectedPositions, listHomeAway, sortBy, selectedPlayers, selectedSources]);
 
   // Group ranked props by player, preserving the rank of their best prop
   const playerGroups = useMemo(() => {
@@ -1196,25 +1281,106 @@ export default function Props() {
               );
             })()}
 
-            {/* Prop type pills — dynamically generated from what's in the feed */}
+            {/* Group preset quick-filters */}
+            {propTypeOptions.length > 0 && (() => {
+              return (
+                <div className="chip-scroll-fade flex items-center gap-1.5 overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0 pb-1 scrollbar-none">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50 flex-shrink-0 self-center mr-0.5">Group</span>
+                  {PROP_GROUPS.map(g => {
+                    const available = g.types.filter(t => propTypeOptions.includes(t));
+                    if (!available.length) return null;
+                    const allActive = available.every(t => selectedTypes.includes(t));
+                    const anyActive = available.some(t => selectedTypes.includes(t));
+                    return (
+                      <button
+                        key={g.key}
+                        onClick={() => toggleGroup(g, available)}
+                        className={cn(
+                          "text-xs px-3 py-1.5 rounded-lg border transition-all flex-shrink-0 whitespace-nowrap font-medium",
+                          allActive
+                            ? "bg-primary/20 border-primary/40 text-primary"
+                            : anyActive
+                            ? "bg-primary/10 border-primary/20 text-primary/70"
+                            : "bg-secondary/40 border-border/50 text-muted-foreground hover:text-foreground hover:border-border"
+                        )}
+                      >
+                        {g.label} <span className="opacity-50 ml-0.5">({available.length})</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+
+            {/* Prop type pills — multi-select */}
             <div className="chip-scroll-fade flex gap-1.5 overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0 md:flex-wrap pb-1 scrollbar-none">
               <SlidersHorizontal className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0 self-center" />
-              {['all', ...propTypeOptions].map(t => (
+              <button
+                onClick={() => setSelectedTypes([])}
+                className={cn(
+                  "text-xs px-3 py-2 rounded-lg border transition-all flex-shrink-0 whitespace-nowrap font-medium",
+                  selectedTypes.length === 0
+                    ? "bg-primary/20 border-primary/40 text-primary"
+                    : "bg-secondary/60 border-border text-muted-foreground hover:text-foreground"
+                )}
+              >
+                All Props
+              </button>
+              {propTypeOptions.map(t => (
                 <button
                   key={t}
-                  onClick={() => setSelectedType(t)}
+                  onClick={() => toggleType(t)}
                   className={cn(
                     "text-xs px-3 py-2 rounded-lg border transition-all flex-shrink-0 whitespace-nowrap",
-                    selectedType === t
+                    selectedTypes.includes(t)
                       ? "bg-primary/20 border-primary/40 text-primary font-medium"
                       : "bg-secondary/60 border-border text-muted-foreground hover:text-foreground"
                   )}
                 >
-                  {t === 'all' ? 'All Props' : (propTypeLabels[t] || t)}
+                  {propTypeLabels[t] || t}
                 </button>
               ))}
             </div>
 
+            {/* Position + Home/Away filters */}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+              {/* Position chips */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50 flex-shrink-0">Pos</span>
+                {['QB', 'RB', 'WR', 'TE'].map(pos => (
+                  <button
+                    key={pos}
+                    onClick={() => togglePosition(pos)}
+                    className={cn(
+                      "text-xs px-2.5 py-1 rounded-lg border transition-all font-medium whitespace-nowrap",
+                      selectedPositions.includes(pos)
+                        ? "bg-primary/20 border-primary/40 text-primary"
+                        : "bg-secondary/40 border-border/50 text-muted-foreground hover:text-foreground hover:border-border"
+                    )}
+                  >
+                    {pos}
+                  </button>
+                ))}
+              </div>
+              {/* Home/Away chips */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50 flex-shrink-0">Game</span>
+                {[{ key: 'all', label: 'All' }, { key: 'home', label: '🏠 Home' }, { key: 'away', label: '✈ Away' }].map(opt => (
+                  <button
+                    key={opt.key}
+                    onClick={() => setListHomeAway(opt.key)}
+                    className={cn(
+                      "text-xs px-2.5 py-1 rounded-lg border transition-all font-medium whitespace-nowrap",
+                      listHomeAway === opt.key
+                        ? "bg-primary/20 border-primary/40 text-primary"
+                        : "bg-secondary/40 border-border/50 text-muted-foreground hover:text-foreground hover:border-border"
+                    )}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
 
             {/* Row 2: player search + sort */}
             <div className="flex items-center gap-2 flex-wrap">
@@ -1348,46 +1514,64 @@ export default function Props() {
                 </button>
               </div>
             </div>
-            <div className="flex flex-wrap gap-1.5">
-              {/* Active filter pills */}
-              {selectedType !== 'all' && (
-                <button
-                  onClick={() => setSelectedType('all')}
-                  className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-primary/12 border border-primary/25 text-primary hover:bg-primary/20 transition-colors"
-                >
-                  {propTypeLabels[selectedType] || selectedType} <X className="w-2.5 h-2.5" />
-                </button>
-              )}
-              {selectedGames.map(key => {
-                const [away, home] = key.split('@');
-                return (
+            {/* Active filter pills */}
+            {(selectedTypes.length > 0 || selectedPositions.length > 0 || listHomeAway !== 'all' || selectedGames.length > 0 || selectedSources.length > 0) && (
+              <div className="flex flex-wrap gap-1.5">
+                {selectedTypes.map(t => (
                   <button
-                    key={key}
-                    onClick={() => setSelectedGames(prev => prev.filter(k => k !== key))}
+                    key={t}
+                    onClick={() => toggleType(t)}
+                    className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-primary/12 border border-primary/25 text-primary hover:bg-primary/20 transition-colors"
+                  >
+                    {propTypeLabels[t] || t} <X className="w-2.5 h-2.5" />
+                  </button>
+                ))}
+                {selectedPositions.map(pos => (
+                  <button
+                    key={pos}
+                    onClick={() => togglePosition(pos)}
+                    className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-primary/12 border border-primary/25 text-primary hover:bg-primary/20 transition-colors"
+                  >
+                    {pos} <X className="w-2.5 h-2.5" />
+                  </button>
+                ))}
+                {listHomeAway !== 'all' && (
+                  <button
+                    onClick={() => setListHomeAway('all')}
+                    className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-primary/12 border border-primary/25 text-primary hover:bg-primary/20 transition-colors"
+                  >
+                    {listHomeAway === 'home' ? '🏠 Home' : '✈ Away'} <X className="w-2.5 h-2.5" />
+                  </button>
+                )}
+                {selectedGames.map(key => {
+                  const [away, home] = key.split('@');
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => setSelectedGames(prev => prev.filter(k => k !== key))}
+                      className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white/8 border border-white/12 text-foreground/70 hover:text-foreground hover:border-white/20 transition-colors"
+                    >
+                      {away} @ {home} <X className="w-2.5 h-2.5" />
+                    </button>
+                  );
+                })}
+                {selectedSources.map(src => (
+                  <button
+                    key={src}
+                    onClick={() => setSelectedSources(prev => prev.filter(s => s !== src))}
                     className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white/8 border border-white/12 text-foreground/70 hover:text-foreground hover:border-white/20 transition-colors"
                   >
-                    {away} @ {home} <X className="w-2.5 h-2.5" />
+                    {SOURCE_META[src]?.label ?? src} <X className="w-2.5 h-2.5" />
                   </button>
-                );
-              })}
-              {selectedSources.map(src => (
+                ))}
                 <button
-                  key={src}
-                  onClick={() => setSelectedSources(prev => prev.filter(s => s !== src))}
-                  className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white/8 border border-white/12 text-foreground/70 hover:text-foreground hover:border-white/20 transition-colors"
-                >
-                  {SOURCE_META[src]?.label ?? src} <X className="w-2.5 h-2.5" />
-                </button>
-              ))}
-              {(selectedType !== 'all' || selectedGames.length > 0 || selectedSources.length > 0 || selectedPlayers.length > 0) && (
-                <button
-                  onClick={() => { setSelectedType('all'); setSelectedGames([]); setSelectedSources([]); setSelectedPlayers([]); }}
+                  onClick={clearAllFilters}
                   className="text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors"
                 >
                   Clear all
                 </button>
-              )}
-            </div>
+              </div>
+            )}
             {viewMode === 'grid' ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {playerGroups.map(({ playerName, rank, props }) => (
