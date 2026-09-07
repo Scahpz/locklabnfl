@@ -1,13 +1,43 @@
-// Fetches 2025 NFL season stats from Sleeper directly (same source as the start/sit section).
+// Fetches NFL season stats from Sleeper directly (same source as the start/sit section).
 // Guaranteed to have correct season data — bypasses the Railway backend for historical analytics.
 
-const _now = new Date();
-export const SLEEPER_SEASON = _now.getMonth() >= 8 ? _now.getFullYear() : _now.getFullYear() - 1;
-
-const CACHE_KEY = `locklab_sl_hist_${SLEEPER_SEASON}`;
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
 let _memCache = null;
+let _resolvedSeason = null;
+
+// Determine which season has enough data (≥5 completed weeks).
+// Current year is only used if week 5 exists with real data; otherwise prior year.
+async function _resolveSeason() {
+  if (_resolvedSeason) return _resolvedSeason;
+
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth(); // 0-indexed
+
+  // Before September: always prior year's season
+  if (month < 8) {
+    _resolvedSeason = year - 1;
+    return _resolvedSeason;
+  }
+
+  // September+: check if current year has ≥5 weeks of real regular-season data
+  try {
+    const r = await fetch(`https://api.sleeper.app/v1/stats/nfl/regular/${year}/5`);
+    if (r.ok) {
+      const data = await r.json();
+      // More than 50 entries means real games happened, not just preseason noise
+      if (Object.keys(data).length > 50) {
+        _resolvedSeason = year;
+        return _resolvedSeason;
+      }
+    }
+  } catch {}
+
+  // Not enough current-year data — use prior year's complete season
+  _resolvedSeason = year - 1;
+  return _resolvedSeason;
+}
 
 function normName(n) {
   return n.toLowerCase().replace(/\./g, '').replace(/\s+/g, ' ').trim();
@@ -15,6 +45,9 @@ function normName(n) {
 
 export async function loadSleeperHistory() {
   if (_memCache && Date.now() - _memCache.ts < CACHE_TTL_MS) return _memCache;
+
+  const season = await _resolveSeason();
+  const CACHE_KEY = `locklab_sl_hist_${season}`;
 
   try {
     const raw = sessionStorage.getItem(CACHE_KEY);
@@ -31,7 +64,7 @@ export async function loadSleeperHistory() {
   const [playersData, ...weekResults] = await Promise.all([
     fetch('https://api.sleeper.app/v1/players/nfl').then(r => r.ok ? r.json() : {}),
     ...Array.from({ length: 18 }, (_, i) =>
-      fetch(`https://api.sleeper.app/v1/stats/nfl/regular/${SLEEPER_SEASON}/${i + 1}`)
+      fetch(`https://api.sleeper.app/v1/stats/nfl/regular/${season}/${i + 1}`)
         .then(r => r.ok ? r.json() : {})
         .then(data => ({ week: i + 1, data }))
         .catch(() => ({ week: i + 1, data: {} }))
@@ -66,9 +99,9 @@ export async function loadSleeperHistory() {
     entry.games.sort((a, b) => b.week - a.week); // most recent first
   }
 
-  const result = { byName, byNameNorm, ts: Date.now(), season: SLEEPER_SEASON };
-
-  try { sessionStorage.setItem(CACHE_KEY, JSON.stringify(result)); } catch {}
+  const result = { byName, byNameNorm, ts: Date.now(), season };
+  const CACHE_KEY_SAVE = `locklab_sl_hist_${season}`;
+  try { sessionStorage.setItem(CACHE_KEY_SAVE, JSON.stringify(result)); } catch {}
 
   _memCache = result;
   return result;
@@ -177,7 +210,7 @@ export function computeAnalyticsFromSleeper(playerName, propType, line, cache) {
     away_hit_rate:     null,
     home_games_count:  0,
     away_games_count:  0,
-    data_seasons:      SLEEPER_SEASON,
+    data_seasons:      cache.season,
     confidence_score:  confScore,
   };
 }

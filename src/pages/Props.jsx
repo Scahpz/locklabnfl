@@ -158,7 +158,7 @@ export default function Props() {
   const [lastFetchedAt, setLastFetchedAt] = useState(null); // Date when odds last loaded
   const searchRef = useRef(null);
   // Pre-seed with hardcoded stats so pace/defense show immediately
-  const [teamContext, setTeamContext] = useState({ teams: TEAM_STATS, injuries: {}, back_to_back: [], game_spreads: {} });
+  const [teamContext, setTeamContext] = useState({ teams: TEAM_STATS, injuries: {}, back_to_back: [], game_spreads: {}, game_totals: {} });
   const [weatherData, setWeatherData] = useState({});
   const fetchedPlayers = useRef(new Set());
 
@@ -232,7 +232,7 @@ export default function Props() {
     if (forceRefresh) {
       clearLiveCache();
       setPlayerAnalytics({});
-      setTeamContext({ teams: TEAM_STATS, injuries: {}, back_to_back: [], game_spreads: {} });
+      setTeamContext({ teams: TEAM_STATS, injuries: {}, back_to_back: [], game_spreads: {}, game_totals: {} });
       fetchedPlayers.current = new Set();
     }
 
@@ -297,6 +297,32 @@ export default function Props() {
     return () => ctrl.abort();
   }, [rawProps.length]);
 
+  // Fetch game odds (spread + total) and merge into teamContext
+  useEffect(() => {
+    if (!rawProps.length || isDemoMode()) return;
+    const ctrl = new AbortController();
+    fetch(`${NFL_API}/api/odds/games`, { signal: ctrl.signal })
+      .then(r => r.ok ? r.json() : [])
+      .then(games => {
+        if (!Array.isArray(games) || !games.length) return;
+        const game_spreads = {};
+        const game_totals  = {};
+        for (const g of games) {
+          const key = `${g.awayAbv}@${g.homeAbv}`;
+          if (g.spread?.home  != null) game_spreads[key] = g.spread.home;
+          if (g.total?.line   != null) game_totals[key]  = g.total.line;
+        }
+        setTeamContext(prev => ({
+          ...prev,
+          game_spreads: { ...game_spreads, ...prev.game_spreads },
+          game_totals:  { ...game_totals,  ...prev.game_totals  },
+        }));
+      })
+      .catch(() => {})
+      .finally(() => {});
+    return () => ctrl.abort();
+  }, [rawProps.length]);
+
   // Fetch weather for each unique home team (Open-Meteo via backend, cached 3h)
   useEffect(() => {
     if (!rawProps.length) return;
@@ -351,10 +377,11 @@ export default function Props() {
   // Merge game logs + team context + injury data into each prop
   const enrichedProps = useMemo(() => {
     const ctx = teamContext || {};
-    const teams     = ctx.teams      || {};
-    const injuries  = ctx.injuries   || {};
+    const teams     = ctx.teams       || {};
+    const injuries  = ctx.injuries    || {};
     const b2b       = new Set(ctx.back_to_back || []);
-    const spreads   = ctx.game_spreads || {};
+    const spreads   = ctx.game_spreads  || {};
+    const totals    = ctx.game_totals   || {};
 
     return rawProps.map(prop => {
       // 1. Game log analytics
@@ -466,6 +493,7 @@ export default function Props() {
         is_home:             isHome,
         is_back_to_back:     b2b.has(team),
         spread:               playerSpread,
+        game_total:           totals[gameId] ?? null,
         injury_context:       injuryContext,
         injury_count:         injuredTeammates.length,
         opp_injury_context:   oppInjuryContext,
