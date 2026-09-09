@@ -88,7 +88,7 @@ export async function loadSleeperHistory() {
 
       byName[name].games.push({
         week,
-        season: SLEEPER_SEASON,
+        season,
         stats,
         opp: stats.opponent || stats.opp || '',
       });
@@ -172,8 +172,8 @@ export function computeAnalyticsFromSleeper(playerName, propType, line, cache) {
     value:  Math.round(getter(g.stats) * 10) / 10,
     opp:    g.opp,
     isHome: null,
-    date:   `${SLEEPER_SEASON}-W${g.week}`,
-    season: SLEEPER_SEASON,
+    date:   `${cache.season}-W${g.week}`,
+    season: cache.season,
     week:   g.week,
   }));
 

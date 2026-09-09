@@ -297,20 +297,28 @@ export default function Props() {
     return () => ctrl.abort();
   }, [rawProps.length]);
 
-  // Fetch game odds (spread + total) and merge into teamContext
+  // Fetch game odds (spread + total) from ESPN's free scoreboard API — no key required
   useEffect(() => {
     if (!rawProps.length || isDemoMode()) return;
     const ctrl = new AbortController();
-    fetch(`${NFL_API}/api/odds/games`, { signal: ctrl.signal })
-      .then(r => r.ok ? r.json() : [])
-      .then(games => {
-        if (!Array.isArray(games) || !games.length) return;
+    fetch('https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard', { signal: ctrl.signal })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data?.events?.length) return;
         const game_spreads = {};
         const game_totals  = {};
-        for (const g of games) {
-          const key = `${g.awayAbv}@${g.homeAbv}`;
-          if (g.spread?.home  != null) game_spreads[key] = g.spread.home;
-          if (g.total?.line   != null) game_totals[key]  = g.total.line;
+        for (const event of data.events) {
+          const comp = event.competitions?.[0];
+          if (!comp) continue;
+          const odds = comp.odds?.[0];
+          if (!odds) continue;
+          const teams = comp.competitors || [];
+          const home = teams.find(t => t.homeAway === 'home')?.team?.abbreviation || '';
+          const away = teams.find(t => t.homeAway === 'away')?.team?.abbreviation || '';
+          if (!home || !away) continue;
+          const key = `${away}@${home}`;
+          if (odds.spread    != null) game_spreads[key] = odds.spread;    // home spread
+          if (odds.overUnder != null) game_totals[key]  = odds.overUnder; // game O/U
         }
         setTeamContext(prev => ({
           ...prev,
@@ -318,8 +326,7 @@ export default function Props() {
           game_totals:  { ...game_totals,  ...prev.game_totals  },
         }));
       })
-      .catch(() => {})
-      .finally(() => {});
+      .catch(() => {});
     return () => ctrl.abort();
   }, [rawProps.length]);
 
