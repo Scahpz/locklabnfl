@@ -186,7 +186,7 @@ function computeAnalytics(gameLogs, line) {
 }
 
 // ── Direct Underdog v5 fetch (browser-side, CORS: * on their API) ─────────────
-const UD_URL = 'https://api.underdogfantasy.com/beta/v5/over_under_lines?sport_id=NFL';
+const UD_URL = 'https://api.underdogfantasy.com/v1/over_under_lines?sport_id=NFL';
 
 const UD_STAT_MAP = {
   passing_yds: 'passing_yards', rushing_yds: 'rushing_yards',

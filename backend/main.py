@@ -720,7 +720,7 @@ async def underdog_props():
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             r = await client.get(
-                "https://api.underdogfantasy.com/beta/v5/over_under_lines",
+                "https://api.underdogfantasy.com/v1/over_under_lines",
                 params={"sport_id": "NFL"},
                 headers={"User-Agent": "Mozilla/5.0"},
             )
