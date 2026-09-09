@@ -18,14 +18,30 @@ import { isDemoMode, getMockPayload } from './mockData';
 import { fetchPropsNoBackend, fetchUnderdogDirect } from './propsNoBackend';
 
 // True when the API URL points to localhost but the browser is on a real domain.
-// This happens in Vercel production builds where .env has VITE_API_URL=http://localhost:8000
-// embedded at build time. Calling localhost from a remote domain always 503s.
 export function isBackendReachable() {
   const apiIsLocal = NFL_API.includes('localhost') || NFL_API.includes('127.0.0.1');
   if (!apiIsLocal) return true; // external URL — assume reachable
   if (typeof window === 'undefined') return true; // SSR / build — skip check
   const host = window.location.hostname;
   return host === 'localhost' || host === '127.0.0.1';
+}
+
+// Quick health probe — returns false if the backend is gone (e.g. Railway 404).
+// Callers can use this to skip the backend and go direct immediately.
+async function _backendAlive() {
+  try {
+    const ctrl = new AbortController();
+    setTimeout(() => ctrl.abort(), 5000);
+    const r = await fetch(`${NFL_API}/health`, { signal: ctrl.signal });
+    // Railway "Application not found" returns 404 with a JSON body
+    if (r.status === 404) {
+      const body = await r.json().catch(() => ({}));
+      if (body?.code === 404) return false; // Railway-specific 404
+    }
+    return r.ok || r.status < 500;
+  } catch {
+    return false;
+  }
 }
 
 export function isCacheValid() {
@@ -242,15 +258,15 @@ let _fetchPromise = null;
 
 async function _doFetch() {
   // If the configured API URL is localhost but we're running on a real domain,
-  // fall back to public APIs (PrizePicks + Sleeper) instead of failing.
-  if (!isBackendReachable()) {
+  // or if the backend is not alive (Railway deleted / 404), go direct immediately.
+  const skipBackend = !isBackendReachable() || !(await _backendAlive());
+  if (skipBackend) {
     const fallback = await fetchPropsNoBackend();
-    if (fallback) {
+    if (fallback?.props?.length) {
       const payload = { ...fallback, props: fallback.props.map((p, i) => enrichProp(p, i)) };
       saveCache(payload);
       return payload;
     }
-    // No NFL props available right now (offseason / no games today)
     return { game_date: new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }), games_summary: [], props: [] };
   }
 
@@ -292,11 +308,12 @@ async function _doFetch() {
   }
 
   if (!rawProps.length) {
-    // Railway path returned nothing — try direct Underdog browser fetch as final fallback.
-    const udDirect = await fetchUnderdogDirect();
-    if (udDirect?.props?.length) {
-      const props = udDirect.props.map((p, i) => enrichProp(p, i));
-      const payload = { game_date: udDirect.game_date || new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }), games_summary: [], props };
+    // Railway path returned nothing — try direct browser fetch (PrizePicks → Underdog).
+    // PrizePicks allows CORS from the Vercel domain so this works when Railway is down.
+    const direct = await fetchPropsNoBackend();
+    if (direct?.props?.length) {
+      const props = direct.props.map((p, i) => enrichProp(p, i));
+      const payload = { game_date: direct.game_date || new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }), games_summary: direct.games_summary || [], props };
       saveCache(payload);
       return payload;
     }
@@ -318,12 +335,11 @@ export async function fetchLiveProps() {
   if (isCacheValid()) return getCachedProps();
   if (_fetchPromise) return _fetchPromise;
   _fetchPromise = _doFetch()
-    .catch(async (err) => {
-      console.error('[LockLab] props fetch failed, trying direct Underdog:', err);
+    .catch(async () => {
       try {
-        const ud = await fetchUnderdogDirect();
-        if (ud?.props?.length) {
-          const payload = { ...ud, props: ud.props.map((p, i) => enrichProp(p, i)) };
+        const direct = await fetchPropsNoBackend();
+        if (direct?.props?.length) {
+          const payload = { ...direct, props: direct.props.map((p, i) => enrichProp(p, i)) };
           saveCache(payload);
           return payload;
         }
