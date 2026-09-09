@@ -1,5 +1,6 @@
 import React from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Label } from 'recharts';
+import { formatMarket } from '@/lib/propLabels';
 
 // Count-based props: integer values — use step line, not smooth spline
 const COUNT_PROPS = new Set([
@@ -46,7 +47,7 @@ export default function PlayerTrendChart({ games, line, originalLine, propType, 
     <div className="w-full">
       <div className="h-52 w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={data} margin={{ top: 8, right: 16, left: -20, bottom: 5 }}>
+          <LineChart data={data} margin={{ top: 8, right: 16, left: 12, bottom: 20 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="hsl(217 33% 20%)" />
             <XAxis
               dataKey="game"
@@ -63,12 +64,23 @@ export default function PlayerTrendChart({ games, line, originalLine, propType, 
               }}
               height={40}
               interval={0}
-            />
+            >
+              <Label value="← older · game · newer →" offset={-4} position="insideBottom" style={{ fill: 'hsl(215 20% 40%)', fontSize: 9 }} />
+            </XAxis>
             {/* Domain: 0 to data max + 1 — prevent over-scaling */}
             <YAxis
               tick={{ fill: 'hsl(215 20% 55%)', fontSize: 11 }}
               domain={[0, dataMax => Math.ceil(dataMax) + 1]}
-            />
+              width={45}
+            >
+              <Label
+                value={formatMarket(propType) || 'Value'}
+                angle={-90}
+                position="insideLeft"
+                style={{ fill: 'hsl(215 20% 55%)', fontSize: 9, textAnchor: 'middle' }}
+                dx={-2}
+              />
+            </YAxis>
             <Tooltip
               contentStyle={{
                 background: 'hsl(222 47% 9%)',
@@ -111,7 +123,6 @@ export default function PlayerTrendChart({ games, line, originalLine, propType, 
           </LineChart>
         </ResponsiveContainer>
       </div>
-      <p className="text-[10px] text-muted-foreground/40 text-center mt-1">oldest ← · · · → newest</p>
     </div>
   );
 }

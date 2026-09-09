@@ -1,6 +1,7 @@
 import React from 'react';
 import { Lock, Zap, Plus } from 'lucide-react';
-import TeamLogo from '@/components/common/TeamLogo';
+import PlayerAvatar from '@/components/common/PlayerAvatar';
+import { formatMarket } from '@/lib/propLabels';
 import { useParlay } from '@/lib/ParlayContext';
 
 export default function LockOfTheDay({ props }) {
@@ -29,13 +30,13 @@ export default function LockOfTheDay({ props }) {
         </div>
 
         <div className="flex items-center gap-4">
-          <TeamLogo team={lock.team} className="w-14 h-14" />
+          <PlayerAvatar photo={lock.image_url} team={lock.team} className="w-14 h-14" />
           <div className="flex-1">
             <h4 className="text-lg font-bold text-foreground">{lock.player_name}</h4>
             <p className="text-sm text-muted-foreground">{lock.team} vs {lock.opponent}</p>
           </div>
           <div className="text-right">
-            <p className="text-xs text-muted-foreground uppercase">{lock.prop_type}</p>
+            <p className="text-xs text-muted-foreground uppercase">{formatMarket(lock.prop_type)}</p>
             <p className="text-2xl font-bold text-foreground">O {lock.line}</p>
             <p className="text-xs text-primary font-semibold">{lock.over_odds > 0 ? '+' : ''}{lock.over_odds}</p>
           </div>

@@ -1,7 +1,8 @@
 import React from 'react';
 import { Lock, TrendingUp, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import TeamLogo from '@/components/common/TeamLogo';
+import PlayerAvatar from '@/components/common/PlayerAvatar';
+import { formatMarket } from '@/lib/propLabels';
 import { useParlay } from '@/lib/ParlayContext';
 import VerdictBadge from '@/components/props/VerdictBadge';
 import { gradeProp } from '@/lib/grading';
@@ -50,7 +51,7 @@ function LockCard({ prop, aiVerdict, aiLoading }) {
 
         {/* Player */}
         <div className="flex items-center gap-3 mb-4">
-          <TeamLogo team={prop.team} className="w-12 h-12" bgClass="bg-white/5 border border-white/8" />
+          <PlayerAvatar photo={prop.image_url} team={prop.team} className="w-12 h-12" bgClass="bg-white/5 border border-white/8" />
           <div>
             <p className="font-bold text-foreground">{prop.player_name}</p>
             <p className="text-[11px] text-muted-foreground/60 mt-0.5">{prop.team} vs {prop.opponent}</p>
@@ -65,7 +66,7 @@ function LockCard({ prop, aiVerdict, aiLoading }) {
         {/* Line block */}
         <div className="flex items-center justify-between bg-white/4 border border-white/6 rounded-xl p-3 mt-3">
           <div>
-            <p className="text-[10px] text-muted-foreground/60 font-semibold uppercase tracking-wider">{prop.prop_type}</p>
+            <p className="text-[10px] text-muted-foreground/60 font-semibold uppercase tracking-wider">{formatMarket(prop.prop_type)}</p>
             <p className="text-2xl font-bold text-foreground mt-0.5 leading-none">{evVerdict.direction === 'OVER' ? 'Over' : 'Under'} {prop.line}</p>
           </div>
           <div className="text-right">

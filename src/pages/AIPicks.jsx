@@ -3,7 +3,8 @@ import { fetchLiveProps } from '@/lib/liveData';
 import { Sparkles, TrendingUp, TrendingDown, Wifi, WifiOff, RefreshCw, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Link } from 'react-router-dom';
-import TeamLogo from '@/components/common/TeamLogo';
+import PlayerAvatar from '@/components/common/PlayerAvatar';
+import { formatMarket } from '@/lib/propLabels';
 import VerdictBadge from '@/components/props/VerdictBadge';
 import { gradeProp } from '@/lib/grading';
 import { calcEVVerdict, TIER_CONFIG } from '@/lib/verdict';
@@ -45,7 +46,7 @@ function PickCard({ prop }) {
       {/* Header */}
       <div className="flex items-start justify-between mb-3">
         <div className="flex items-center gap-3">
-          <TeamLogo team={prop.team} className="w-10 h-10" />
+          <PlayerAvatar photo={prop.image_url} team={prop.team} className="w-10 h-10" />
           <div>
             <Link
               to={`/trends?player=${encodeURIComponent(prop.player_name)}`}
@@ -67,7 +68,7 @@ function PickCard({ prop }) {
       {/* Line block */}
       <div className="flex items-center justify-between bg-secondary/50 rounded-lg p-3 mb-3">
         <div>
-          <p className="text-xs text-muted-foreground uppercase tracking-wider">{prop.prop_type}</p>
+          <p className="text-xs text-muted-foreground uppercase tracking-wider">{formatMarket(prop.prop_type)}</p>
           <p className={cn("text-xl font-bold flex items-center gap-1.5 mt-0.5", isOver ? 'text-emerald-400' : 'text-rose-400')}>
             {isOver
               ? <TrendingUp className="w-4 h-4" />

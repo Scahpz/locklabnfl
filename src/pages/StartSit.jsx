@@ -9,6 +9,7 @@ import { getLeagueSettings, saveLeagueSettings, SCORING_FORMATS } from '@/lib/le
 import { fetchLivePlayers, clearLiveCache } from '@/lib/nflLiveData';
 import { cn } from '@/lib/utils';
 import TeamLogo from '@/components/common/TeamLogo';
+import PlayerAvatar from '@/components/common/PlayerAvatar';
 import PlayerBreakdownModal from '@/components/PlayerBreakdownModal';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -378,7 +379,7 @@ function PlayerRankCard({ rank, posRank, player, prop, score, onCompare, onOpen 
         </span>
       </div>
 
-      <TeamLogo team={player.team} className="w-9 h-9" />
+      <PlayerAvatar photo={player.photo_url} team={player.team} className="w-9 h-9" />
 
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
@@ -489,7 +490,7 @@ function WaiverCard({ rank, player, prop, score, waiverReason, injuryUpside, isH
           </span>
         </div>
 
-        <TeamLogo team={player.team} className="w-9 h-9" />
+        <PlayerAvatar photo={player.photo_url} team={player.team} className="w-9 h-9" />
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
@@ -586,7 +587,7 @@ function PlayerSlot({ label, player, prop, score, availableProps, onChangeProp, 
       </div>
 
       <div className="flex items-center gap-3">
-        <TeamLogo team={player.team} className="w-10 h-10" />
+        <PlayerAvatar photo={player.photo_url} team={player.team} className="w-10 h-10" />
         <div>
           <div className="font-semibold text-foreground text-sm">{player.player_name}</div>
           <div className="text-[11px] text-muted-foreground">{player.team} · {player.position}</div>
@@ -781,7 +782,7 @@ function PlayerPickerModal({ players: allPlayers, onSelect, onClose, excludePlay
                 onClick={() => onSelect(player)}
                 className="w-full flex items-center gap-3 rounded-xl p-2.5 hover:bg-white/5 transition-colors text-left"
               >
-                <TeamLogo team={player.team} className="w-8 h-8 flex-shrink-0" />
+                <PlayerAvatar photo={player.photo_url} team={player.team} className="w-8 h-8 flex-shrink-0" />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
                     <span className="text-sm font-medium text-foreground truncate">{player.player_name}</span>

@@ -300,7 +300,7 @@ function buildPlayers(sleeperRaw, projections, { teamToOpp, teamToTotal, teamIsH
       team,
       opponent,
       position:            p.position,
-      photo_url:           '',
+      photo_url:           `https://sleepercdn.com/content/nfl/players/thumb/${id}.jpg`,
       is_starter:          p.depth_chart_order === 1,
       depth_chart_order:   p.depth_chart_order ?? 99,
       injury_status:       injStatus,

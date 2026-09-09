@@ -7,6 +7,7 @@ import MinutesTrendChart from '@/components/trends/MinutesTrendChart';
 import HotStreakCard from '@/components/trends/HotStreakCard';
 import { cn } from '@/lib/utils';
 import TeamLogo from '@/components/common/TeamLogo';
+import { formatMarket } from '@/lib/propLabels';
 
 import { NFL_API } from '@/lib/config';
 
@@ -278,7 +279,7 @@ export default function Trends() {
             <div key={i} className="rounded-xl border border-border bg-card p-5">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-3">
-                  <h3 className="text-lg font-bold text-foreground uppercase">{prop.prop_type}</h3>
+                  <h3 className="text-lg font-bold text-foreground uppercase">{formatMarket(prop.prop_type)}</h3>
                   <Badge variant="outline" className="border-border text-xs">Line: {prop.line}</Badge>
                 </div>
                 {prop.streak_info && (

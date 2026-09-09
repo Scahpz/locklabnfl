@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import TeamLogo from '@/components/common/TeamLogo';
+import { formatMarket } from '@/lib/propLabels';
 import { useParlay } from '@/lib/ParlayContext';
 import { base44 } from '@/api/base44Client';
 import ParlayHistoryTab from '@/components/props/ParlayHistoryTab';
@@ -202,7 +203,7 @@ export default function ParlayBuilder() {
                           <p className="text-xs font-medium text-foreground truncate">{leg.player_name}</p>
                           <p className="text-[10px] text-muted-foreground">
                             {leg.is_game_bet ? (
-                              <span className="font-bold text-primary">{leg.prop_type.toUpperCase()} ({leg.odds > 0 ? '+' : ''}{leg.odds})</span>
+                              <span className="font-bold text-primary">{formatMarket(leg.prop_type)} ({leg.odds > 0 ? '+' : ''}{leg.odds})</span>
                             ) : (
                               <>
                                 <span className={cn("font-bold", isOver ? 'text-emerald-400' : 'text-rose-400')}>

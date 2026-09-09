@@ -1,7 +1,8 @@
 import React from 'react';
 import { Flame, TrendingUp, Zap, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import TeamLogo from '@/components/common/TeamLogo';
+import PlayerAvatar from '@/components/common/PlayerAvatar';
+import { formatMarket } from '@/lib/propLabels';
 import { useParlay } from '@/lib/ParlayContext';
 import { Link } from 'react-router-dom';
 
@@ -21,7 +22,7 @@ export default function DemonPickCard({ pick, onOpenDetail }) {
   if (!pick) return null;
 
   const { prop, reason, coldStreakLen, seasonAvg, boomLine, boomScore } = pick;
-  const label = propTypeLabels[prop.prop_type] || prop.prop_type.toUpperCase();
+  const label = propTypeLabels[prop.prop_type] || formatMarket(prop.prop_type);
   const picked = isSelected(prop.player_name, prop.prop_type, 'over');
 
   return (
@@ -50,7 +51,7 @@ export default function DemonPickCard({ pick, onOpenDetail }) {
 
         {/* Player */}
         <div className="flex items-center gap-3 mb-4">
-          <TeamLogo team={prop.team} className="w-11 h-11" />
+          <PlayerAvatar photo={prop.image_url} team={prop.team} className="w-11 h-11" />
           <div className="flex-1 min-w-0">
             <Link to={`/trends?player=${encodeURIComponent(prop.player_name)}`}
               className="font-bold text-sm text-foreground hover:text-orange-400 transition-colors">

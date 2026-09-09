@@ -2,6 +2,7 @@ import React from 'react';
 import { Flame, TrendingUp } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import TeamLogo from '@/components/common/TeamLogo';
+import { formatMarket } from '@/lib/propLabels';
 
 export default function HotStreakCard({ player, prop, onClick, isSelected }) {
   const hits = prop.last_10_games?.filter(v => v > prop.line).length || 0;
@@ -23,7 +24,7 @@ export default function HotStreakCard({ player, prop, onClick, isSelected }) {
         <Flame className="w-3.5 h-3.5 text-orange-400 ml-auto flex-shrink-0" />
       </div>
       <div className="bg-secondary/60 rounded-lg px-2 py-1.5 text-center">
-        <p className="text-[10px] text-muted-foreground uppercase">{prop.prop_type}</p>
+        <p className="text-[10px] text-muted-foreground uppercase">{formatMarket(prop.prop_type)}</p>
         <p className="text-base font-bold text-primary">{hits}/10</p>
         <p className="text-[10px] text-muted-foreground">hit rate</p>
       </div>

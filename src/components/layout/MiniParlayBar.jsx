@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Layers, X, ChevronUp, ChevronDown, ArrowRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import TeamLogo from '@/components/common/TeamLogo';
+import { formatMarket } from '@/lib/propLabels';
 
 export default function MiniParlayBar() {
   const { legs, removeLeg, removeGameLeg, clearLegs } = useParlay();
@@ -25,13 +26,13 @@ export default function MiniParlayBar() {
                   <p className="text-xs font-semibold text-foreground truncate">{leg.player_name}</p>
                   <p className="text-[10px] text-muted-foreground mt-0.5">
                     {leg.is_game_bet ? (
-                      <span className="font-bold text-primary">{leg.prop_type.toUpperCase()} · {leg.odds > 0 ? '+' : ''}{leg.odds}</span>
+                      <span className="font-bold text-primary">{formatMarket(leg.prop_type)} · {leg.odds > 0 ? '+' : ''}{leg.odds}</span>
                     ) : (
                       <>
                         <span className={cn("font-bold", leg.pick === 'over' ? 'text-primary' : 'text-destructive')}>
                           {leg.pick.toUpperCase()}
                         </span>
-                        {' '}{leg.line} {leg.prop_type.toUpperCase()} · <span className="text-muted-foreground">{leg.odds > 0 ? '+' : ''}{leg.odds}</span>
+                        {' '}{leg.line} {formatMarket(leg.prop_type)} · <span className="text-muted-foreground">{leg.odds > 0 ? '+' : ''}{leg.odds}</span>
                       </>
                     )}
                   </p>
