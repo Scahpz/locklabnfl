@@ -25,9 +25,10 @@ async function _resolveSeason() {
     return _resolvedSeason;
   }
 
-  // September+: check if current year has ≥5 weeks of real regular-season data
+  // September+: check if current year's Week 1 has real regular-season data.
+  // Checking week 1 (not week 5) so the current season is used from day 1.
   try {
-    const r = await fetch(`https://api.sleeper.app/v1/stats/nfl/regular/${year}/5`);
+    const r = await fetch(`https://api.sleeper.app/v1/stats/nfl/regular/${year}/1`);
     if (r.ok) {
       const data = await r.json();
       // More than 50 entries means real games happened, not just preseason noise

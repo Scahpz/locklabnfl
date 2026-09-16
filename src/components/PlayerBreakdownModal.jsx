@@ -43,6 +43,11 @@ const ESPN_TO_SLEEPER = { WSH: 'WAS', LA: 'LAR' };
 // SLEEPER_TO_ESPN: build the ESPN schedule URL from our team abbreviations
 const SLEEPER_TO_ESPN = { WAS: 'WSH', LAR: 'LA' };
 
+// Season years — computed once at module load so labels stay consistent
+const _seasonNow      = new Date();
+const CURRENT_SEASON  = _seasonNow.getMonth() >= 8 ? _seasonNow.getFullYear() : _seasonNow.getFullYear() - 1;
+const PRIOR_SEASON    = CURRENT_SEASON - 1;
+
 const GAME_FILTERS = ['L3', 'L5', 'L10', 'All'];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -207,7 +212,7 @@ function buildBullets(player, score, rank) {
 // Cached in sessionStorage per player — subsequent opens are instant.
 
 async function fetchLastSeasonLog(playerId, team, position) {
-  const cacheKey = `locklab_ls25_${playerId}`;
+  const cacheKey = `locklab_ls${PRIOR_SEASON}_${playerId}`;
   try {
     const cached = sessionStorage.getItem(cacheKey);
     if (cached) return JSON.parse(cached);
@@ -218,10 +223,10 @@ async function fetchLastSeasonLog(playerId, team, position) {
 
   const [schedRes, ...weekRes] = await Promise.allSettled([
     fetch(
-      `https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/${espnTeam}/schedule?season=2025&seasontype=2`,
+      `https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/${espnTeam}/schedule?season=${PRIOR_SEASON}&seasontype=2`,
     ).then(r => r.ok ? r.json() : null).catch(() => null),
     ...Array.from({ length: 18 }, (_, i) =>
-      fetch(`https://api.sleeper.app/v1/stats/nfl/regular/2025/${i + 1}`)
+      fetch(`https://api.sleeper.app/v1/stats/nfl/regular/${PRIOR_SEASON}/${i + 1}`)
         .then(r => r.ok ? r.json() : null).catch(() => null),
     ),
   ]);
@@ -375,8 +380,8 @@ function SeasonStatsSection({ lsLog, onRetryLS, pos, score, opponent = '—' }) 
       {/* Season toggle */}
       <div className="flex gap-1.5 p-1 bg-white/4 rounded-xl w-fit">
         {[
-          { key: 'current', label: '2026 Season' },
-          { key: 'last',    label: '2025 Season' },
+          { key: 'current', label: `${CURRENT_SEASON} Season` },
+          { key: 'last',    label: `${PRIOR_SEASON} Season` },
         ].map(({ key, label }) => (
           <button
             key={key}
@@ -427,7 +432,7 @@ function SeasonStatsSection({ lsLog, onRetryLS, pos, score, opponent = '—' }) 
         /* ── fetching ── */
         <div className="flex flex-col items-center gap-3 py-10">
           <div className="w-5 h-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
-          <p className="text-[11px] text-muted-foreground">Loading 2025 game log…</p>
+          <p className="text-[11px] text-muted-foreground">Loading {PRIOR_SEASON} game log…</p>
           <p className="text-[10px] text-muted-foreground/60">
             Fetching 18 weeks of stats — takes a moment the first time.
           </p>
@@ -435,7 +440,7 @@ function SeasonStatsSection({ lsLog, onRetryLS, pos, score, opponent = '—' }) 
       ) : lsLog === 'error' ? (
         /* ── error ── */
         <div className="flex flex-col items-center gap-2 py-8">
-          <p className="text-[11px] text-red-400">Failed to load 2025 game log.</p>
+          <p className="text-[11px] text-red-400">Failed to load {PRIOR_SEASON} game log.</p>
           <button onClick={onRetryLS} className="text-[10px] text-primary underline underline-offset-2">
             Retry
           </button>
@@ -563,11 +568,11 @@ function SeasonStatsSection({ lsLog, onRetryLS, pos, score, opponent = '—' }) 
             return (
               <div className="pt-2 border-t border-white/6">
                 <div className="flex items-center justify-between mb-1.5">
-                  <div className="text-[10px] text-muted-foreground uppercase tracking-wider">vs {opponent} · 2025</div>
+                  <div className="text-[10px] text-muted-foreground uppercase tracking-wider">vs {opponent} · {PRIOR_SEASON}</div>
                   {vsAvg != null && <div className="text-[10px] font-semibold text-primary">{vsAvg} FP avg</div>}
                 </div>
                 {vsGames.length === 0 ? (
-                  <p className="text-[11px] text-muted-foreground">No meetings vs {opponent} in 2025.</p>
+                  <p className="text-[11px] text-muted-foreground">No meetings vs {opponent} in {PRIOR_SEASON}.</p>
                 ) : (
                   <div className="space-y-1">
                     {vsGames.map(g => (

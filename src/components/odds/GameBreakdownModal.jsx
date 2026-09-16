@@ -363,14 +363,14 @@ export default function GameBreakdownModal({ game, onClose, liveStats = null }) 
 
             {/* ── 2025 Season History ── */}
             {hist && (
-              <SectionToggle title="2025 Season History" icon={BarChart2} defaultOpen={false}>
+              <SectionToggle title={`${NFL_SEASON_YEAR} Season History`} icon={BarChart2} defaultOpen={false}>
                 <div className="space-y-3">
                   {/* Season records */}
                   <div className="grid grid-cols-3 gap-2 text-center">
                     {[aA, null, hA].map((team, i) => {
                       if (!team) return (
                         <div key="mid" className="flex flex-col items-center justify-center">
-                          <span className="text-[9px] text-muted-foreground uppercase tracking-wider">2025 Record</span>
+                          <span className="text-[9px] text-muted-foreground uppercase tracking-wider">{NFL_SEASON_YEAR} Record</span>
                         </div>
                       );
                       const s = hist[team]?.season ?? { w: 0, l: 0, pf: 0, pa: 0 };

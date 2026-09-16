@@ -9,6 +9,9 @@ import VerdictBadge from '@/components/props/VerdictBadge';
 import PlayerTrendChart from '@/components/trends/PlayerTrendChart';
 import { useParlay } from '@/lib/ParlayContext';
 
+const _pdmNow = new Date();
+const CURRENT_NFL_SEASON = _pdmNow.getMonth() >= 8 ? _pdmNow.getFullYear() : _pdmNow.getFullYear() - 1;
+
 
 function fmtOdds(n) {
   if (n == null) return '—';
@@ -642,7 +645,7 @@ export default function PropDetailModal({ prop, onClose }) {
 
               // NFL week helper for table/header labels
               const getWeekLabel = (g) => {
-                if (g?.week) return `'${(g.season ?? 2025).toString().slice(-2)} W${g.week}`;
+                if (g?.week) return `'${(g.season ?? CURRENT_NFL_SEASON).toString().slice(-2)} W${g.week}`;
                 if (g?.date) {
                   try {
                     const d = new Date(g.date);
@@ -694,7 +697,7 @@ export default function PropDetailModal({ prop, onClose }) {
               const weeks = windowLogs.map(g => g.week).filter(Boolean);
               const minWk = weeks.length ? Math.min(...weeks) : null;
               const maxWk = weeks.length ? Math.max(...weeks) : null;
-              const logSeason = allDetailLogs.find(g => g.season)?.season ?? 2025;
+              const logSeason = allDetailLogs.find(g => g.season)?.season ?? CURRENT_NFL_SEASON;
               const seasonLabel = minWk && maxWk
                 ? `${logSeason} Regular Season · Weeks ${minWk}–${maxWk}`
                 : `${logSeason} Regular Season`;
