@@ -1,5 +1,7 @@
 // Fetches NFL season stats from Sleeper directly (same source as the start/sit section).
-// Guaranteed to have correct season data — bypasses the Railway backend for historical analytics.
+// Loads BOTH the current season AND the prior season so analytics always have a full
+// data foundation even when only 1-3 weeks of the new season have been played.
+// Current-season games sort first (newest) so L5/L10 windows are anchored to 2026+.
 
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
@@ -10,8 +12,8 @@ const SLEEPER_TO_ESPN = { WAS: 'WSH', LAR: 'LA' };
 let _memCache = null;
 let _resolvedSeason = null;
 
-// Determine which season has enough data (≥5 completed weeks).
-// Current year is only used if week 5 exists with real data; otherwise prior year.
+// Determine the current NFL season year.
+// September+: use the current calendar year if Week 1 has real data, else prior year.
 async function _resolveSeason() {
   if (_resolvedSeason) return _resolvedSeason;
 
@@ -19,27 +21,26 @@ async function _resolveSeason() {
   const year = now.getFullYear();
   const month = now.getMonth(); // 0-indexed
 
-  // Before September: always prior year's season
+  // Before September: always prior year's complete season
   if (month < 8) {
     _resolvedSeason = year - 1;
     return _resolvedSeason;
   }
 
-  // September+: check if current year's Week 1 has real regular-season data.
-  // Checking week 1 (not week 5) so the current season is used from day 1.
-  try {
-    const r = await fetch(`https://api.sleeper.app/v1/stats/nfl/regular/${year}/1`);
-    if (r.ok) {
-      const data = await r.json();
-      // More than 50 entries means real games happened, not just preseason noise
-      if (Object.keys(data).length > 50) {
-        _resolvedSeason = year;
-        return _resolvedSeason;
+  // September+: check weeks 1 and 2 — if either has data, current season is live
+  for (const checkWeek of [1, 2]) {
+    try {
+      const r = await fetch(`https://api.sleeper.app/v1/stats/nfl/regular/${year}/${checkWeek}`);
+      if (r.ok) {
+        const data = await r.json();
+        if (Object.keys(data).length > 50) {
+          _resolvedSeason = year;
+          return _resolvedSeason;
+        }
       }
-    }
-  } catch {}
+    } catch {}
+  }
 
-  // Not enough current-year data — use prior year's complete season
   _resolvedSeason = year - 1;
   return _resolvedSeason;
 }
@@ -48,11 +49,33 @@ function normName(n) {
   return n.toLowerCase().replace(/\./g, '').replace(/\s+/g, ' ').trim();
 }
 
+// Build week → ESPN_abbr → { opp (Sleeper abbr), date, isHome } from an ESPN schedule response
+function _buildScheduleMap(schedRes) {
+  const map = {};
+  for (const event of schedRes?.events ?? []) {
+    const weekNum = event.week?.number;
+    if (!weekNum) continue;
+    const comp = event.competitions?.[0];
+    if (!comp) continue;
+    const home = comp.competitors?.find(c => c.homeAway === 'home')?.team?.abbreviation?.toUpperCase();
+    const away = comp.competitors?.find(c => c.homeAway === 'away')?.team?.abbreviation?.toUpperCase();
+    if (!home || !away) continue;
+    const date = event.date ?? null;
+    if (!map[weekNum]) map[weekNum] = {};
+    const homeSlp = ESPN_TO_SLEEPER[home] ?? home;
+    const awaySlp = ESPN_TO_SLEEPER[away] ?? away;
+    map[weekNum][home] = { opp: awaySlp, date, isHome: true };
+    map[weekNum][away] = { opp: homeSlp, date, isHome: false };
+  }
+  return map;
+}
+
 export async function loadSleeperHistory() {
   if (_memCache && Date.now() - _memCache.ts < CACHE_TTL_MS) return _memCache;
 
-  const season = await _resolveSeason();
-  const CACHE_KEY = `locklab_sl_hist2_${season}`;
+  const season      = await _resolveSeason();
+  const priorSeason = season - 1;
+  const CACHE_KEY   = `locklab_sl_hist3_${season}`; // v3: loads both current + prior season
 
   try {
     const raw = sessionStorage.getItem(CACHE_KEY);
@@ -65,78 +88,86 @@ export async function loadSleeperHistory() {
     }
   } catch {}
 
-  // Fetch player list + all 18 weeks + ESPN schedule in parallel
-  const [playersData, scheduleRes, ...weekResults] = await Promise.all([
+  // Fetch everything in parallel:
+  //   1 players list
+  //   2 ESPN schedules (current + prior season)
+  //   18 × current season Sleeper weekly stats
+  //   18 × prior season Sleeper weekly stats
+  const [playersData, schedResCurr, schedResPrior, ...weekResultsAll] = await Promise.all([
     fetch('https://api.sleeper.app/v1/players/nfl').then(r => r.ok ? r.json() : {}),
     fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?dates=${season}0901-${season + 1}0201&limit=300`)
-      .then(r => r.ok ? r.json() : null)
-      .catch(() => null),
+      .then(r => r.ok ? r.json() : null).catch(() => null),
+    fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?dates=${priorSeason}0901-${season}0201&limit=300`)
+      .then(r => r.ok ? r.json() : null).catch(() => null),
+    // current season weeks 1-18
     ...Array.from({ length: 18 }, (_, i) =>
       fetch(`https://api.sleeper.app/v1/stats/nfl/regular/${season}/${i + 1}`)
         .then(r => r.ok ? r.json() : {})
-        .then(data => ({ week: i + 1, data }))
-        .catch(() => ({ week: i + 1, data: {} }))
+        .then(data => ({ week: i + 1, season, data }))
+        .catch(() => ({ week: i + 1, season, data: {} }))
+    ),
+    // prior season weeks 1-18
+    ...Array.from({ length: 18 }, (_, i) =>
+      fetch(`https://api.sleeper.app/v1/stats/nfl/regular/${priorSeason}/${i + 1}`)
+        .then(r => r.ok ? r.json() : {})
+        .then(data => ({ week: i + 1, season: priorSeason, data }))
+        .catch(() => ({ week: i + 1, season: priorSeason, data: {} }))
     ),
   ]);
 
-  // Build schedule map: weekNum → espnTeamAbbr → { opp (Sleeper abbr), date, isHome }
-  const scheduleMap = {};
-  for (const event of scheduleRes?.events ?? []) {
-    const weekNum = event.week?.number;
-    if (!weekNum) continue;
-    const comp = event.competitions?.[0];
-    if (!comp) continue;
-    const home = comp.competitors?.find(c => c.homeAway === 'home')?.team?.abbreviation?.toUpperCase();
-    const away = comp.competitors?.find(c => c.homeAway === 'away')?.team?.abbreviation?.toUpperCase();
-    if (!home || !away) continue;
-    const date = event.date ?? null;
-    if (!scheduleMap[weekNum]) scheduleMap[weekNum] = {};
-    const homeSlp = ESPN_TO_SLEEPER[home] ?? home;
-    const awaySlp = ESPN_TO_SLEEPER[away] ?? away;
-    scheduleMap[weekNum][home] = { opp: awaySlp, date, isHome: true };
-    scheduleMap[weekNum][away] = { opp: homeSlp, date, isHome: false };
-  }
+  const schedMapCurr  = _buildScheduleMap(schedResCurr);
+  const schedMapPrior = _buildScheduleMap(schedResPrior);
 
-  const byName = {};
-  const byNameNorm = {}; // normalized → canonical
+  const currWeekResults  = weekResultsAll.slice(0, 18);
+  const priorWeekResults = weekResultsAll.slice(18);
 
-  for (const { week, data } of weekResults) {
-    for (const [pid, stats] of Object.entries(data)) {
-      if (!stats || typeof stats !== 'object') continue;
-      const info = playersData[pid];
-      if (!info?.full_name) continue;
+  const byName     = {};
+  const byNameNorm = {};
 
-      // Skip bye weeks and DNP games — Sleeper still emits zero-stat entries for inactive players
-      if ((stats.pts_half_ppr ?? 0) < 0.5) continue;
+  function processWeeks(weekResults, schedMap) {
+    for (const { week, season: wkSeason, data } of weekResults) {
+      for (const [pid, stats] of Object.entries(data)) {
+        if (!stats || typeof stats !== 'object') continue;
+        const info = playersData[pid];
+        if (!info?.full_name) continue;
 
-      const name = info.full_name;
-      if (!byName[name]) {
-        byName[name] = { position: info.position || '', games: [] };
-        byNameNorm[normName(name)] = name;
+        // Skip bye weeks and DNP/inactive games (Sleeper emits zero-stat rows for these)
+        if ((stats.pts_half_ppr ?? 0) < 0.5) continue;
+
+        const name = info.full_name;
+        if (!byName[name]) {
+          byName[name] = { position: info.position || '', games: [] };
+          byNameNorm[normName(name)] = name;
+        }
+
+        const espnTeam   = SLEEPER_TO_ESPN[info.team] ?? info.team;
+        const weekSched  = schedMap[week] ?? {};
+        const schedEntry = weekSched[espnTeam] ?? weekSched[info.team] ?? null;
+
+        byName[name].games.push({
+          week,
+          season: wkSeason,
+          stats,
+          opp:    schedEntry?.opp    ?? stats.opponent ?? stats.opp ?? '',
+          isHome: schedEntry?.isHome ?? null,
+          date:   schedEntry?.date   ?? null,
+        });
       }
-
-      // Look up opponent and game date from ESPN schedule
-      const espnTeam   = SLEEPER_TO_ESPN[info.team] ?? info.team;
-      const weekSched  = scheduleMap[week] ?? {};
-      const schedEntry = weekSched[espnTeam] ?? weekSched[info.team] ?? null;
-
-      byName[name].games.push({
-        week,
-        season,
-        stats,
-        opp:    schedEntry?.opp    ?? stats.opponent ?? stats.opp ?? '',
-        isHome: schedEntry?.isHome ?? null,
-        date:   schedEntry?.date   ?? null,
-      });
     }
   }
 
+  processWeeks(currWeekResults, schedMapCurr);
+  processWeeks(priorWeekResults, schedMapPrior);
+
   for (const entry of Object.values(byName)) {
-    entry.games.sort((a, b) => b.week - a.week); // most recent first
+    // Current season games first, then prior season — within each, newest week first
+    entry.games.sort((a, b) =>
+      b.season !== a.season ? b.season - a.season : b.week - a.week
+    );
   }
 
   const result = { byName, byNameNorm, ts: Date.now(), season };
-  try { sessionStorage.setItem(`locklab_sl_hist2_${season}`, JSON.stringify(result)); } catch {}
+  try { sessionStorage.setItem(CACHE_KEY, JSON.stringify(result)); } catch {}
 
   _memCache = result;
   return result;
@@ -182,7 +213,6 @@ function _findEntry(playerName, cache) {
   const canonical = cache.byNameNorm[norm];
   if (canonical) return cache.byName[canonical];
 
-  // Partial: remove periods, try prefix/suffix match
   for (const [k, v] of Object.entries(cache.byNameNorm)) {
     if (norm.length > 4 && (k.startsWith(norm) || norm.startsWith(k))) {
       return cache.byName[v];
@@ -201,20 +231,26 @@ export function computeAnalyticsFromSleeper(playerName, propType, line, cache) {
   const getter = STAT_GETTERS[propType];
   if (!getter) return null;
 
-  const games  = entry.games; // sorted desc by week
+  // games is sorted: current season newest first, then prior season newest first
+  const games  = entry.games;
   const values = games.map(g => getter(g.stats));
   const logs   = games.map(g => ({
     value:  Math.round(getter(g.stats) * 10) / 10,
     opp:    g.opp,
     isHome: g.isHome,
-    date:   g.date ?? `${cache.season}-W${g.week}`,
-    season: cache.season,
+    date:   g.date ?? `${g.season}-W${g.week}`,
+    season: g.season,
     week:   g.week,
   }));
 
+  // L5/L10/L20 windows start from the most recent games (current season first)
   const v5  = values.slice(0, 5);
   const v10 = values.slice(0, 10);
   const v20 = values.slice(0, 20);
+
+  // Current-season games only (for display — "2026 stats")
+  const currGames  = games.filter(g => g.season === cache.season);
+  const currValues = currGames.map(g => getter(g.stats));
 
   const a10     = _avg(v10);
   const proj    = _avg(v5) ?? a10 ?? _avg(values);
@@ -229,9 +265,10 @@ export function computeAnalyticsFromSleeper(playerName, propType, line, cache) {
     hit_rate_last_5:   _hitRate(v5,  line),
     hit_rate_last_10:  _hitRate(v10, line),
     hit_rate_last_20:  _hitRate(v20, line),
-    season_avg:        _avg(values),
-    season_games:      values.length,
-    season_hit_rate:   _hitRate(values, line),
+    season_avg:        currValues.length ? _avg(currValues) : _avg(values),
+    season_games:      currValues.length || values.length,
+    season_hit_rate:   currValues.length ? _hitRate(currValues, line) : _hitRate(values, line),
+    // current-season game logs shown up front in chart; prior season fills the window
     last_5_games:      v5,
     last_10_games:     v10,
     last_20_games:     v20,

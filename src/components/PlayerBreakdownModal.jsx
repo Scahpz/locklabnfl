@@ -207,9 +207,66 @@ function buildBullets(player, score, rank) {
   return { likes: likes.slice(0, 3), risks: risks.slice(0, 2) };
 }
 
-// ─── Last-season fetch (2025) ─────────────────────────────────────────────────
-// 18 parallel Sleeper weekly stat dumps + 1 ESPN schedule request.
-// Cached in sessionStorage per player — subsequent opens are instant.
+// ─── Season log fetchers ──────────────────────────────────────────────────────
+// fetchCurrentSeasonLog: in-progress season (CURRENT_SEASON), session-cached in memory.
+// fetchLastSeasonLog:    completed prior season (PRIOR_SEASON), sessionStorage-cached.
+
+const _csCache = new Map(); // playerId → GameEntry[], memory-only (fresh each page load)
+
+async function fetchCurrentSeasonLog(playerId, team, position) {
+  if (_csCache.has(playerId)) return _csCache.get(playerId);
+
+  const espnTeam = SLEEPER_TO_ESPN[team] ?? team;
+  const defKey   = POS_DEF_KEY[position];
+
+  const [schedRes, ...weekRes] = await Promise.allSettled([
+    fetch(
+      `https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/${espnTeam}/schedule?season=${CURRENT_SEASON}&seasontype=2`,
+    ).then(r => r.ok ? r.json() : null).catch(() => null),
+    ...Array.from({ length: 18 }, (_, i) =>
+      fetch(`https://api.sleeper.app/v1/stats/nfl/regular/${CURRENT_SEASON}/${i + 1}`)
+        .then(r => r.ok ? r.json() : null).catch(() => null),
+    ),
+  ]);
+
+  const oppByWeek = {};
+  const schedData = schedRes.status === 'fulfilled' ? schedRes.value : null;
+  for (const ev of schedData?.events ?? []) {
+    const week = ev.week?.number ?? ev.week;
+    if (!week) continue;
+    const comp   = ev.competitions?.[0];
+    const home   = comp?.competitors?.find(c => c.homeAway === 'home')?.team?.abbreviation?.toUpperCase();
+    const away   = comp?.competitors?.find(c => c.homeAway === 'away')?.team?.abbreviation?.toUpperCase();
+    const mine   = espnTeam.toUpperCase();
+    const rawOpp = home === mine ? away : away === mine ? home : null;
+    if (rawOpp) oppByWeek[week] = ESPN_TO_SLEEPER[rawOpp] ?? rawOpp;
+  }
+
+  const log = weekRes
+    .map((res, i) => {
+      const week  = i + 1;
+      const stats = res.status === 'fulfilled' ? res.value?.[playerId] : null;
+      if (!stats || (stats.pts_half_ppr ?? 0) < 0.5) return null;
+      const opp  = oppByWeek[week] ?? null;
+      const rank = opp ? defRank(opp, defKey) : null;
+      return {
+        week,
+        opponent:   opp,
+        defRankVal: rank,
+        fp:         Math.round((stats.pts_half_ppr ?? 0) * 10) / 10,
+        passYd:     stats.pass_yd != null ? Math.round(stats.pass_yd)           : null,
+        passTd:     stats.pass_td != null ? Math.round(stats.pass_td * 10) / 10 : null,
+        rushYd:     stats.rush_yd != null ? Math.round(stats.rush_yd)           : null,
+        rec:        stats.rec     != null ? Math.round(stats.rec * 10) / 10     : null,
+        recYd:      stats.rec_yd  != null ? Math.round(stats.rec_yd)            : null,
+        recTd:      stats.rec_td  != null ? Math.round(stats.rec_td * 10) / 10  : null,
+      };
+    })
+    .filter(Boolean);
+
+  _csCache.set(playerId, log);
+  return log;
+}
 
 async function fetchLastSeasonLog(playerId, team, position) {
   const cacheKey = `locklab_ls${PRIOR_SEASON}_${playerId}`;
@@ -345,16 +402,24 @@ function LSChartTooltip({ active, payload, pos }) {
 
 // ─── Season Stats section ─────────────────────────────────────────────────────
 
-function SeasonStatsSection({ lsLog, onRetryLS, pos, score, opponent = '—' }) {
-  const [seasonFilter, setSeasonFilter] = useState('last');
-  const [gameFilter,   setGameFilter]   = useState('L10');
+function SeasonStatsSection({ lsLog, csLog, onRetryLS, onRetryCS, pos, score, opponent = '—' }) {
+  const [seasonFilter, setSeasonFilter] = useState('current'); // default: show 2026 up front
+  const [gameFilter,   setGameFilter]   = useState('All');
+
+  const isCurrent  = seasonFilter === 'current';
+  const activeLog  = isCurrent ? csLog : lsLog;
+  const onRetry    = isCurrent ? onRetryCS : onRetryLS;
+  const activeSeason = isCurrent ? CURRENT_SEASON : PRIOR_SEASON;
+  const isLoading  = activeLog === null || activeLog === 'loading';
+  const isError    = activeLog === 'error';
+  const hasData    = Array.isArray(activeLog) && activeLog.length > 0;
 
   const slice = useMemo(() => {
-    if (!Array.isArray(lsLog)) return [];
-    if (gameFilter === 'All') return lsLog;
+    if (!Array.isArray(activeLog)) return [];
+    if (gameFilter === 'All') return activeLog;
     const n = gameFilter === 'L3' ? 3 : gameFilter === 'L5' ? 5 : 10;
-    return lsLog.slice(-n);
-  }, [lsLog, gameFilter]);
+    return activeLog.slice(-n);
+  }, [activeLog, gameFilter]);
 
   const allFP    = slice.map(g => g.fp);
   const avg      = allFP.length ? Math.round(allFP.reduce((a, b) => a + b, 0) / allFP.length * 10) / 10 : 0;
@@ -362,7 +427,6 @@ function SeasonStatsSection({ lsLog, onRetryLS, pos, score, opponent = '—' }) 
   const low      = allFP.length ? Math.min(...allFP) : 0;
   const chartMax = Math.max(high + 5, (score?.ceiling ?? 20) + 5, 20);
 
-  // X-axis label: "KC #3" — team the player faced + that defense's rank vs this position
   const chartData = slice.map(g => ({
     ...g,
     xLabel: g.opponent
@@ -370,10 +434,7 @@ function SeasonStatsSection({ lsLog, onRetryLS, pos, score, opponent = '—' }) 
       : `Wk${g.week}`,
   }));
 
-  // Angle labels when there are enough games that they'd overlap
   const needsAngle = slice.length > 7;
-
-  const isCurrent = seasonFilter === 'current';
 
   return (
     <div className="space-y-3">
@@ -398,8 +459,8 @@ function SeasonStatsSection({ lsLog, onRetryLS, pos, score, opponent = '—' }) 
         ))}
       </div>
 
-      {/* Game filter — only visible for last season */}
-      {!isCurrent && (
+      {/* Game filter — shown when chart has data */}
+      {hasData && (
         <div className="flex gap-1">
           {GAME_FILTERS.map(f => (
             <button
@@ -419,39 +480,27 @@ function SeasonStatsSection({ lsLog, onRetryLS, pos, score, opponent = '—' }) 
       )}
 
       {/* Content */}
-      {isCurrent ? (
-        /* ── 2026 season — no data yet ── */
-        <div className="rounded-xl bg-white/3 border border-white/8 px-4 py-8 text-center">
-          <Calendar className="w-7 h-7 text-muted-foreground/30 mx-auto mb-2.5" />
-          <p className="text-sm font-semibold text-foreground">No stats available yet</p>
-          <p className="text-[11px] text-muted-foreground mt-1">
-            The 2026 NFL season hasn't started. Stats will populate week by week once games are played.
-          </p>
-        </div>
-      ) : lsLog === null || lsLog === 'loading' ? (
-        /* ── fetching ── */
+      {isLoading ? (
         <div className="flex flex-col items-center gap-3 py-10">
           <div className="w-5 h-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
-          <p className="text-[11px] text-muted-foreground">Loading {PRIOR_SEASON} game log…</p>
+          <p className="text-[11px] text-muted-foreground">Loading {activeSeason} game log…</p>
           <p className="text-[10px] text-muted-foreground/60">
             Fetching 18 weeks of stats — takes a moment the first time.
           </p>
         </div>
-      ) : lsLog === 'error' ? (
-        /* ── error ── */
+      ) : isError ? (
         <div className="flex flex-col items-center gap-2 py-8">
-          <p className="text-[11px] text-red-400">Failed to load {PRIOR_SEASON} game log.</p>
-          <button onClick={onRetryLS} className="text-[10px] text-primary underline underline-offset-2">
+          <p className="text-[11px] text-red-400">Failed to load {activeSeason} game log.</p>
+          <button onClick={onRetry} className="text-[10px] text-primary underline underline-offset-2">
             Retry
           </button>
         </div>
-      ) : lsLog.length === 0 ? (
-        /* ── no games ── */
+      ) : !hasData ? (
         <div className="rounded-xl bg-white/3 border border-white/8 px-4 py-6 text-center">
           <Calendar className="w-6 h-6 text-muted-foreground/40 mx-auto mb-2" />
-          <p className="text-[11px] text-muted-foreground">No {new Date().getMonth() >= 8 ? new Date().getFullYear() : new Date().getFullYear() - 1} regular season games found.</p>
+          <p className="text-[11px] text-muted-foreground">No {activeSeason} games found yet.</p>
           <p className="text-[10px] text-muted-foreground/60 mt-1">
-            Player may have been injured, on a practice squad, or inactive most of the year.
+            {isCurrent ? 'Stats populate week by week as games are played.' : 'Player may have been injured or inactive most of the season.'}
           </p>
         </div>
       ) : (
@@ -528,7 +577,7 @@ function SeasonStatsSection({ lsLog, onRetryLS, pos, score, opponent = '—' }) 
           </ResponsiveContainer>
 
           <p className="text-[10px] text-muted-foreground">
-            Real {new Date().getMonth() >= 8 ? new Date().getFullYear() : new Date().getFullYear() - 1} half-PPR stats · Source: Sleeper · Def rank = current season · Hover for game details
+            {activeSeason} half-PPR stats · Source: Sleeper · Def rank = current season · Hover for game details
           </p>
 
           {/* Avg stats line */}
@@ -561,18 +610,18 @@ function SeasonStatsSection({ lsLog, onRetryLS, pos, score, opponent = '—' }) 
             );
           })()}
 
-          {/* vs. current opponent */}
-          {opponent && opponent !== 'TBD' && opponent !== '—' && (() => {
-            const vsGames = lsLog.filter(g => g.opponent === opponent).slice(-3);
+          {/* vs. current opponent — use whichever season is active */}
+          {opponent && opponent !== 'TBD' && opponent !== '—' && Array.isArray(activeLog) && (() => {
+            const vsGames = activeLog.filter(g => g.opponent === opponent).slice(-3);
             const vsAvg   = vsGames.length ? Math.round(vsGames.reduce((a, g) => a + g.fp, 0) / vsGames.length * 10) / 10 : null;
             return (
               <div className="pt-2 border-t border-white/6">
                 <div className="flex items-center justify-between mb-1.5">
-                  <div className="text-[10px] text-muted-foreground uppercase tracking-wider">vs {opponent} · {PRIOR_SEASON}</div>
+                  <div className="text-[10px] text-muted-foreground uppercase tracking-wider">vs {opponent} · {activeSeason}</div>
                   {vsAvg != null && <div className="text-[10px] font-semibold text-primary">{vsAvg} FP avg</div>}
                 </div>
                 {vsGames.length === 0 ? (
-                  <p className="text-[11px] text-muted-foreground">No meetings vs {opponent} in {PRIOR_SEASON}.</p>
+                  <p className="text-[11px] text-muted-foreground">No meetings vs {opponent} in {activeSeason}.</p>
                 ) : (
                   <div className="space-y-1">
                     {vsGames.map(g => (
@@ -601,16 +650,18 @@ function SeasonStatsSection({ lsLog, onRetryLS, pos, score, opponent = '—' }) 
 
 export default function PlayerBreakdownModal({ entry, onClose }) {
   const [lsLog, setLsLog] = useState(null); // null | 'loading' | 'error' | GameEntry[]
+  const [csLog, setCsLog] = useState(null); // same, for current season
 
   const pos      = entry?.player?.position ?? 'WR';
   const opponent = entry?.player?.opponent ?? '—';
 
-  // Reset when player changes
+  // Reset both logs when player changes
   useEffect(() => {
     setLsLog(null);
+    setCsLog(null);
   }, [entry?.player?.id]);
 
-  // Fetch 2025 game log on mount (lazy — cached after first load)
+  // Fetch prior-season game log (lazy — sessionStorage-cached)
   useEffect(() => {
     if (!entry || lsLog !== null) return;
     setLsLog('loading');
@@ -618,6 +669,15 @@ export default function PlayerBreakdownModal({ entry, onClose }) {
       .then(log => setLsLog(log))
       .catch(() => setLsLog('error'));
   }, [entry, lsLog, pos]);
+
+  // Fetch current-season game log (memory-cached per session)
+  useEffect(() => {
+    if (!entry || csLog !== null) return;
+    setCsLog('loading');
+    fetchCurrentSeasonLog(entry.player.id, entry.player.team, pos)
+      .then(log => setCsLog(log))
+      .catch(() => setCsLog('error'));
+  }, [entry, csLog, pos]);
 
   const playerTeam = entry?.player?.team ?? null;
   const similar = useMemo(
@@ -785,11 +845,12 @@ export default function PlayerBreakdownModal({ entry, onClose }) {
               </p>
             </Section>
 
-            {/* Season Stats (2026 empty state / 2025 chart) */}
             <Section title="Season Stats" icon={BarChart2} defaultOpen>
               <SeasonStatsSection
                 lsLog={lsLog}
+                csLog={csLog}
                 onRetryLS={() => setLsLog(null)}
+                onRetryCS={() => setCsLog(null)}
                 pos={pos}
                 score={score}
                 opponent={opponent}
