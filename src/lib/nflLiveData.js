@@ -1,7 +1,7 @@
 // Fetches live NFL roster (Sleeper API) + per-player projections + schedule/totals (ESPN).
 // Returns a player array with real projected FP attached, compatible with fantasyScore().
 
-const CACHE_KEY = 'locklab_nfl_live_v10'; // v10: DEF depth-chart filter fix
+const CACHE_KEY = 'locklab_nfl_live_v11'; // v11: current-week fix
 const CACHE_TTL = 4 * 60 * 60 * 1000;    // 4h
 
 const ESPN_NORM = { WSH: 'WAS' };
@@ -194,16 +194,15 @@ async function fetchESPNSchedule() {
       return true;
     });
 
-  // Filter to the earliest week so buildScheduleMaps maps Week 1 opponents only
-  const minWeek = allRegular.reduce((m, ev) => {
-    const w = ev.week?.number;
-    return (w != null && w < m) ? w : m;
-  }, Infinity);
-  const events = minWeek === Infinity ? allRegular : allRegular.filter(ev => ev.week?.number === minWeek);
-
-  // Use season year from regular-season response; week from first event if available
+  // Use the live scoreboard's week number as the current week — it always reflects
+  // the week that is in progress or about to start, never a past completed week.
   const seasonYear = regSeason?.season?.year ?? current?.season?.year ?? year;
-  const weekNum    = regSeason?.week?.number ?? current?.week?.number  ?? 1;
+  const weekNum    = current?.week?.number ?? regSeason?.week?.number ?? 1;
+
+  // Filter the full-season event list to the current week only.
+  // Using minWeek here would lock to Week 1 for the entire season.
+  const weekEvents = allRegular.filter(ev => ev.week?.number === weekNum);
+  const events     = weekEvents.length > 0 ? weekEvents : allRegular;
 
   return { events, seasonYear, weekNum };
 }
@@ -368,6 +367,7 @@ export async function fetchLivePlayers() {
 export function clearLiveCache() {
   try {
     localStorage.removeItem(CACHE_KEY);
+    localStorage.removeItem('locklab_nfl_live_v10');
     localStorage.removeItem('locklab_nfl_live_v3');
     localStorage.removeItem('locklab_nfl_live_v4');
     localStorage.removeItem('locklab_nfl_live_v5');

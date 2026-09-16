@@ -48,11 +48,18 @@ async function fetchESPNGames() {
     return true;
   });
 
-  // Only show the earliest (current) week — don't display the full 18-week schedule
+  // currentGames (live scoreboard) only has the current week — use that to find
+  // the right week number. minWeek from the full-season range locks to Week 1 forever.
+  const currentWeekNums = currentGames.map(g => g.week).filter(w => w != null);
+  const currentWeek = currentWeekNums.length > 0 ? Math.min(...currentWeekNums) : null;
+
+  if (currentWeek != null) {
+    const weekFiltered = allRegular.filter(g => g.week === currentWeek);
+    return weekFiltered.length > 0 ? weekFiltered : allRegular;
+  }
   const weeks = allRegular.map(g => g.week).filter(w => w != null);
   if (weeks.length === 0) return allRegular;
-  const minWeek = Math.min(...weeks);
-  return allRegular.filter(g => g.week === minWeek || g.week == null);
+  return allRegular.filter(g => g.week === Math.min(...weeks) || g.week == null);
 }
 
 // Maps ESPN scoreboard response to the shape GameOddsCard expects.
@@ -141,7 +148,7 @@ export default function LiveOdds() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
-  const [filter, setFilter] = useState('week_1');
+  const [filter, setFilter] = useState('all');
   const [countdown, setCountdown] = useState(REFRESH_MS / 1000);
   const [oddsSource, setOddsSource] = useState(null); // 'prizepicks' | 'odds_api' | 'season_avg'
   const [breakdownGame, setBreakdownGame] = useState(null);
@@ -293,19 +300,6 @@ export default function LiveOdds() {
               <span>Next refresh in {Math.floor(countdown / 60)}:{String(countdown % 60).padStart(2, '0')}</span>
             </div>
           )}
-          {/* API key settings only relevant when a custom backend is configured */}
-          {isBackendReachable() && (
-            <button
-              onClick={() => setShowSettings(v => !v)}
-              className={cn(
-                "flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-all border",
-                showSettings ? "bg-primary/10 border-primary/40 text-primary" : "bg-secondary border-border text-foreground hover:bg-secondary/80"
-              )}
-            >
-              <Key className="w-3.5 h-3.5" />
-              {settings.odds_api_key ? 'Settings' : 'Add API Key'}
-            </button>
-          )}
           <button
             onClick={load} disabled={loading}
             className={cn(
@@ -319,8 +313,8 @@ export default function LiveOdds() {
         </div>
       </div>
 
-      {/* Settings Panel — only when a custom backend is wired up */}
-      {showSettings && isBackendReachable() && (
+      {/* Settings Panel — hidden (API key removed; ESPN provides free DraftKings odds) */}
+      {false && showSettings && isBackendReachable() && (
         <div className="rounded-xl border border-border bg-card p-5 space-y-4">
           <h3 className="font-bold text-foreground flex items-center gap-2">
             <Key className="w-4 h-4 text-primary" /> Sportsbook Settings
@@ -385,20 +379,6 @@ export default function LiveOdds() {
         </div>
       )}
 
-      {/* Upgrade hint — only when backend is configured and no paid key */}
-      {isBackendReachable() && !settings.odds_api_key && !showSettings && oddsSource === 'prizepicks' && (
-        <div className="rounded-xl border border-chart-3/20 bg-chart-3/5 px-4 py-3 flex items-start gap-3">
-          <Zap className="w-4 h-4 text-chart-3 mt-0.5 shrink-0" />
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-foreground">Live lines from PrizePicks — free &amp; no key needed</p>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Want lines from DraftKings, FanDuel, or BetMGM?{' '}
-              <button onClick={() => setShowSettings(true)} className="text-primary underline">Add a free Odds API key</button>
-              {' '}(500 req/month at the-odds-api.com).
-            </p>
-          </div>
-        </div>
-      )}
 
       {/* Real error */}
       {error && error !== 'add_key' && (
