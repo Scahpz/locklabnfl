@@ -633,32 +633,23 @@ function PlayerSlot({ label, player, prop, score, availableProps, onChangeProp, 
 
 function ComparisonResult({ result, playerA, playerB }) {
   if (!result) return null;
-  const { winner, dimensions, reasoning, confidence } = result;
-  const winnerName = winner === 'A' ? playerA?.player_name : winner === 'B' ? playerB?.player_name : null;
+  const { winner, dimensions, reasoning, confidence, edgeLabel } = result;
+  const winnerName = winner === 'A' ? playerA?.player_name : playerB?.player_name;
 
   return (
     <div className="rounded-2xl border border-white/6 bg-[hsl(222,47%,9%)] p-4 space-y-4">
-      <div className={cn(
-        'rounded-xl p-3 flex items-center justify-between',
-        winner === 'toss-up' ? 'bg-white/5' : 'bg-primary/10 border border-primary/20',
-      )}>
+      <div className="rounded-xl p-3 flex items-center justify-between bg-primary/10 border border-primary/20">
         <div>
-          {winnerName ? (
-            <>
-              <div className="text-xs text-muted-foreground mb-0.5">Recommendation</div>
-              <div className="font-bold text-foreground">Start {winnerName}</div>
-            </>
-          ) : (
-            <div className="font-bold text-muted-foreground">Toss-Up Decision</div>
-          )}
+          <div className="text-xs text-muted-foreground mb-0.5">Recommendation</div>
+          <div className="font-bold text-foreground">Start {winnerName}</div>
         </div>
         <span className={cn(
           'text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border',
           confidence === 'High'   && 'bg-primary/20 border-primary/40 text-primary',
           confidence === 'Medium' && 'bg-amber-500/20 border-amber-500/40 text-amber-400',
-          confidence === 'Low'    && 'bg-red-500/20 border-red-500/40 text-red-400',
+          confidence === 'Low'    && 'bg-blue-500/20 border-blue-500/40 text-blue-400',
         )}>
-          {confidence} Confidence
+          {edgeLabel ?? confidence}
         </span>
       </div>
 

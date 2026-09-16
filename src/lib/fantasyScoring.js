@@ -409,37 +409,99 @@ export function compareStartSit(playerA, propA, playerB, propB, settings) {
   const aWins     = dimensions.filter(d => d.winner === 'A').length;
   const bWins     = dimensions.filter(d => d.winner === 'B').length;
   const scoreDiff = Math.abs(scoreA.total - scoreB.total);
+
+  // Always pick a winner — even a 1-point edge is an edge.
+  // Tiebreaker when category wins are equal: fantasy score → projection → ceiling.
+  let winnerKey;
+  if      (aWins > bWins)                   winnerKey = 'A';
+  else if (bWins > aWins)                   winnerKey = 'B';
+  else if (scoreA.total > scoreB.total)     winnerKey = 'A';
+  else if (scoreB.total > scoreA.total)     winnerKey = 'B';
+  else if (scoreA.projection >= scoreB.projection) winnerKey = 'A';
+  else                                       winnerKey = 'B';
+
   const confidence = scoreDiff >= 12 ? 'High' : scoreDiff >= 6 ? 'Medium' : 'Low';
-  const winnerKey  = aWins > bWins ? 'A' : bWins > aWins ? 'B' : 'toss-up';
-  const winnerName = winnerKey === 'A' ? playerA.player_name : winnerKey === 'B' ? playerB.player_name : null;
+  // More useful label when the margin is narrow
+  const edgeLabel  = scoreDiff >= 12 ? 'Strong Start'
+                   : scoreDiff >= 6  ? 'Clear Edge'
+                   : scoreDiff >= 2  ? 'Slight Edge'
+                   : 'Lean';
+
+  const wPlayer = winnerKey === 'A' ? playerA : playerB;
+  const lPlayer = winnerKey === 'A' ? playerB : playerA;
+  const wScore  = winnerKey === 'A' ? scoreA  : scoreB;
+  const lScore  = winnerKey === 'A' ? scoreB  : scoreA;
+  const wProp   = winnerKey === 'A' ? propA   : propB;
+  const lProp   = winnerKey === 'A' ? propB   : propA;
+  const wIsHome = winnerKey === 'A' ? isHomeA : isHomeB;
+  const lIsHome = winnerKey === 'A' ? isHomeB : isHomeA;
 
   const reasoning = [];
+
   if (scoreDiff >= 6) {
-    const higher = scoreA.total >= scoreB.total
-      ? { name: playerA.player_name, score: scoreA }
-      : { name: playerB.player_name, score: scoreB };
-    reasoning.push(`${higher.name} has a meaningfully higher fantasy score (${higher.score.total}) — a ${scoreDiff.toFixed(1)}-point edge.`);
+    reasoning.push(`${wPlayer.player_name} holds a ${scoreDiff.toFixed(1)}-point fantasy score advantage (${wScore.total} vs ${lScore.total}).`);
   } else {
-    reasoning.push(`Scores are close (${scoreA.total} vs ${scoreB.total}) — this is a genuine toss-up decision.`);
+    // Close matchup — surface the specific differentiating factors
+    const gtW = wProp.game_total ?? 45.5;
+    const gtL = lProp.game_total ?? 45.5;
+    const gtGap = gtW - gtL;
+
+    // 1. Game-total gap is the clearest market signal
+    if (Math.abs(gtGap) >= 4) {
+      if (gtGap > 0) {
+        reasoning.push(`${wPlayer.player_name}'s game has a ${gtW} O/U vs ${gtL} — ${gtGap.toFixed(1)} more expected points creates more scoring opportunities.`);
+      } else {
+        reasoning.push(`${lPlayer.player_name} gets the higher O/U (${gtL} vs ${gtW}), but ${wPlayer.player_name} still edges out on overall score and projection.`);
+      }
+    }
+
+    // 2. Matchup quality
+    if (wScore.matchupRating !== lScore.matchupRating) {
+      reasoning.push(`${wPlayer.player_name} draws a ${wScore.matchupRating} matchup vs ${lPlayer.player_name}'s ${lScore.matchupRating} — a real edge in ceiling.`);
+    }
+
+    // 3. Projection gap
+    const projDiff = wScore.projection - lScore.projection;
+    if (projDiff >= 1) {
+      reasoning.push(`${wPlayer.player_name} projects ${wScore.projection} FP vs ${lScore.projection} — a ${projDiff.toFixed(1)}-point individual output edge.`);
+    }
+
+    // 4. Usage
+    const uW = usageValue(wPlayer, wProp);
+    const uL = usageValue(lPlayer, lProp);
+    if (uW != null && uL != null && Math.abs(uW - uL) >= 0.03) {
+      const label = wPlayer.position === 'RB' ? 'snap share' : 'target share';
+      reasoning.push(`${wPlayer.player_name} has the higher ${label} (${Math.round(uW * 100)}% vs ${Math.round(uL * 100)}%) — volume is the most consistent predictor.`);
+    }
+
+    // 5. Home field when other factors are tied
+    if (wIsHome && !lIsHome && reasoning.length < 2) {
+      reasoning.push(`${wPlayer.player_name} plays at home — historically worth ~1–2 extra FP on volume and efficiency.`);
+    }
+
+    // 6. Ceiling edge
+    if (reasoning.length < 2 && wScore.ceiling - lScore.ceiling >= 2) {
+      reasoning.push(`${wPlayer.player_name} has the higher ceiling (${wScore.ceiling} vs ${lScore.ceiling}) — more boom-week upside in a GPP or must-win spot.`);
+    }
+
+    // Absolute fallback — always say something specific
+    if (reasoning.length === 0) {
+      reasoning.push(`${wPlayer.player_name} has a marginal overall score edge (${wScore.total} vs ${lScore.total}) — nearly identical outlook but the data gives a slight lean.`);
+    }
   }
-  if (Math.abs(scoreA.tier1 - scoreB.tier1) > 2) {
-    const better = scoreA.tier1 > scoreB.tier1 ? playerA.player_name : playerB.player_name;
-    reasoning.push(`${better} has a higher projected fantasy output this week.`);
-  }
-  if (Math.abs(scoreA.tier2 - scoreB.tier2) > 1) {
-    const better = scoreA.tier2 > scoreB.tier2 ? playerA.player_name : playerB.player_name;
-    reasoning.push(`${better} has the better matchup (${better === playerA.player_name ? scoreA.matchupRating : scoreB.matchupRating}).`);
-  }
+
+  // Injury flag
   if (injA !== injB && (injA !== 'healthy' || injB !== 'healthy')) {
     const concern = injA !== 'healthy' ? playerA.player_name : playerB.player_name;
     const status  = injA !== 'healthy' ? injA : injB;
-    reasoning.push(`Injury concern: ${concern} is listed as ${status}.`);
+    reasoning.push(`Injury flag: ${concern} is listed as ${status} — confirm active status before locking in.`);
   }
-  reasoning.push(winnerName
-    ? `Recommendation: Start ${winnerName} with ${confidence.toLowerCase()} confidence.`
-    : 'Too close to call — go with the better matchup or flip a coin.');
 
-  return { winner: winnerKey, dimensions, reasoning, confidence, scoreA, scoreB };
+  // Clear bottom-line recommendation
+  const closerNote = confidence === 'Low' ? ` — ${edgeLabel.toLowerCase()}, but a lean is still a lean` : '';
+  reasoning.push(`Start ${wPlayer.player_name}${closerNote}.`);
+
+  return { winner: winnerKey, dimensions, reasoning, confidence, edgeLabel, scoreA, scoreB };
 }
 
 // ─── Rankings ─────────────────────────────────────────────────────────────────
