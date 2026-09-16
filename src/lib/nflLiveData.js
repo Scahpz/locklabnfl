@@ -1,7 +1,7 @@
 // Fetches live NFL roster (Sleeper API) + per-player projections + schedule/totals (ESPN).
 // Returns a player array with real projected FP attached, compatible with fantasyScore().
 
-const CACHE_KEY = 'locklab_nfl_live_v11'; // v11: current-week fix
+const CACHE_KEY = 'locklab_nfl_live_v12'; // v12: dual-season analytics
 const CACHE_TTL = 4 * 60 * 60 * 1000;    // 4h
 
 const ESPN_NORM = { WSH: 'WAS' };
@@ -367,6 +367,7 @@ export async function fetchLivePlayers() {
 export function clearLiveCache() {
   try {
     localStorage.removeItem(CACHE_KEY);
+    localStorage.removeItem('locklab_nfl_live_v11');
     localStorage.removeItem('locklab_nfl_live_v10');
     localStorage.removeItem('locklab_nfl_live_v3');
     localStorage.removeItem('locklab_nfl_live_v4');

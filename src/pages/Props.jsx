@@ -19,12 +19,12 @@ import PropDetailModal from '@/components/props/PropDetailModal';
 import { useParlay } from '@/lib/ParlayContext';
 
 // ── Game-log localStorage cache ───────────────────────────────────────────────
-const GL_CACHE_PREFIX = 'locklab_gl_v10_';
+const GL_CACHE_PREFIX = 'locklab_gl_v11_';
 const GL_TTL_MS = 2 * 60 * 60 * 1000; // 2-hour TTL per entry
 // Wipe all older cache versions on load
 for (let i = localStorage.length - 1; i >= 0; i--) {
   const k = localStorage.key(i);
-  if (k && k.startsWith('locklab_gl_') && !k.startsWith('locklab_gl_v10_')) {
+  if (k && k.startsWith('locklab_gl_') && !k.startsWith('locklab_gl_v11_')) {
     localStorage.removeItem(k);
   }
 }
