@@ -13,18 +13,19 @@ import { cn } from '@/lib/utils';
 import { rankScore, gradeProp } from '@/lib/grading';
 import { formatMarket, toLetterGrade } from '@/lib/propLabels';
 import { NFL_API } from '@/lib/config';
-import { TEAM_STATS, updateLeagueAvgs } from '@/lib/teamStats';
+import { TEAM_STATS, updateLeagueAvgs, updateTeamDefStats } from '@/lib/teamStats';
 import { loadSleeperHistory, computeAnalyticsFromSleeper } from '@/lib/sleeperHistory';
+import { useSeasonStats } from '@/lib/nflSeasonStats';
 import PropDetailModal from '@/components/props/PropDetailModal';
 import { useParlay } from '@/lib/ParlayContext';
 
 // ── Game-log localStorage cache ───────────────────────────────────────────────
-const GL_CACHE_PREFIX = 'locklab_gl_v11_';
+const GL_CACHE_PREFIX = 'locklab_gl_v12_';
 const GL_TTL_MS = 2 * 60 * 60 * 1000; // 2-hour TTL per entry
 // Wipe all older cache versions on load
 for (let i = localStorage.length - 1; i >= 0; i--) {
   const k = localStorage.key(i);
-  if (k && k.startsWith('locklab_gl_') && !k.startsWith('locklab_gl_v11_')) {
+  if (k && k.startsWith('locklab_gl_') && !k.startsWith('locklab_gl_v12_')) {
     localStorage.removeItem(k);
   }
 }
@@ -106,6 +107,13 @@ const tomorrowLocalStr = new Date(Date.now() + 86400000).toLocaleDateString('en-
 export default function Props() {
   const { addLeg: parlayAddLeg } = useParlay();
   const navigate = useNavigate();
+  // Live 2026 season stats — updates TEAM_STATS defensive data in place each session
+  const liveSeasonStats = useSeasonStats();
+  useEffect(() => {
+    if (liveSeasonStats?.defense) {
+      updateTeamDefStats(liveSeasonStats.defense);
+    }
+  }, [liveSeasonStats]);
   const [rawProps, setRawProps] = useState([]);
   const [gameDate, setGameDate] = useState(null);
   const [gamesSummary, setGamesSummary] = useState([]);

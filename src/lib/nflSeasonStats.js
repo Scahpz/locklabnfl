@@ -55,6 +55,35 @@ function parseOffense(categories, gp, hardcoded) {
   };
 }
 
+// ─── Defensive stats parser ───────────────────────────────────────────────────
+// Extracts yards allowed per game from ESPN's defensive category.
+// ESPN reports season totals so we divide by gamesPlayed.
+// Position-level splits (WR/TE/RB) are derived via fixed league-average shares.
+function parseDefense(categories, gp) {
+  if (!gp) return null;
+
+  // ESPN uses several name variants — try each
+  const passAllowed = statVal(categories, 'passingYardsAllowed', null)
+    ?? statVal(categories, 'netPassingYardsAllowed', null)
+    ?? statVal(categories, 'passYardsAllowed', null);
+  const rushAllowed = statVal(categories, 'rushingYardsAllowed', null)
+    ?? statVal(categories, 'rushYardsAllowed', null);
+
+  if (passAllowed == null || rushAllowed == null) return null;
+
+  const passPerGame = Math.round(passAllowed / gp);
+  const rushPerGame = Math.round(rushAllowed / gp);
+
+  // Positional split constants: league-average share of receiving yards by position
+  return {
+    pass_yds_allowed:    passPerGame,
+    rush_yds_allowed:    rushPerGame,
+    rec_yds_allowed_wr:  Math.round(passPerGame * 0.66),
+    rec_yds_allowed_te:  Math.round(passPerGame * 0.25),
+    rec_yds_allowed_rb:  Math.round(passPerGame * 0.14),
+  };
+}
+
 // ─── Fetch one team ───────────────────────────────────────────────────────────
 async function fetchTeamStats(abv) {
   const id = ESPN_IDS[abv];
@@ -72,33 +101,38 @@ async function fetchTeamStats(abv) {
 
   // gamesPlayed lives in the "general" category
   let gp = statVal(categories, 'gamesPlayed', 0);
-  if (!gp) {
-    // some ESPN responses nest it under passing category
-    gp = statVal(categories, 'games', 0);
-  }
+  if (!gp) gp = statVal(categories, 'games', 0);
   if (!gp) return null;
 
   const hardcoded = TEAM_OFFENSE[abv] ?? null;
-  return parseOffense(categories, gp, hardcoded);
+  return {
+    offense: parseOffense(categories, gp, hardcoded),
+    defense: parseDefense(categories, gp),
+  };
 }
 
 // ─── Fetch all 32 teams (throttled to avoid rate-limiting) ───────────────────
-async function fetchAllOffense() {
+async function fetchAllStats() {
   const teams = Object.keys(ESPN_IDS);
-  const table = {};
+  const offenseTable = {};
+  const defenseTable = {};
 
   // Batch in groups of 8 to avoid hammering ESPN
   for (let i = 0; i < teams.length; i += 8) {
     const batch = teams.slice(i, i + 8);
     const results = await Promise.allSettled(batch.map(abv => fetchTeamStats(abv)));
     results.forEach((r, idx) => {
-      if (r.status === 'fulfilled' && r.value) {
-        table[batch[idx]] = r.value;
-      }
+      if (r.status !== 'fulfilled' || !r.value) return;
+      const abv = batch[idx];
+      if (r.value.offense) offenseTable[abv] = r.value.offense;
+      if (r.value.defense) defenseTable[abv] = r.value.defense;
     });
   }
 
-  return Object.keys(table).length >= 20 ? table : null; // require at least 20 teams
+  const hasEnough = Object.keys(offenseTable).length >= 20;
+  return hasEnough
+    ? { offense: offenseTable, defense: Object.keys(defenseTable).length >= 20 ? defenseTable : null }
+    : null;
 }
 
 // ─── Cache helpers ────────────────────────────────────────────────────────────
@@ -121,7 +155,7 @@ function writeCache(data) {
 }
 
 // ─── React hook ───────────────────────────────────────────────────────────────
-// Returns { offense: { ARI: {...}, ... } } or null (use hardcoded 2024 fallback)
+// Returns { offense: { ARI: {...} }, defense: { ARI: {...} } } or null
 export function useSeasonStats() {
   const [stats, setStats] = useState(() => {
     if (!isLiveSeason()) return null;
@@ -135,12 +169,11 @@ export function useSeasonStats() {
     if (cached) { setStats(cached); return; }
 
     let cancelled = false;
-    fetchAllOffense().then(offense => {
-      if (cancelled || !offense) return;
-      const result = { offense };
+    fetchAllStats().then(result => {
+      if (cancelled || !result) return;
       writeCache(result);
       setStats(result);
-    }).catch(() => { /* silent — predictions fall back to 2024 */ });
+    }).catch(() => { /* silent — falls back to hardcoded 2025 data */ });
 
     return () => { cancelled = true; };
   }, []);

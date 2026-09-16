@@ -105,3 +105,20 @@ export function updateLeagueAvgs(avgs) {
   if (!avgs || typeof avgs !== 'object') return;
   Object.assign(NFL_LEAGUE_AVGS, avgs);
 }
+
+// Called when live ESPN defensive stats are available (updated weekly).
+// Merges live yards-allowed data into TEAM_STATS so grading uses current season values.
+// TD-allowed stats are kept from hardcoded values since ESPN basic stats don't expose them.
+export function updateTeamDefStats(liveDefense) {
+  if (!liveDefense || typeof liveDefense !== 'object') return;
+  Object.keys(liveDefense).forEach(team => {
+    if (!TEAM_STATS[team]) return;
+    const live = liveDefense[team];
+    // Only update yardage fields — keep TD-allowed from hardcoded baseline
+    if (live.pass_yds_allowed != null)   TEAM_STATS[team].pass_yds_allowed   = live.pass_yds_allowed;
+    if (live.rush_yds_allowed != null)   TEAM_STATS[team].rush_yds_allowed   = live.rush_yds_allowed;
+    if (live.rec_yds_allowed_wr != null) TEAM_STATS[team].rec_yds_allowed_wr = live.rec_yds_allowed_wr;
+    if (live.rec_yds_allowed_te != null) TEAM_STATS[team].rec_yds_allowed_te = live.rec_yds_allowed_te;
+    if (live.rec_yds_allowed_rb != null) TEAM_STATS[team].rec_yds_allowed_rb = live.rec_yds_allowed_rb;
+  });
+}

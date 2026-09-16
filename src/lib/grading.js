@@ -542,8 +542,13 @@ function gradeWithContext(prop) {
     });
   }
 
-  // ── 17. QB QUALITY (NEW) — WR / TE / RB receiving props ──────────────────────
-  const qbW = adjW(10, 'qbQuality', pg);
+  // ── 17. QB QUALITY — WR / TE / RB receiving props ───────────────────────────
+  // When we have real game logs, the QB situation is already baked into L10/hit rate.
+  // Use a small weight (tie-breaker only) to avoid double-penalizing players like
+  // Bowers who outperform their team's QB situation.
+  const qbW = hasLogs && l10 != null
+    ? adjW(2, 'qbQuality', pg)
+    : adjW(10, 'qbQuality', pg);
   if (qbW > 0 && prop.team) {
     const teamKey  = (prop.team || '').toUpperCase().trim();
     const qbTier   = QB_TIER[teamKey];
