@@ -3,6 +3,10 @@
 
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
+// Normalize ESPN abbreviations → Sleeper format, and vice-versa
+const ESPN_TO_SLEEPER = { WSH: 'WAS', LA: 'LAR' };
+const SLEEPER_TO_ESPN = { WAS: 'WSH', LAR: 'LA' };
+
 let _memCache = null;
 let _resolvedSeason = null;
 
@@ -47,7 +51,7 @@ export async function loadSleeperHistory() {
   if (_memCache && Date.now() - _memCache.ts < CACHE_TTL_MS) return _memCache;
 
   const season = await _resolveSeason();
-  const CACHE_KEY = `locklab_sl_hist_${season}`;
+  const CACHE_KEY = `locklab_sl_hist2_${season}`;
 
   try {
     const raw = sessionStorage.getItem(CACHE_KEY);
@@ -60,9 +64,12 @@ export async function loadSleeperHistory() {
     }
   } catch {}
 
-  // Fetch player list + all 18 weeks in parallel (same URL pattern as PlayerBreakdownModal)
-  const [playersData, ...weekResults] = await Promise.all([
+  // Fetch player list + all 18 weeks + ESPN schedule in parallel
+  const [playersData, scheduleRes, ...weekResults] = await Promise.all([
     fetch('https://api.sleeper.app/v1/players/nfl').then(r => r.ok ? r.json() : {}),
+    fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?dates=${season}0901-${season + 1}0201&limit=300`)
+      .then(r => r.ok ? r.json() : null)
+      .catch(() => null),
     ...Array.from({ length: 18 }, (_, i) =>
       fetch(`https://api.sleeper.app/v1/stats/nfl/regular/${season}/${i + 1}`)
         .then(r => r.ok ? r.json() : {})
@@ -70,6 +77,24 @@ export async function loadSleeperHistory() {
         .catch(() => ({ week: i + 1, data: {} }))
     ),
   ]);
+
+  // Build schedule map: weekNum → espnTeamAbbr → { opp (Sleeper abbr), date, isHome }
+  const scheduleMap = {};
+  for (const event of scheduleRes?.events ?? []) {
+    const weekNum = event.week?.number;
+    if (!weekNum) continue;
+    const comp = event.competitions?.[0];
+    if (!comp) continue;
+    const home = comp.competitors?.find(c => c.homeAway === 'home')?.team?.abbreviation?.toUpperCase();
+    const away = comp.competitors?.find(c => c.homeAway === 'away')?.team?.abbreviation?.toUpperCase();
+    if (!home || !away) continue;
+    const date = event.date ?? null;
+    if (!scheduleMap[weekNum]) scheduleMap[weekNum] = {};
+    const homeSlp = ESPN_TO_SLEEPER[home] ?? home;
+    const awaySlp = ESPN_TO_SLEEPER[away] ?? away;
+    scheduleMap[weekNum][home] = { opp: awaySlp, date, isHome: true };
+    scheduleMap[weekNum][away] = { opp: homeSlp, date, isHome: false };
+  }
 
   const byName = {};
   const byNameNorm = {}; // normalized → canonical
@@ -80,17 +105,27 @@ export async function loadSleeperHistory() {
       const info = playersData[pid];
       if (!info?.full_name) continue;
 
+      // Skip bye weeks and DNP games — Sleeper still emits zero-stat entries for inactive players
+      if ((stats.pts_half_ppr ?? 0) < 0.5) continue;
+
       const name = info.full_name;
       if (!byName[name]) {
         byName[name] = { position: info.position || '', games: [] };
         byNameNorm[normName(name)] = name;
       }
 
+      // Look up opponent and game date from ESPN schedule
+      const espnTeam   = SLEEPER_TO_ESPN[info.team] ?? info.team;
+      const weekSched  = scheduleMap[week] ?? {};
+      const schedEntry = weekSched[espnTeam] ?? weekSched[info.team] ?? null;
+
       byName[name].games.push({
         week,
         season,
         stats,
-        opp: stats.opponent || stats.opp || '',
+        opp:    schedEntry?.opp    ?? stats.opponent ?? stats.opp ?? '',
+        isHome: schedEntry?.isHome ?? null,
+        date:   schedEntry?.date   ?? null,
       });
     }
   }
@@ -100,8 +135,7 @@ export async function loadSleeperHistory() {
   }
 
   const result = { byName, byNameNorm, ts: Date.now(), season };
-  const CACHE_KEY_SAVE = `locklab_sl_hist_${season}`;
-  try { sessionStorage.setItem(CACHE_KEY_SAVE, JSON.stringify(result)); } catch {}
+  try { sessionStorage.setItem(`locklab_sl_hist2_${season}`, JSON.stringify(result)); } catch {}
 
   _memCache = result;
   return result;
@@ -171,8 +205,8 @@ export function computeAnalyticsFromSleeper(playerName, propType, line, cache) {
   const logs   = games.map(g => ({
     value:  Math.round(getter(g.stats) * 10) / 10,
     opp:    g.opp,
-    isHome: null,
-    date:   `${cache.season}-W${g.week}`,
+    isHome: g.isHome,
+    date:   g.date ?? `${cache.season}-W${g.week}`,
     season: cache.season,
     week:   g.week,
   }));
