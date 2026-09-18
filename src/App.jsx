@@ -18,6 +18,7 @@ import LiveOdds from '@/pages/LiveOdds';
 import AIPicks from '@/pages/AIPicks.jsx';
 import PropHistory from '@/pages/PropHistory.jsx';
 import StartSit from '@/pages/StartSit.jsx';
+import DevAdmin from '@/pages/DevAdmin.jsx';
 
 function ScrollToTop() {
   const { pathname } = useLocation();
@@ -55,28 +56,31 @@ const AuthenticatedApp = () => {
         <Route path="/start-sit" element={<StartSit />} />
         <Route path="/live-odds" element={<Navigate to="/odds" replace />} />
         <Route path="/streaks" element={<Navigate to="/trends" replace />} />
+        <Route path="*" element={<PageNotFound />} />
       </Route>
-      <Route path="*" element={<PageNotFound />} />
     </Routes>
   );
 };
 
 
 function App() {
-
   return (
     <AuthProvider>
       <ParlayProvider>
         <QueryClientProvider client={queryClientInstance}>
           <Router>
             <ScrollToTop />
-            <AuthenticatedApp />
+            <Routes>
+              {/* Dev-only route — PIN gated, no nav, not linked anywhere in the app */}
+              <Route path="/locklab-dev" element={<DevAdmin />} />
+              <Route path="*" element={<AuthenticatedApp />} />
+            </Routes>
           </Router>
           <Toaster />
         </QueryClientProvider>
       </ParlayProvider>
     </AuthProvider>
-  )
+  );
 }
 
 export default App

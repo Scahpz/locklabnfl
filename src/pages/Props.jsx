@@ -16,6 +16,7 @@ import { NFL_API } from '@/lib/config';
 import { TEAM_STATS, updateLeagueAvgs, updateTeamDefStats } from '@/lib/teamStats';
 import { loadSleeperHistory, computeAnalyticsFromSleeper } from '@/lib/sleeperHistory';
 import { useSeasonStats } from '@/lib/nflSeasonStats';
+import { savePredictionSnapshot } from '@/lib/predictionLog';
 import PropDetailModal from '@/components/props/PropDetailModal';
 import { useParlay } from '@/lib/ParlayContext';
 
@@ -523,6 +524,36 @@ export default function Props() {
       };
     });
   }, [rawProps, playerAnalytics, teamContext, weatherData]);
+
+  // Auto-save prediction snapshot for dev accuracy tracking — fires once when analytics settle
+  const snapshotSavedRef = useRef(false);
+  useEffect(() => {
+    if (snapshotSavedRef.current || !enrichedProps.length || !isLive) return;
+    // Only snapshot when we have real game log data (analytics have loaded)
+    const hasAnalytics = enrichedProps.some(p => p.avg_last_10 != null);
+    if (!hasAnalytics) return;
+
+    // Determine NFL week and season from first prop's game date
+    const firstProp = enrichedProps.find(p => p.scheduled_at);
+    const week = firstProp ? getNFLWeek(firstProp.scheduled_at) : null;
+    if (!week) return;
+    const season = new Date().getMonth() >= 8 ? new Date().getFullYear() : new Date().getFullYear() - 1;
+
+    const propsToSave = enrichedProps.map(p => {
+      const grade = gradeProp(p);
+      return {
+        ...p,
+        verdict:     grade.verdict,
+        lean:        grade.lean,
+        confidence:  grade.confidence,
+        overProb:    grade.overProb,
+        letterGrade: toLetterGrade(grade.confidence),
+      };
+    });
+
+    savePredictionSnapshot(season, week, propsToSave);
+    snapshotSavedRef.current = true;
+  }, [enrichedProps, isLive]);
 
   // Open modal from URL params once data is loaded — must be after enrichedProps declaration
   useEffect(() => {
