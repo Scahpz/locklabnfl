@@ -340,6 +340,7 @@ def _load_sleeper_fallback():
 @app.on_event("startup")
 async def _startup():
     threading.Thread(target=_load_nfl_data, daemon=True).start()
+    threading.Thread(target=_load_trend_data, daemon=True).start()
 
 
 def _player_analytics(name: str, prop_type: str, line, df) -> dict | None:
@@ -1089,3 +1090,345 @@ async def team_context():
         "game_spreads": {},
         "data_loaded":  True,
     }
+
+
+# ── Player Trend Engine (Phase 1: Stock Up / Stock Down) ──────────────────────
+#
+# Tags every QB/RB/WR/TE as stock_up / stock_down / hold from real usage-share
+# trend (snap share, target share, carry share) — last-3-games vs season, with
+# small-sample shrinkage toward the position average. No estimated stats: every
+# input below is a real, directly-reported Sleeper field (off_snp/tm_off_snp,
+# rec_tgt, rush_att), never a guess or a filled-in default.
+#
+# Sourced from the Sleeper stats API, not nfl_data_py: nfl_data_py's
+# import_weekly_data() hardcodes a GitHub release URL
+# (releases/download/player_stats/player_stats_{year}.parquet) that 404s for
+# any season 2025+ — nflverse restructured those releases (now
+# stats_player_week_{year}.parquet under a different tag) and nfl_data_py
+# 0.3.3, the latest released on PyPI, was never updated to match. Sleeper is
+# the same source this app's frontend (nflLiveData.js) and this file's own
+# _load_sleeper_fallback() already rely on for real current-season data, and
+# it reports snap counts (off_snp/tm_off_snp) directly per player-week, which
+# nflverse's weekly file doesn't even carry (snap counts are a separate
+# dataset there) — so it's a better fit here, not just a fallback.
+#
+# Deliberately isolated from _weekly_df/_load_nfl_data above: that pipeline
+# waits for 5+ completed weeks of the current season before including it, to
+# protect prop-grading L5/L10 stats from tiny-sample noise. The trend engine
+# instead wants in-season data from week 1 onward and protects against small
+# samples with _shrink() below, so it gets its own current-season-only pull.
+#
+# Phase 1 scope: Momentum is driven entirely by Role Trend (usage-share
+# deltas). The full spec's Opportunity Outlook (injuries/depth-chart moves)
+# and Environment (schedule, Vegas totals, PROE) sub-scores are later phases
+# and are not faked here. Buy Low / Sell High (needs an xFP model + market
+# value data) are likewise a later phase — this ships Stock Up/Down only.
+
+_trend_players: dict | None         = None  # player_id -> {name, team, position, weeks: [...]}
+_trend_season: int | None           = None
+_trend_loaded                       = False
+_trend_loading                      = False
+_trend_loaded_at: str | None        = None
+
+TREND_POSITIONS = ["QB", "RB", "WR", "TE"]
+
+# Which sticky usage metrics apply to which position. QBs have no meaningful
+# target_share; carry_share doubles as "rushing involvement" for QBs (scrambles
+# + designed runs), the closest real-stat proxy for the spec's QB rushing signal.
+TREND_METRICS_BY_POS = {
+    "QB": ["snap_share", "carry_share"],
+    "RB": ["snap_share", "target_share", "carry_share"],
+    "WR": ["snap_share", "target_share"],
+    "TE": ["snap_share", "target_share"],
+}
+
+MIN_SNAP_SHARE_QUALIFY = 0.20   # spec: exclude backups from the position-average baseline
+SHRINK_K                = 2.0   # stabilization constant for L3 shrinkage (sticky metrics -> small k)
+TREND_REFRESH_TTL       = 6 * 3600  # Sleeper stats typically settle within hours of games ending
+
+
+def _load_trend_data():
+    """
+    Pulls the current season's real weekly usage stats from the Sleeper API
+    (see module comment above for why Sleeper instead of nfl_data_py here).
+    """
+    global _trend_players, _trend_season, _trend_loaded, _trend_loading, _trend_loaded_at
+    _trend_loading = True
+    try:
+        import urllib.request
+        import json
+        import datetime
+
+        year = datetime.datetime.now().year
+
+        with urllib.request.urlopen("https://api.sleeper.app/v1/players/nfl", timeout=30) as resp:
+            raw_players: dict = json.loads(resp.read())
+
+        roster: dict = {}
+        for pid, p in raw_players.items():
+            if p.get("active") and p.get("full_name") and p.get("position") in TREND_POSITIONS:
+                roster[pid] = {"name": p["full_name"], "team": p.get("team") or "", "position": p["position"]}
+
+        players: dict = {}
+        team_week_targets: dict = {}
+        team_week_carries: dict = {}
+        weeks_found: list = []
+
+        for week in range(1, 19):
+            url = f"https://api.sleeper.app/v1/stats/nfl/regular/{year}/{week}"
+            try:
+                with urllib.request.urlopen(url, timeout=30) as resp:
+                    week_stats: dict = json.loads(resp.read())
+            except Exception as e:
+                print(f"[trend-engine] {year} week {week} fetch failed: {e}")
+                continue
+            if not week_stats:
+                continue
+            weeks_found.append(week)
+
+            for pid, stats in week_stats.items():
+                if pid not in roster or not stats:
+                    continue
+                team = roster[pid]["team"]
+                targets = float(stats.get("rec_tgt") or 0)
+                carries = float(stats.get("rush_att") or 0)
+                off_snp = stats.get("off_snp")
+                tm_off_snp = stats.get("tm_off_snp")
+                snap_share = (off_snp / tm_off_snp) if (off_snp is not None and tm_off_snp) else None
+
+                entry = players.setdefault(pid, {**roster[pid], "weeks": []})
+                entry["team"] = team
+                entry["weeks"].append({
+                    "week": week, "team": team,
+                    "snap_share": snap_share, "targets": targets, "carries": carries,
+                })
+
+                if team:
+                    key = (team, week)
+                    team_week_targets[key] = team_week_targets.get(key, 0.0) + targets
+                    team_week_carries[key] = team_week_carries.get(key, 0.0) + carries
+
+        if not players:
+            print(f"[trend-engine] No {year} weekly stats available yet")
+            return
+
+        # Now that team-week totals are known, convert raw targets/carries into shares.
+        for p in players.values():
+            for w in p["weeks"]:
+                tt = team_week_targets.get((w["team"], w["week"]))
+                tc = team_week_carries.get((w["team"], w["week"]))
+                w["target_share"] = (w["targets"] / tt) if tt else None
+                w["carry_share"]  = (w["carries"] / tc) if tc else None
+                del w["targets"]
+                del w["carries"]
+            p["weeks"].sort(key=lambda wk: wk["week"])
+
+        _trend_players   = players
+        _trend_season    = year
+        _trend_loaded    = True
+        _trend_loaded_at = datetime.datetime.utcnow().isoformat() + "Z"
+        print(f"[trend-engine] Ready — {year} weeks {weeks_found}, {len(players)} players")
+    except Exception as exc:
+        print(f"[trend-engine] Load error: {exc}")
+    finally:
+        _trend_loading = False
+
+
+def _shrink(stat, pos_avg, n, k=SHRINK_K):
+    """adjusted = (player_stat*n + pos_avg*k) / (n+k) — pulls small samples toward the position mean."""
+    if stat is None or pos_avg is None:
+        return stat
+    return (stat * n + pos_avg * k) / (n + k)
+
+
+def _mean(vals):
+    vals = [v for v in vals if v is not None]
+    return sum(vals) / len(vals) if vals else None
+
+
+def _std(vals, mean_val):
+    vals = [v for v in vals if v is not None]
+    if len(vals) < 2 or mean_val is None:
+        return None
+    return (sum((v - mean_val) ** 2 for v in vals) / (len(vals) - 1)) ** 0.5
+
+
+def _compute_trend_scores():
+    players = _trend_players or {}
+    if not players:
+        return {"data_loaded": False, "players": [], "season": _trend_season, "data_as_of": _trend_loaded_at}
+
+    # ── Per-player season / L3 / L1 for each usage metric ───────────────────
+    computed = []
+    for pid, p in players.items():
+        weeks = p["weeks"]
+        n_games = len(weeks)
+        if n_games == 0:
+            continue
+        last3 = weeks[-3:]
+        metrics = {}
+        for metric in ("snap_share", "target_share", "carry_share"):
+            season_vals = [w[metric] for w in weeks if w[metric] is not None]
+            l3_vals     = [w[metric] for w in last3  if w[metric] is not None]
+            metrics[metric] = {
+                "season": _mean(season_vals),
+                "l3":     _mean(l3_vals),
+                "l1":     weeks[-1][metric],
+                "n_l3":   len(l3_vals),
+            }
+        computed.append({
+            "player_id": pid, "name": p["name"], "team": p["team"], "position": p["position"],
+            "games_played": n_games, "metrics": metrics,
+            "qualifies": (metrics["snap_share"]["l1"] or 0) >= MIN_SNAP_SHARE_QUALIFY,
+        })
+
+    # ── Position averages (qualifying population only) — shrinkage targets ──
+    pos_avgs: dict = {}
+    for pos in TREND_POSITIONS:
+        pos_players = [c for c in computed if c["position"] == pos and c["qualifies"]]
+        pos_avgs[pos] = {
+            metric: _mean([c["metrics"][metric]["season"] for c in pos_players])
+            for metric in ("snap_share", "target_share", "carry_share")
+        }
+
+    # ── Role Trend = shrunk L3 - season, per applicable metric ──────────────
+    # Only meaningful once the season sample is STRICTLY LARGER than the L3
+    # window (games_played > 3) — with 3 or fewer games, "L3" and "season" are
+    # literally the same games, so there is no trend yet, only the same data
+    # twice. Below that threshold, shrinking L3 alone (toward the position
+    # average) while leaving season un-shrunk manufactures a fake delta purely
+    # from the two numbers being pulled differently — not from anything that
+    # actually changed. Skip it rather than show a fabricated signal.
+    MIN_GAMES_FOR_TREND = 4
+    role_trend_raw: dict = {}
+    for c in computed:
+        if c["games_played"] < MIN_GAMES_FOR_TREND:
+            role_trend_raw[c["player_id"]] = {}
+            continue
+        applicable = TREND_METRICS_BY_POS.get(c["position"], [])
+        deltas = {}
+        for metric in applicable:
+            m = c["metrics"][metric]
+            shrunk_l3 = _shrink(m["l3"], pos_avgs.get(c["position"], {}).get(metric), m["n_l3"])
+            if shrunk_l3 is not None and m["season"] is not None:
+                deltas[metric] = shrunk_l3 - m["season"]
+        role_trend_raw[c["player_id"]] = deltas
+
+    # z-score each metric's delta within its position's qualifying population
+    z_stats: dict = {}
+    for pos in TREND_POSITIONS:
+        for metric in TREND_METRICS_BY_POS.get(pos, []):
+            vals = [
+                role_trend_raw[c["player_id"]][metric]
+                for c in computed
+                if c["position"] == pos and c["qualifies"] and metric in role_trend_raw[c["player_id"]]
+            ]
+            mean_v = _mean(vals)
+            z_stats[(pos, metric)] = (mean_v, _std(vals, mean_v))
+
+    # ── Assemble tagged output rows ──────────────────────────────────────────
+    METRIC_LABEL = {"snap_share": "Snap share", "target_share": "Target share", "carry_share": "Carry share"}
+    out_players = []
+    for c in computed:
+        pos, applicable = c["position"], TREND_METRICS_BY_POS.get(c["position"], [])
+        deltas = role_trend_raw.get(c["player_id"], {})
+
+        z_scores, max_move = [], 0.0
+        for metric in applicable:
+            delta = deltas.get(metric)
+            if delta is None:
+                continue
+            mean_v, std_v = z_stats.get((pos, metric), (None, None))
+            if std_v:
+                z_scores.append(delta / std_v)
+            if abs(delta) > abs(max_move):
+                max_move = delta
+
+        role_trend_z = _mean(z_scores)
+        momentum = max(-100.0, min(100.0, role_trend_z * 33.3)) if role_trend_z is not None else None
+
+        # Noise-game guard: last game's snaps cratered vs. this player's own prior
+        # trend — likely an in-game injury exit, not a real role change.
+        weeks = players[c["player_id"]]["weeks"]
+        possible_injury_exit = False
+        if len(weeks) >= 2:
+            prior_avg = _mean([w["snap_share"] for w in weeks[:-1]])
+            last_snap = weeks[-1]["snap_share"]
+            if prior_avg and last_snap is not None and last_snap < prior_avg * 0.5:
+                possible_injury_exit = True
+
+        tag = "hold"
+        if momentum is not None:
+            if momentum >= 25 and abs(max_move) >= 0.10:
+                tag = "stock_up"
+            elif momentum <= -25 and abs(max_move) >= 0.10 and not possible_injury_exit:
+                tag = "stock_down"
+
+        reasons = []
+        for metric in applicable:
+            m, delta = c["metrics"][metric], deltas.get(metric)
+            if delta is None or m["season"] is None or m["l3"] is None or abs(delta) < 0.05:
+                continue
+            direction = "up" if delta > 0 else "down"
+            reasons.append(
+                f"{METRIC_LABEL[metric]} {direction} from {round(m['season']*100)}% "
+                f"to {round(m['l3']*100)}% over the last 3 games."
+            )
+        if possible_injury_exit:
+            reasons.append("Snap share dropped sharply in the most recent game — may reflect an in-game injury, not a real role change.")
+        if c["games_played"] < MIN_GAMES_FOR_TREND:
+            plural = "s" if c["games_played"] != 1 else ""
+            reasons.append(
+                f"Not enough games yet to measure a trend — has {c['games_played']} game{plural}, "
+                f"needs {MIN_GAMES_FOR_TREND}."
+            )
+
+        out_players.append({
+            "player_id":    c["player_id"],
+            "player_name":  c["name"],
+            "team":         c["team"],
+            "position":     pos,
+            "games_played": c["games_played"],
+            "metrics": {
+                metric: {k: v for k, v in c["metrics"][metric].items() if k != "n_l3"}
+                for metric in applicable
+            },
+            # Week-by-week series (chronological) for sparkline charts — same
+            # applicable metrics only, raw values straight from _trend_players.
+            "weekly": [
+                {"week": w["week"], **{metric: w[metric] for metric in applicable}}
+                for w in weeks
+            ],
+            "momentum":   round(momentum, 1) if momentum is not None else None,
+            "confidence": round(min(100.0, (c["games_played"] / 4.0) * 100)),
+            "tag":        tag,
+            "reasons":    reasons,
+            "source":     "Sleeper API (api.sleeper.app/v1/stats)",
+        })
+
+    return {
+        "data_loaded": True,
+        "season":      _trend_season,
+        "data_as_of":  _trend_loaded_at,
+        "players":     out_players,
+    }
+
+
+@app.get("/api/trend-scores")
+async def trend_scores():
+    if not _trend_loaded and not _trend_loading:
+        threading.Thread(target=_load_trend_data, daemon=True).start()
+    if not _trend_loaded:
+        return {"data_loaded": False, "data_loading": _trend_loading, "players": [], "season": None, "data_as_of": None}
+
+    if _trend_loaded_at and not _trend_loading:
+        import datetime
+        age = (datetime.datetime.utcnow() - datetime.datetime.fromisoformat(_trend_loaded_at.rstrip("Z"))).total_seconds()
+        if age > TREND_REFRESH_TTL:
+            threading.Thread(target=_load_trend_data, daemon=True).start()
+
+    try:
+        return _compute_trend_scores()
+    except Exception as exc:
+        print(f"[trend-engine] Compute error: {exc}")
+        return {"data_loaded": False, "error": str(exc), "players": [], "season": _trend_season, "data_as_of": _trend_loaded_at}

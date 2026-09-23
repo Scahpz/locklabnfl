@@ -7,6 +7,7 @@ import { fantasyScore, compareStartSit, rankPlayers, rankWaiverWire, computeConf
 import { mockPlayers, isDemoMode } from '@/lib/mockData';
 import { getLeagueSettings, saveLeagueSettings, SCORING_FORMATS } from '@/lib/leagueSettings';
 import { fetchLivePlayers, clearLiveCache } from '@/lib/nflLiveData';
+import { fetchTrendScores, indexTrendByPlayerId, TAG_META } from '@/lib/trendEngine';
 import { cn } from '@/lib/utils';
 import TeamLogo from '@/components/common/TeamLogo';
 import PlayerAvatar from '@/components/common/PlayerAvatar';
@@ -38,6 +39,29 @@ function VerdictChip({ verdict }) {
       verdict === 'SIT'   && 'bg-red-500/20 border-red-500/40 text-red-400',
     )}>
       {verdict}
+    </span>
+  );
+}
+
+// Stock Up / Stock Down chip from the Player Trend Engine. Greyed out below
+// ~40 confidence per spec ("show low-confidence tags greyed out").
+function TrendTagChip({ trend }) {
+  if (!trend || trend.tag === 'hold') return null;
+  const meta = TAG_META[trend.tag];
+  if (!meta) return null;
+  const lowConfidence = (trend.confidence ?? 0) < 40;
+  return (
+    <span
+      title={`${meta.label} · ${trend.confidence}% confidence`}
+      className={cn(
+        'text-[9px] font-bold px-1.5 py-0.5 rounded-full border uppercase tracking-wide flex items-center gap-0.5',
+        trend.tag === 'stock_up'
+          ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
+          : 'bg-red-500/15 border-red-500/30 text-red-400',
+        lowConfidence && 'opacity-50',
+      )}
+    >
+      {meta.arrow} {meta.short}
     </span>
   );
 }
@@ -356,7 +380,7 @@ function isBreakout(player, prop) {
   return trendingUp && (softMatchup || hotStreak);
 }
 
-function PlayerRankCard({ rank, posRank, player, prop, score, onCompare, onOpen }) {
+function PlayerRankCard({ rank, posRank, player, prop, score, trend, onCompare, onOpen }) {
   const propLabel = PROP_LABELS[prop.prop_type] ?? prop.prop_type;
   const breakout  = isBreakout(player, prop);
 
@@ -401,6 +425,7 @@ function PlayerRankCard({ rank, posRank, player, prop, score, onCompare, onOpen 
               <TrendingUp className="w-2.5 h-2.5" /> Breakout
             </span>
           )}
+          <TrendTagChip trend={trend} />
         </div>
         <div className="text-[11px] text-muted-foreground mt-0.5">
           {player.team} {prop?.is_home ? 'vs' : '@'} {player.opponent} · {propLabel} {prop.line}
@@ -838,6 +863,13 @@ export default function StartSit() {
 
   useEffect(() => { loadLivePlayers(); }, [loadLivePlayers]);
 
+  // Player Trend Engine — Stock Up/Down tags, loaded independently so a slow
+  // or failed trend fetch never blocks the core rankings.
+  const [trendIndex, setTrendIndex] = useState({});
+  useEffect(() => {
+    fetchTrendScores().then(data => setTrendIndex(indexTrendByPlayerId(data))).catch(() => {});
+  }, []);
+
   const activePlayers = liveStatus.players ?? mockPlayers;
   const isLive = !isDemoMode() && !liveStatus.error && liveStatus.players !== mockPlayers && !liveStatus.loading;
 
@@ -1248,7 +1280,7 @@ export default function StartSit() {
             {!liveStatus.loading && (
               <TopMatchupsRow
                 rankings={filteredRankings}
-                onOpen={(entry) => setBreakdownEntry(entry)}
+                onOpen={(entry) => setBreakdownEntry({ ...entry, trend: trendIndex[entry.player.id] })}
               />
             )}
 
@@ -1268,8 +1300,9 @@ export default function StartSit() {
                     player={player}
                     prop={prop}
                     score={score}
+                    trend={trendIndex[player.id]}
                     onCompare={handleCompareFromRanking}
-                    onOpen={() => setBreakdownEntry({ player, prop, score })}
+                    onOpen={() => setBreakdownEntry({ player, prop, score, trend: trendIndex[player.id] })}
                   />
                 ))}
                 {filteredRankings.length === 0 && (

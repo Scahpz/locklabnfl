@@ -11,6 +11,7 @@ import {
 } from 'recharts';
 import { TEAM_STATS, NFL_LEAGUE_AVGS } from '@/lib/teamStats';
 import { computeConfidence } from '@/lib/fantasyScoring';
+import { TAG_META, metricLabel } from '@/lib/trendEngine';
 import TeamLogo from '@/components/common/TeamLogo';
 import { cn } from '@/lib/utils';
 
@@ -372,6 +373,107 @@ function CriteriaBar({ label, score, maxScore, tip }) {
       </div>
       {tip && <p className="text-[10px] text-muted-foreground/60">{tip}</p>}
     </div>
+  );
+}
+
+// Momentum runs -100..+100 (0 = neutral); render as a bar centered at the midpoint.
+function MomentumBar({ momentum }) {
+  const pct   = Math.min(100, Math.max(0, (momentum + 100) / 2));
+  const color = momentum >= 25 ? 'bg-emerald-500' : momentum <= -25 ? 'bg-red-500' : 'bg-amber-500';
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] text-muted-foreground">Momentum</span>
+        <span className="text-[11px] font-semibold text-foreground tabular-nums">
+          {momentum > 0 ? '+' : ''}{momentum}
+        </span>
+      </div>
+      <div className="relative h-1.5 bg-white/8 rounded-full overflow-hidden">
+        <div className="absolute left-1/2 top-0 bottom-0 w-px bg-white/20" />
+        <motion.div
+          className={cn('h-full rounded-full', color)}
+          initial={{ width: 0 }}
+          animate={{ width: `${pct}%` }}
+          transition={{ duration: 0.55, ease: 'easeOut' }}
+        />
+      </div>
+    </div>
+  );
+}
+
+// Tiny snap/target/carry-share-by-week sparkline built from the trend engine's
+// weekly series — reuses the recharts primitives already imported in this file.
+function TrendSparkline({ weekly, metric }) {
+  const points = (weekly ?? [])
+    .filter(w => w[metric] != null)
+    .map(w => ({ week: `W${w.week}`, value: Math.round(w[metric] * 1000) / 10 }));
+  if (points.length < 2) return null;
+  return (
+    <div>
+      <div className="text-[10px] text-muted-foreground mb-1">{metricLabel(metric)} by week</div>
+      <ResponsiveContainer width="100%" height={60}>
+        <AreaChart data={points} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
+          <XAxis dataKey="week" tick={{ fontSize: 9, fill: 'hsl(215,16%,57%)' }} axisLine={false} tickLine={false} />
+          <YAxis hide domain={['dataMin - 5', 'dataMax + 5']} />
+          <Tooltip
+            formatter={(v) => [`${v}%`, metricLabel(metric)]}
+            contentStyle={{ background: 'hsl(222,47%,9%)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 11 }}
+          />
+          <Area type="monotone" dataKey="value" stroke="hsl(217,91%,60%)" fill="hsl(217,91%,60%)" fillOpacity={0.15} strokeWidth={1.5} />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+// Player Trend Engine section — Stock Up/Down tag, momentum, confidence,
+// template-generated reason bullets, and weekly usage-share sparklines.
+// See backend/main.py's "Player Trend Engine" section for what's computed.
+function TrendEngineSection({ trend }) {
+  if (!trend) return null;
+  const meta = TAG_META[trend.tag];
+  const metrics = Object.keys(trend.metrics ?? {});
+
+  return (
+    <Section title="Trend Engine" icon={Activity} defaultOpen={trend.tag !== 'hold'}>
+      <div className="flex items-center justify-between">
+        <span
+          className={cn(
+            'text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border',
+            trend.tag === 'stock_up'   && 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400',
+            trend.tag === 'stock_down' && 'bg-red-500/20 border-red-500/40 text-red-400',
+            trend.tag === 'hold'       && 'bg-white/8 border-white/15 text-muted-foreground',
+          )}
+        >
+          {meta ? meta.label : 'Hold'}
+        </span>
+        <span className="text-[10px] text-muted-foreground">
+          {trend.confidence}% confidence · {trend.games_played} game{trend.games_played !== 1 ? 's' : ''} this season
+        </span>
+      </div>
+
+      {trend.momentum != null && <MomentumBar momentum={trend.momentum} />}
+
+      {trend.reasons?.length > 0 && (
+        <ul className="space-y-1">
+          {trend.reasons.map((r, i) => (
+            <li key={i} className="flex items-start gap-2 text-[11px] text-muted-foreground">
+              <span className="text-primary mt-0.5 flex-shrink-0">•</span> {r}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {metrics.length > 0 && (
+        <div className="grid grid-cols-1 gap-3 pt-1">
+          {metrics.map(metric => (
+            <TrendSparkline key={metric} weekly={trend.weekly} metric={metric} />
+          ))}
+        </div>
+      )}
+
+      <p className="text-[9px] text-muted-foreground/50">Source: {trend.source}</p>
+    </Section>
   );
 }
 
@@ -1015,6 +1117,9 @@ export default function PlayerBreakdownModal({ entry, onClose }) {
                 ))}
               </div>
             </Section>
+
+            {/* Player Trend Engine */}
+            <TrendEngineSection trend={entry.trend} />
 
             {/* Injury context */}
             {hasInjury && (
