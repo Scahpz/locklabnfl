@@ -1265,20 +1265,33 @@ def _compute_trend_scores():
         n_games = len(weeks)
         if n_games == 0:
             continue
+        # Once there are 4+ games, compare last-3-games vs full season (the
+        # spec's definition, with L3 as a subset of season — standard, accepted
+        # overlap for a "recent form vs season" read). Below that, L3 and season
+        # would be the exact same games, so there's nothing to compare — instead
+        # compare the most recent game against everything before it. Still two
+        # genuinely different, non-overlapping sets of games, just smaller ones,
+        # so the signal is real (noisier, but real) rather than fabricated.
+        uses_l3_window = n_games >= 4
         last3 = weeks[-3:]
         metrics = {}
         for metric in ("snap_share", "target_share", "carry_share"):
-            season_vals = [w[metric] for w in weeks if w[metric] is not None]
-            l3_vals     = [w[metric] for w in last3  if w[metric] is not None]
+            if uses_l3_window:
+                season_vals = [w[metric] for w in weeks if w[metric] is not None]
+                recent_vals = [w[metric] for w in last3  if w[metric] is not None]
+            else:
+                season_vals = [w[metric] for w in weeks[:-1] if w[metric] is not None]
+                recent_vals = [weeks[-1][metric]] if weeks[-1][metric] is not None else []
             metrics[metric] = {
-                "season": _mean(season_vals),
-                "l3":     _mean(l3_vals),
-                "l1":     weeks[-1][metric],
-                "n_l3":   len(l3_vals),
+                "season":   _mean(season_vals),
+                "l3":       _mean(recent_vals),
+                "l1":       weeks[-1][metric],
+                "n_l3":     len(recent_vals),
+                "n_season": len(season_vals),
             }
         computed.append({
             "player_id": pid, "name": p["name"], "team": p["team"], "position": p["position"],
-            "games_played": n_games, "metrics": metrics,
+            "games_played": n_games, "metrics": metrics, "uses_l3_window": uses_l3_window,
             "qualifies": (metrics["snap_share"]["l1"] or 0) >= MIN_SNAP_SHARE_QUALIFY,
         })
 
@@ -1291,15 +1304,11 @@ def _compute_trend_scores():
             for metric in ("snap_share", "target_share", "carry_share")
         }
 
-    # ── Role Trend = shrunk L3 - season, per applicable metric ──────────────
-    # Only meaningful once the season sample is STRICTLY LARGER than the L3
-    # window (games_played > 3) — with 3 or fewer games, "L3" and "season" are
-    # literally the same games, so there is no trend yet, only the same data
-    # twice. Below that threshold, shrinking L3 alone (toward the position
-    # average) while leaving season un-shrunk manufactures a fake delta purely
-    # from the two numbers being pulled differently — not from anything that
-    # actually changed. Skip it rather than show a fabricated signal.
-    MIN_GAMES_FOR_TREND = 4
+    # ── Role Trend = shrunk recent-window - season/prior baseline ───────────
+    # A single game (games_played == 1) has nothing to compare against at all —
+    # that's the only real floor. Everything from 2 games on gets a real,
+    # non-fabricated comparison (see the uses_l3_window branch above).
+    MIN_GAMES_FOR_TREND = 2
     role_trend_raw: dict = {}
     for c in computed:
         if c["games_played"] < MIN_GAMES_FOR_TREND:
@@ -1309,9 +1318,18 @@ def _compute_trend_scores():
         deltas = {}
         for metric in applicable:
             m = c["metrics"][metric]
-            shrunk_l3 = _shrink(m["l3"], pos_avgs.get(c["position"], {}).get(metric), m["n_l3"])
-            if shrunk_l3 is not None and m["season"] is not None:
-                deltas[metric] = shrunk_l3 - m["season"]
+            pos_avg = pos_avgs.get(c["position"], {}).get(metric)
+            shrunk_recent = _shrink(m["l3"], pos_avg, m["n_l3"])
+            # In the small-sample fallback, the baseline is just as thin a
+            # sample as the "recent" side (as little as 1 game) — shrinking
+            # only one side while leaving an equally-noisy baseline untouched
+            # can flip the apparent direction relative to the raw numbers
+            # shown in the reason text. Shrink both sides the same way there.
+            # Once there's a real season (uses_l3_window), the season average
+            # is already a stable large-n estimate and doesn't need shrinking.
+            baseline = _shrink(m["season"], pos_avg, m["n_season"]) if not c["uses_l3_window"] else m["season"]
+            if shrunk_recent is not None and baseline is not None:
+                deltas[metric] = shrunk_recent - baseline
         role_trend_raw[c["player_id"]] = deltas
 
     # z-score each metric's delta within its position's qualifying population
@@ -1365,6 +1383,7 @@ def _compute_trend_scores():
                 tag = "stock_down"
 
         reasons = []
+        recent_label = "over the last 3 games" if c["uses_l3_window"] else "vs. the last game"
         for metric in applicable:
             m, delta = c["metrics"][metric], deltas.get(metric)
             if delta is None or m["season"] is None or m["l3"] is None or abs(delta) < 0.05:
@@ -1372,15 +1391,17 @@ def _compute_trend_scores():
             direction = "up" if delta > 0 else "down"
             reasons.append(
                 f"{METRIC_LABEL[metric]} {direction} from {round(m['season']*100)}% "
-                f"to {round(m['l3']*100)}% over the last 3 games."
+                f"to {round(m['l3']*100)}% {recent_label}."
             )
         if possible_injury_exit:
             reasons.append("Snap share dropped sharply in the most recent game — may reflect an in-game injury, not a real role change.")
         if c["games_played"] < MIN_GAMES_FOR_TREND:
+            reasons.append("Only 1 game played — nothing to compare it against yet.")
+        elif not c["uses_l3_window"]:
             plural = "s" if c["games_played"] != 1 else ""
             reasons.append(
-                f"Not enough games yet to measure a trend — has {c['games_played']} game{plural}, "
-                f"needs {MIN_GAMES_FOR_TREND}."
+                f"Early-season sample ({c['games_played']} game{plural}) — comparing most recent game "
+                f"to the game{plural} before it; widens to a full 3-game window at 4+ games."
             )
 
         out_players.append({
