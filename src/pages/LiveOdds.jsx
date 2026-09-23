@@ -17,49 +17,41 @@ function espnDateStr(d) {
   return d.toISOString().slice(0, 10).replace(/-/g, '');
 }
 
-// Fetches the upcoming regular-season schedule; falls back to current scoreboard.
-// Preseason games are filtered out — only regular-season matchups are shown.
+async function tryUrl(url) {
+  try {
+    const res = await fetch(url);
+    return res.ok ? res.json() : null;
+  } catch { return null; }
+}
+
+// Fetches games for the current week plus a couple weeks on either side, so the
+// week tabs have something to switch between. ESPN's `dates=` range query (used
+// previously to pull the whole season in one call) now returns HTTP 400 for any
+// multi-day range, so weeks are fetched one at a time via the `week=` param instead.
 async function fetchESPNGames() {
-  async function tryUrl(url) {
-    try {
-      const res = await fetch(url);
-      if (!res.ok) return [];
-      const data = await res.json();
-      return mapESPNToGames(data);
-    } catch { return []; }
-  }
+  const current = await tryUrl(ESPN_SCOREBOARD); // live/undated scoreboard — always the in-progress or upcoming week
+  const currentWeek = current?.week?.number ?? null;
 
-  // Upcoming regular season year (July+ = this year, otherwise last year)
-  const now  = new Date();
-  const year = now.getMonth() >= 6 ? now.getFullYear() : now.getFullYear() - 1;
+  if (currentWeek == null) return mapESPNToGames(current);
 
-  // Fetch full regular season + current scoreboard simultaneously
-  const [currentGames, regSeasonGames] = await Promise.all([
-    tryUrl(ESPN_SCOREBOARD),                                                      // live scoreboard (may be preseason)
-    tryUrl(`${ESPN_SCOREBOARD}?dates=${year}0901-${year + 1}0115&limit=300`),     // full regular season
-  ]);
+  const weeksToFetch = [currentWeek - 1, currentWeek, currentWeek + 1, currentWeek + 2]
+    .filter(w => w >= 1 && w <= 18);
 
-  // Merge (prefer regular season), deduplicate, exclude preseason entirely
+  const weekResponses = await Promise.all(
+    weeksToFetch.map(w => tryUrl(`${ESPN_SCOREBOARD}?seasontype=2&week=${w}`)),
+  );
+
   const seen = new Set();
-  const allRegular = [...regSeasonGames, ...currentGames].filter(g => {
-    if (g.is_preseason) return false;
-    if (seen.has(g.id)) return false;
-    seen.add(g.id);
-    return true;
-  });
+  const games = weekResponses
+    .flatMap(mapESPNToGames)
+    .filter(g => {
+      if (g.is_preseason) return false;
+      if (seen.has(g.id)) return false;
+      seen.add(g.id);
+      return true;
+    });
 
-  // currentGames (live scoreboard) only has the current week — use that to find
-  // the right week number. minWeek from the full-season range locks to Week 1 forever.
-  const currentWeekNums = currentGames.map(g => g.week).filter(w => w != null);
-  const currentWeek = currentWeekNums.length > 0 ? Math.min(...currentWeekNums) : null;
-
-  if (currentWeek != null) {
-    const weekFiltered = allRegular.filter(g => g.week === currentWeek);
-    return weekFiltered.length > 0 ? weekFiltered : allRegular;
-  }
-  const weeks = allRegular.map(g => g.week).filter(w => w != null);
-  if (weeks.length === 0) return allRegular;
-  return allRegular.filter(g => g.week === Math.min(...weeks) || g.week == null);
+  return games.length > 0 ? games : mapESPNToGames(current);
 }
 
 // Maps ESPN scoreboard response to the shape GameOddsCard expects.

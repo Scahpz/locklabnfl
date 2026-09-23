@@ -1,7 +1,7 @@
 // Fetches live NFL roster (Sleeper API) + per-player projections + schedule/totals (ESPN).
 // Returns a player array with real projected FP attached, compatible with fantasyScore().
 
-const CACHE_KEY = 'locklab_nfl_live_v12'; // v12: dual-season analytics
+const CACHE_KEY = 'locklab_nfl_live_v13'; // v13: fixed ESPN schedule fetch (dates= range query was 400ing)
 const CACHE_TTL = 4 * 60 * 60 * 1000;    // 4h
 
 const ESPN_NORM = { WSH: 'WAS' };
@@ -163,46 +163,32 @@ async function fetchSleeperProjections(season, week) {
   }
 }
 
-// Fetch the schedule — always prefers the upcoming regular-season week over preseason.
+async function tryFetch(url) {
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    return r.ok ? r.json() : null;
+  } catch { return null; }
+}
+
+// Fetch the schedule for the current regular-season week.
 // Returns a synthetic object: { events, seasonYear, weekNum }
 async function fetchESPNSchedule() {
   const year = new Date().getFullYear();
-  async function tryFetch(url) {
-    try {
-      const r = await fetch(url, { signal: AbortSignal.timeout(6000) });
-      return r.ok ? r.json() : null;
-    } catch { return null; }
-  }
 
-  const [current, regSeason] = await Promise.all([
-    tryFetch('https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard'),
-    tryFetch(
-      `https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard` +
-      `?dates=${year}0901-${year + 1}0115&limit=300`,
-    ),
-  ]);
+  // ESPN's undated scoreboard always reflects the week in progress or about to
+  // start (never a past completed week) — use it to learn the current week number.
+  const current    = await tryFetch('https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard');
+  const seasonYear = current?.season?.year ?? year;
+  const weekNum    = current?.week?.number ?? 1;
 
-  // Merge events, deduplicate by id, drop preseason (type 1 OR slug contains 'pre')
-  const seen = new Set();
-  const allRegular = [...(regSeason?.events ?? []), ...(current?.events ?? [])]
-    .filter(ev => {
-      const t    = ev.season?.type;
-      const slug = (ev.season?.slug ?? '').toLowerCase();
-      if (t === 1 || slug.includes('pre')) return false; // preseason
-      if (seen.has(ev.id)) return false;
-      seen.add(ev.id);
-      return true;
-    });
+  // Fetch the full game list for that specific week. ESPN's `dates=` range query
+  // (previously used to pull the whole season in one call) now returns HTTP 400
+  // for any multi-day range, so weeks must be fetched one at a time via `week=`.
+  const weekData = await tryFetch(
+    `https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?seasontype=2&week=${weekNum}`,
+  );
 
-  // Use the live scoreboard's week number as the current week — it always reflects
-  // the week that is in progress or about to start, never a past completed week.
-  const seasonYear = regSeason?.season?.year ?? current?.season?.year ?? year;
-  const weekNum    = current?.week?.number ?? regSeason?.week?.number ?? 1;
-
-  // Filter the full-season event list to the current week only.
-  // Using minWeek here would lock to Week 1 for the entire season.
-  const weekEvents = allRegular.filter(ev => ev.week?.number === weekNum);
-  const events     = weekEvents.length > 0 ? weekEvents : allRegular;
+  const events = (weekData?.events?.length ? weekData.events : current?.events) ?? [];
 
   return { events, seasonYear, weekNum };
 }
@@ -367,6 +353,7 @@ export async function fetchLivePlayers() {
 export function clearLiveCache() {
   try {
     localStorage.removeItem(CACHE_KEY);
+    localStorage.removeItem('locklab_nfl_live_v12');
     localStorage.removeItem('locklab_nfl_live_v11');
     localStorage.removeItem('locklab_nfl_live_v10');
     localStorage.removeItem('locklab_nfl_live_v3');
