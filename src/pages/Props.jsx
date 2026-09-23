@@ -16,7 +16,7 @@ import { NFL_API } from '@/lib/config';
 import { TEAM_STATS, updateLeagueAvgs, updateTeamDefStats } from '@/lib/teamStats';
 import { loadSleeperHistory, computeAnalyticsFromSleeper } from '@/lib/sleeperHistory';
 import { useSeasonStats } from '@/lib/nflSeasonStats';
-import { savePredictionSnapshot } from '@/lib/predictionLog';
+import { savePredictionSnapshot, getSnapshot } from '@/lib/predictionLog';
 import PropDetailModal from '@/components/props/PropDetailModal';
 import { useParlay } from '@/lib/ParlayContext';
 
@@ -525,10 +525,12 @@ export default function Props() {
     });
   }, [rawProps, playerAnalytics, teamContext, weatherData]);
 
-  // Auto-save prediction snapshot for dev accuracy tracking — fires once when analytics settle
-  const snapshotSavedRef = useRef(false);
+  // Auto-save prediction snapshot for dev accuracy tracking — fires once per (season, week),
+  // checked against localStorage rather than an in-session ref. A ref-only guard latches
+  // permanently after the first save and never re-arms for a new week if the tab/PWA stays
+  // open (or isn't hard-reloaded) across the week boundary — this keeps it correct per week.
   useEffect(() => {
-    if (snapshotSavedRef.current || !enrichedProps.length || !isLive) return;
+    if (!enrichedProps.length || !isLive) return;
     // Only snapshot when we have real game log data (analytics have loaded)
     const hasAnalytics = enrichedProps.some(p => p.avg_last_10 != null);
     if (!hasAnalytics) return;
@@ -538,6 +540,10 @@ export default function Props() {
     const week = firstProp ? getNFLWeek(firstProp.scheduled_at) : null;
     if (!week) return;
     const season = new Date().getMonth() >= 8 ? new Date().getFullYear() : new Date().getFullYear() - 1;
+
+    // Already captured this week — don't overwrite the pre-game snapshot with
+    // hindsight-informed data from a later visit.
+    if (getSnapshot(season, week)) return;
 
     const propsToSave = enrichedProps.map(p => {
       const grade = gradeProp(p);
@@ -552,7 +558,6 @@ export default function Props() {
     });
 
     savePredictionSnapshot(season, week, propsToSave);
-    snapshotSavedRef.current = true;
   }, [enrichedProps, isLive]);
 
   // Open modal from URL params once data is loaded — must be after enrichedProps declaration
