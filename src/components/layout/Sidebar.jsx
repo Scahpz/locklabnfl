@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
-import { TrendingUp, Zap, Layers, Bell, User, GitCompare, Activity, ChevronLeft, ChevronRight, Sparkles, Search, ClipboardList, Trophy } from 'lucide-react';
+import { TrendingUp, Zap, Layers, Bell, User, GitCompare, Activity, ChevronLeft, ChevronRight, Sparkles, Search, ClipboardList, Trophy, ArrowUpDown } from 'lucide-react';
 import logo from '@/assets/logo.png';
 
 const navItems = [
@@ -10,6 +10,7 @@ const navItems = [
   { path: '/trends', label: 'Streaks & Trends', icon: TrendingUp },
   { path: '/compare', label: 'Compare', icon: GitCompare },
   { path: '/start-sit', label: 'Start/Sit', icon: Trophy },
+  { path: '/trend-engine', label: 'Trend Engine', icon: ArrowUpDown },
   { path: '/odds', label: 'Live Odds', icon: Activity },
   { path: '/parlay', label: 'Parlay Builder', icon: Layers },
   { path: '/history', label: 'Prop History', icon: ClipboardList },

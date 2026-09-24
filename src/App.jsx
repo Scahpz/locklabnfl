@@ -18,6 +18,7 @@ import LiveOdds from '@/pages/LiveOdds';
 import AIPicks from '@/pages/AIPicks.jsx';
 import PropHistory from '@/pages/PropHistory.jsx';
 import StartSit from '@/pages/StartSit.jsx';
+import TrendEngine from '@/pages/TrendEngine.jsx';
 import DevAdmin from '@/pages/DevAdmin.jsx';
 
 function ScrollToTop() {
@@ -54,6 +55,7 @@ const AuthenticatedApp = () => {
         <Route path="/ai-picks" element={<AIPicks />} />
         <Route path="/history" element={<PropHistory />} />
         <Route path="/start-sit" element={<StartSit />} />
+        <Route path="/trend-engine" element={<TrendEngine />} />
         <Route path="/live-odds" element={<Navigate to="/odds" replace />} />
         <Route path="/streaks" element={<Navigate to="/trends" replace />} />
         <Route path="*" element={<PageNotFound />} />
