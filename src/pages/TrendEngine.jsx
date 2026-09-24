@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { TrendingUp, TrendingDown, Activity, Search } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Flame, Activity, Search } from 'lucide-react';
 import { fetchTrendScores, TAG_META } from '@/lib/trendEngine';
 import { fetchLivePlayers } from '@/lib/nflLiveData';
 import { fantasyScore } from '@/lib/fantasyScoring';
@@ -13,11 +13,18 @@ import { cn } from '@/lib/utils';
 const POSITIONS = ['All', 'QB', 'RB', 'WR', 'TE'];
 
 const TABS = [
-  { key: 'stock_up',   label: 'Stock Up',   icon: TrendingUp },
-  { key: 'stock_down', label: 'Stock Down', icon: TrendingDown },
-  { key: 'buy_low',    label: 'Buy Low',    comingSoon: true },
-  { key: 'sell_high',  label: 'Sell High',  comingSoon: true },
+  { key: 'stock_up',   label: 'Stock Up',   icon: TrendingUp,  metric: 'momentum' },
+  { key: 'stock_down', label: 'Stock Down', icon: TrendingDown, metric: 'momentum' },
+  { key: 'buy_low',    label: 'Buy Low',    icon: DollarSign,  metric: 'fpoe' },
+  { key: 'sell_high',  label: 'Sell High',  icon: Flame,       metric: 'fpoe' },
 ];
+
+const TAG_CHIP_CLS = {
+  stock_up:   'bg-emerald-500/15 border-emerald-500/30 text-emerald-400',
+  stock_down: 'bg-red-500/15 border-red-500/30 text-red-400',
+  buy_low:    'bg-sky-500/15 border-sky-500/30 text-sky-400',
+  sell_high:  'bg-amber-500/15 border-amber-500/30 text-amber-400',
+};
 
 function MomentumBar({ momentum }) {
   const pct   = Math.min(100, Math.max(0, ((momentum ?? 0) + 100) / 2));
@@ -30,9 +37,9 @@ function MomentumBar({ momentum }) {
   );
 }
 
-function TrendPlayerRow({ entry, onOpen }) {
+function TrendPlayerRow({ entry, highlightMetric, onOpen }) {
   const { trend, player } = entry;
-  const meta = TAG_META[trend.tag];
+  const showMomentum = highlightMetric === 'momentum' && trend.momentum != null;
   return (
     <button
       onClick={onOpen}
@@ -50,24 +57,27 @@ function TrendPlayerRow({ entry, onOpen }) {
             {trend.position}
           </span>
           <TeamLogo team={trend.team} className="w-4 h-4" />
-          <span className={cn(
-            'text-[9px] font-bold px-1.5 py-0.5 rounded-full border uppercase tracking-wide',
-            trend.tag === 'stock_up'
-              ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
-              : 'bg-red-500/15 border-red-500/30 text-red-400',
-          )}>
-            {meta?.arrow} {meta?.label}
-          </span>
+          {(trend.tags ?? []).map(tag => (
+            <span key={tag} className={cn('text-[9px] font-bold px-1.5 py-0.5 rounded-full border uppercase tracking-wide', TAG_CHIP_CLS[tag])}>
+              {TAG_META[tag]?.arrow} {TAG_META[tag]?.label}
+            </span>
+          ))}
         </div>
-        <div className="mt-1.5"><MomentumBar momentum={trend.momentum} /></div>
+        {showMomentum && <div className="mt-1.5"><MomentumBar momentum={trend.momentum} /></div>}
         {trend.reasons?.[0] && (
           <p className="text-[11px] text-muted-foreground mt-1.5 truncate">{trend.reasons[0]}</p>
         )}
       </div>
       <div className="flex flex-col items-end gap-1 flex-shrink-0">
-        <span className="text-lg font-bold text-foreground tabular-nums">
-          {trend.momentum > 0 ? '+' : ''}{trend.momentum}
-        </span>
+        {highlightMetric === 'fpoe' ? (
+          <span className={cn('text-lg font-bold tabular-nums', trend.fpoe > 0 ? 'text-amber-400' : 'text-sky-400')}>
+            {trend.fpoe > 0 ? '+' : ''}{trend.fpoe} FP
+          </span>
+        ) : (
+          <span className="text-lg font-bold text-foreground tabular-nums">
+            {trend.momentum > 0 ? '+' : ''}{trend.momentum}
+          </span>
+        )}
         <span className="text-[10px] text-muted-foreground">{trend.confidence}% conf</span>
       </div>
     </button>
@@ -107,15 +117,20 @@ export default function TrendEngine() {
     return trendData.players.map(trend => ({ trend, player: livePlayerById[trend.player_id] }));
   }, [trendData, livePlayerById]);
 
+  const activeTabMeta = TABS.find(t => t.key === activeTab);
+
   const filtered = useMemo(() => {
-    let result = entries.filter(e => e.trend.tag === activeTab);
+    let result = entries.filter(e => e.trend.tags?.includes(activeTab));
     if (position !== 'All') result = result.filter(e => e.trend.position === position);
     if (search.trim()) {
       const q = search.toLowerCase();
       result = result.filter(e => e.trend.player_name.toLowerCase().includes(q));
     }
-    return result.sort((a, b) => Math.abs(b.trend.momentum ?? 0) - Math.abs(a.trend.momentum ?? 0));
-  }, [entries, activeTab, position, search]);
+    const sortKey = activeTabMeta?.metric === 'fpoe'
+      ? (e) => Math.abs(e.trend.fpoe_z ?? 0)
+      : (e) => Math.abs(e.trend.momentum ?? 0);
+    return result.sort((a, b) => sortKey(b) - sortKey(a));
+  }, [entries, activeTab, position, search, activeTabMeta]);
 
   function openPlayer(entry) {
     const { player, trend } = entry;
@@ -130,8 +145,6 @@ export default function TrendEngine() {
     setBreakdownEntry({ player, prop: topProp, score, trend });
   }
 
-  const activeTabMeta = TABS.find(t => t.key === activeTab);
-
   return (
     <div className="space-y-6 max-w-4xl mx-auto pb-8">
       {/* Header */}
@@ -143,8 +156,8 @@ export default function TrendEngine() {
           <h1 className="text-xl font-bold text-foreground">Player Trend Engine</h1>
           <p className="text-sm text-muted-foreground">
             {trendData?.data_loaded && trendData.data_as_of
-              ? `Data as of ${new Date(trendData.data_as_of).toLocaleString()} · real usage-share trend, not gut feel`
-              : 'Real usage-share trend — snap %, target %, carry % vs. season baseline'}
+              ? `Data as of ${new Date(trendData.data_as_of).toLocaleString()} · real usage & production trend, not gut feel`
+              : 'Real usage & production trend — snap %, target %, carry %, and actual-vs-expected points'}
           </p>
         </div>
       </div>
@@ -154,33 +167,28 @@ export default function TrendEngine() {
         {TABS.map(tab => (
           <button
             key={tab.key}
-            onClick={() => !tab.comingSoon && setActiveTab(tab.key)}
-            disabled={tab.comingSoon}
+            onClick={() => setActiveTab(tab.key)}
             className={cn(
               'px-3.5 py-2 rounded-xl border text-[12px] font-semibold flex-shrink-0 transition-all flex items-center gap-1.5',
-              tab.comingSoon
-                ? 'border-white/6 text-muted-foreground/40 cursor-not-allowed'
-                : activeTab === tab.key
+              activeTab === tab.key
                 ? 'bg-primary/20 border-primary/40 text-primary'
                 : 'border-white/8 text-muted-foreground hover:border-white/18 hover:text-foreground',
             )}
           >
             {tab.icon && <tab.icon className="w-3.5 h-3.5" />}
             {tab.label}
-            {tab.comingSoon && <span className="text-[9px] opacity-70">(soon)</span>}
           </button>
         ))}
       </div>
 
-      {activeTabMeta?.comingSoon ? (
-        <div className="text-center text-muted-foreground text-sm py-16 rounded-2xl border border-dashed border-white/10">
-          <p className="font-medium text-foreground/80">{activeTabMeta.label} is coming in a later phase</p>
-          <p className="text-xs mt-1.5 text-muted-foreground/60 max-w-sm mx-auto">
-            Needs an expected-fantasy-points model and real market value data (rostered %, trade value) —
-            not built yet, so it's not shown as if it were. Stock Up/Down (real usage trend) is live now.
-          </p>
-        </div>
-      ) : !trendData?.data_loaded && !loading ? (
+      {activeTab === 'buy_low' || activeTab === 'sell_high' ? (
+        <p className="text-[11px] text-muted-foreground/60 -mt-2">
+          Based on real targets/carries priced at this season's league-average conversion rate (RB/WR/TE only) vs. actual points —
+          not yet weighted for market/trade value.
+        </p>
+      ) : null}
+
+      {!trendData?.data_loaded && !loading ? (
         <div className="text-center text-muted-foreground text-sm py-16 rounded-2xl border border-dashed border-white/10">
           Could not reach the trend engine — check your connection and reload.
         </div>
@@ -226,7 +234,12 @@ export default function TrendEngine() {
           ) : (
             <div className="space-y-2">
               {filtered.map(entry => (
-                <TrendPlayerRow key={entry.trend.player_id} entry={entry} onOpen={() => openPlayer(entry)} />
+                <TrendPlayerRow
+                  key={entry.trend.player_id}
+                  entry={entry}
+                  highlightMetric={activeTabMeta?.metric}
+                  onOpen={() => openPlayer(entry)}
+                />
               ))}
               {filtered.length === 0 && (
                 <div className="text-center text-muted-foreground text-sm py-12">

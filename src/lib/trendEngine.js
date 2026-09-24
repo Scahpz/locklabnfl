@@ -3,12 +3,14 @@
 
 import { NFL_API } from './config';
 
-const CACHE_KEY = 'locklab_trend_v1';
+const CACHE_KEY = 'locklab_trend_v2'; // v2: tag -> tags[] (a player can carry a role tag + a value tag)
 const CACHE_TTL = 4 * 60 * 60 * 1000; // 4h
 
 export const TAG_META = {
-  stock_up:   { label: 'Stock Up',   short: 'UP',   arrow: '↑' },
-  stock_down: { label: 'Stock Down', short: 'DOWN', arrow: '↓' },
+  stock_up:   { label: 'Stock Up',   short: 'UP',        arrow: '↑', color: 'emerald' },
+  stock_down: { label: 'Stock Down', short: 'DOWN',       arrow: '↓', color: 'red' },
+  buy_low:    { label: 'Buy Low',    short: 'BUY LOW',    arrow: '▲', color: 'sky' },
+  sell_high:  { label: 'Sell High',  short: 'SELL HIGH',  arrow: '▼', color: 'amber' },
 };
 
 const METRIC_LABEL = {

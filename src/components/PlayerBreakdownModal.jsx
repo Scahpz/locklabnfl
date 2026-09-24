@@ -426,33 +426,54 @@ function TrendSparkline({ weekly, metric }) {
   );
 }
 
-// Player Trend Engine section — Stock Up/Down tag, momentum, confidence,
-// template-generated reason bullets, and weekly usage-share sparklines.
+const TREND_TAG_CLS = {
+  stock_up:   'bg-emerald-500/20 border-emerald-500/40 text-emerald-400',
+  stock_down: 'bg-red-500/20 border-red-500/40 text-red-400',
+  buy_low:    'bg-sky-500/20 border-sky-500/40 text-sky-400',
+  sell_high:  'bg-amber-500/20 border-amber-500/40 text-amber-400',
+};
+
+// Player Trend Engine section — role tag (Stock Up/Down) and/or value tag (Buy
+// Low/Sell High, a player can carry both at once), momentum, actual-vs-expected
+// FP, confidence, template-generated reason bullets, and weekly usage sparklines.
 // See backend/main.py's "Player Trend Engine" section for what's computed.
 function TrendEngineSection({ trend }) {
   if (!trend) return null;
-  const meta = TAG_META[trend.tag];
+  const tags = trend.tags?.length ? trend.tags : [];
   const metrics = Object.keys(trend.metrics ?? {});
 
   return (
-    <Section title="Trend Engine" icon={Activity} defaultOpen={trend.tag !== 'hold'}>
-      <div className="flex items-center justify-between">
-        <span
-          className={cn(
-            'text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border',
-            trend.tag === 'stock_up'   && 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400',
-            trend.tag === 'stock_down' && 'bg-red-500/20 border-red-500/40 text-red-400',
-            trend.tag === 'hold'       && 'bg-white/8 border-white/15 text-muted-foreground',
+    <Section title="Trend Engine" icon={Activity} defaultOpen={tags.length > 0}>
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {tags.length > 0 ? tags.map(tag => (
+            <span
+              key={tag}
+              className={cn('text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border', TREND_TAG_CLS[tag])}
+            >
+              {TAG_META[tag]?.label ?? tag}
+            </span>
+          )) : (
+            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border bg-white/8 border-white/15 text-muted-foreground">
+              Hold
+            </span>
           )}
-        >
-          {meta ? meta.label : 'Hold'}
-        </span>
+        </div>
         <span className="text-[10px] text-muted-foreground">
           {trend.confidence}% confidence · {trend.games_played} game{trend.games_played !== 1 ? 's' : ''} this season
         </span>
       </div>
 
       {trend.momentum != null && <MomentumBar momentum={trend.momentum} />}
+
+      {trend.fpoe != null && (
+        <div className="flex items-center justify-between text-[11px] rounded-lg bg-white/3 border border-white/8 px-3 py-2">
+          <span className="text-muted-foreground">Actual vs. Expected FP (recent)</span>
+          <span className={cn('font-semibold', trend.fpoe > 0 ? 'text-amber-400' : trend.fpoe < 0 ? 'text-sky-400' : 'text-foreground')}>
+            {trend.fpoe > 0 ? '+' : ''}{trend.fpoe} FP
+          </span>
+        </div>
+      )}
 
       {trend.reasons?.length > 0 && (
         <ul className="space-y-1">

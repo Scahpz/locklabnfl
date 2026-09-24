@@ -43,26 +43,39 @@ function VerdictChip({ verdict }) {
   );
 }
 
-// Stock Up / Stock Down chip from the Player Trend Engine. Greyed out below
-// ~40 confidence per spec ("show low-confidence tags greyed out").
+const TAG_CHIP_CLS = {
+  emerald: 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400',
+  red:     'bg-red-500/15 border-red-500/30 text-red-400',
+  sky:     'bg-sky-500/15 border-sky-500/30 text-sky-400',
+  amber:   'bg-amber-500/15 border-amber-500/30 text-amber-400',
+};
+
+// Trend Engine tag chips — a player can carry a role tag (Stock Up/Down) and a
+// value tag (Buy Low/Sell High) at once. Greyed out below ~40 confidence per
+// spec ("show low-confidence tags greyed out").
 function TrendTagChip({ trend }) {
-  if (!trend || trend.tag === 'hold') return null;
-  const meta = TAG_META[trend.tag];
-  if (!meta) return null;
+  if (!trend?.tags?.length) return null;
   const lowConfidence = (trend.confidence ?? 0) < 40;
   return (
-    <span
-      title={`${meta.label} · ${trend.confidence}% confidence`}
-      className={cn(
-        'text-[9px] font-bold px-1.5 py-0.5 rounded-full border uppercase tracking-wide flex items-center gap-0.5',
-        trend.tag === 'stock_up'
-          ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
-          : 'bg-red-500/15 border-red-500/30 text-red-400',
-        lowConfidence && 'opacity-50',
-      )}
-    >
-      {meta.arrow} {meta.short}
-    </span>
+    <>
+      {trend.tags.map(tag => {
+        const meta = TAG_META[tag];
+        if (!meta) return null;
+        return (
+          <span
+            key={tag}
+            title={`${meta.label} · ${trend.confidence}% confidence`}
+            className={cn(
+              'text-[9px] font-bold px-1.5 py-0.5 rounded-full border uppercase tracking-wide flex items-center gap-0.5',
+              TAG_CHIP_CLS[meta.color],
+              lowConfidence && 'opacity-50',
+            )}
+          >
+            {meta.arrow} {meta.short}
+          </span>
+        );
+      })}
+    </>
   );
 }
 

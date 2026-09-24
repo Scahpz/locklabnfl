@@ -1146,6 +1146,12 @@ MIN_SNAP_SHARE_QUALIFY = 0.20   # spec: exclude backups from the position-averag
 SHRINK_K                = 2.0   # stabilization constant for L3 shrinkage (sticky metrics -> small k)
 TREND_REFRESH_TTL       = 6 * 3600  # Sleeper stats typically settle within hours of games ending
 
+# Buy Low / Sell High (xFP vs actual) only applies to RB/WR/TE. QB fantasy
+# scoring is dominated by passing yards/TDs, which this xFP model doesn't
+# cover (it only prices out targets and carries) — showing a QB's FPOE would
+# silently ignore most of his real point total and mislabel him.
+VALUE_TAG_POSITIONS = ["RB", "WR", "TE"]
+
 
 def _load_trend_data():
     """
@@ -1172,6 +1178,13 @@ def _load_trend_data():
         players: dict = {}
         team_week_targets: dict = {}
         team_week_carries: dict = {}
+        # League-wide per-position totals, for the xFP conversion rates below —
+        # "if an average player at this position got this target/carry, what do
+        # they usually turn it into" — computed from this same real data, not guessed.
+        pos_totals: dict = {
+            pos: {"targets": 0.0, "carries": 0.0, "receptions": 0.0, "rec_yd": 0.0, "rec_td": 0.0, "rush_yd": 0.0, "rush_td": 0.0}
+            for pos in TREND_POSITIONS
+        }
         weeks_found: list = []
 
         for week in range(1, 19):
@@ -1189,9 +1202,15 @@ def _load_trend_data():
             for pid, stats in week_stats.items():
                 if pid not in roster or not stats:
                     continue
-                team = roster[pid]["team"]
-                targets = float(stats.get("rec_tgt") or 0)
-                carries = float(stats.get("rush_att") or 0)
+                position = roster[pid]["position"]
+                team     = roster[pid]["team"]
+                targets    = float(stats.get("rec_tgt") or 0)
+                carries    = float(stats.get("rush_att") or 0)
+                receptions = float(stats.get("rec") or 0)
+                rec_yd     = float(stats.get("rec_yd") or 0)
+                rec_td     = float(stats.get("rec_td") or 0)
+                rush_yd    = float(stats.get("rush_yd") or 0)
+                rush_td    = float(stats.get("rush_td") or 0)
                 off_snp = stats.get("off_snp")
                 tm_off_snp = stats.get("tm_off_snp")
                 snap_share = (off_snp / tm_off_snp) if (off_snp is not None and tm_off_snp) else None
@@ -1199,8 +1218,10 @@ def _load_trend_data():
                 entry = players.setdefault(pid, {**roster[pid], "weeks": []})
                 entry["team"] = team
                 entry["weeks"].append({
-                    "week": week, "team": team,
-                    "snap_share": snap_share, "targets": targets, "carries": carries,
+                    "week": week, "team": team, "snap_share": snap_share,
+                    "targets": targets, "carries": carries,
+                    "receptions": receptions, "rec_yd": rec_yd, "rec_td": rec_td,
+                    "rush_yd": rush_yd, "rush_td": rush_td,
                 })
 
                 if team:
@@ -1208,19 +1229,57 @@ def _load_trend_data():
                     team_week_targets[key] = team_week_targets.get(key, 0.0) + targets
                     team_week_carries[key] = team_week_carries.get(key, 0.0) + carries
 
+                pt = pos_totals[position]
+                pt["targets"] += targets; pt["carries"] += carries
+                pt["receptions"] += receptions; pt["rec_yd"] += rec_yd; pt["rec_td"] += rec_td
+                pt["rush_yd"] += rush_yd; pt["rush_td"] += rush_td
+
         if not players:
             print(f"[trend-engine] No {year} weekly stats available yet")
             return
 
-        # Now that team-week totals are known, convert raw targets/carries into shares.
+        # League-average conversion rates per position: e.g. "an average RB target
+        # turns into 0.6 catches and 6.8 receiving yards." Fixed half-PPR weights for
+        # now (matching this app's DEFAULT_SETTINGS) — making this read the user's
+        # actual league scoring settings is a follow-up, not faked as personalized here.
+        def rate(total, count):
+            return (total / count) if count else 0.0
+
+        conv: dict = {}
+        for pos, t in pos_totals.items():
+            conv[pos] = {
+                "rec_per_target":    rate(t["receptions"], t["targets"]),
+                "rec_yd_per_target": rate(t["rec_yd"],      t["targets"]),
+                "rec_td_per_target": rate(t["rec_td"],      t["targets"]),
+                "rush_yd_per_carry": rate(t["rush_yd"],     t["carries"]),
+                "rush_td_per_carry": rate(t["rush_td"],     t["carries"]),
+            }
+
+        REC_PTS, REC_YD_PTS, REC_TD_PTS = 0.5, 0.1, 6.0
+        RUSH_YD_PTS, RUSH_TD_PTS        = 0.1, 6.0
+
+        # Now that team-week totals and league conversion rates are known: convert
+        # raw targets/carries into shares, and compute actual vs. expected FP.
         for p in players.values():
+            pos = p["position"]
+            c = conv[pos]
             for w in p["weeks"]:
                 tt = team_week_targets.get((w["team"], w["week"]))
                 tc = team_week_carries.get((w["team"], w["week"]))
                 w["target_share"] = (w["targets"] / tt) if tt else None
                 w["carry_share"]  = (w["carries"] / tc) if tc else None
-                del w["targets"]
-                del w["carries"]
+
+                w["actual_fp"] = (
+                    w["receptions"] * REC_PTS + w["rec_yd"] * REC_YD_PTS + w["rec_td"] * REC_TD_PTS
+                    + w["rush_yd"] * RUSH_YD_PTS + w["rush_td"] * RUSH_TD_PTS
+                )
+                w["xfp"] = (
+                    w["targets"] * (c["rec_per_target"] * REC_PTS + c["rec_yd_per_target"] * REC_YD_PTS + c["rec_td_per_target"] * REC_TD_PTS)
+                    + w["carries"] * (c["rush_yd_per_carry"] * RUSH_YD_PTS + c["rush_td_per_carry"] * RUSH_TD_PTS)
+                )
+
+                for key in ("targets", "carries", "receptions", "rec_yd", "rec_td", "rush_yd", "rush_td"):
+                    del w[key]
             p["weeks"].sort(key=lambda wk: wk["week"])
 
         _trend_players   = players
@@ -1289,10 +1348,19 @@ def _compute_trend_scores():
                 "n_l3":     len(recent_vals),
                 "n_season": len(season_vals),
             }
+        # Recent-window FPOE (actual - expected fantasy points): how this player's
+        # results compared to what an average player would score on the same real
+        # volume, over whatever the "recent" window is (matches uses_l3_window).
+        recent_weeks = last3 if uses_l3_window else weeks[-1:]
+        fpoe_vals = [w["actual_fp"] - w["xfp"] for w in recent_weeks if w.get("actual_fp") is not None and w.get("xfp") is not None]
+
         computed.append({
             "player_id": pid, "name": p["name"], "team": p["team"], "position": p["position"],
             "games_played": n_games, "metrics": metrics, "uses_l3_window": uses_l3_window,
             "qualifies": (metrics["snap_share"]["l1"] or 0) >= MIN_SNAP_SHARE_QUALIFY,
+            "recent_fpoe": _mean(fpoe_vals),
+            "recent_actual_fp": _mean([w["actual_fp"] for w in recent_weeks]),
+            "recent_xfp": _mean([w["xfp"] for w in recent_weeks]),
         })
 
     # ── Position averages (qualifying population only) — shrinkage targets ──
@@ -1344,6 +1412,14 @@ def _compute_trend_scores():
             mean_v = _mean(vals)
             z_stats[(pos, metric)] = (mean_v, _std(vals, mean_v))
 
+    # z-score recent FPOE (actual - expected FP) within each position's
+    # qualifying population, for the Buy Low / Sell High threshold below.
+    fpoe_stats: dict = {}
+    for pos in VALUE_TAG_POSITIONS:
+        vals = [c["recent_fpoe"] for c in computed if c["position"] == pos and c["qualifies"] and c["recent_fpoe"] is not None]
+        mean_v = _mean(vals)
+        fpoe_stats[pos] = (mean_v, _std(vals, mean_v))
+
     # ── Assemble tagged output rows ──────────────────────────────────────────
     METRIC_LABEL = {"snap_share": "Snap share", "target_share": "Target share", "carry_share": "Carry share"}
     out_players = []
@@ -1375,12 +1451,32 @@ def _compute_trend_scores():
             if prior_avg and last_snap is not None and last_snap < prior_avg * 0.5:
                 possible_injury_exit = True
 
-        tag = "hold"
+        role_tag = "hold"
         if momentum is not None:
             if momentum >= 25 and abs(max_move) >= 0.10:
-                tag = "stock_up"
+                role_tag = "stock_up"
             elif momentum <= -25 and abs(max_move) >= 0.10 and not possible_injury_exit:
-                tag = "stock_down"
+                role_tag = "stock_down"
+
+        # Buy Low / Sell High — FPOE (actual minus expected FP) vs. the position,
+        # paired with role direction. Buy Low = underperforming his real
+        # opportunity while his role isn't shrinking (results should catch up).
+        # Sell High = overperforming (usually TD/big-play driven) while his role
+        # isn't growing (regression risk). A player can carry both a role tag and
+        # a value tag — that combination (e.g. Stock Up + Buy Low) is the
+        # strongest signal per the spec: role's growing, points haven't shown up.
+        value_tag = None
+        fpoe_z = None
+        if pos in VALUE_TAG_POSITIONS and c["games_played"] >= MIN_GAMES_FOR_TREND and c["recent_fpoe"] is not None:
+            mean_v, std_v = fpoe_stats.get(pos, (None, None))
+            if std_v:
+                fpoe_z = (c["recent_fpoe"] - mean_v) / std_v
+                if fpoe_z <= -1.0 and role_tag != "stock_down":
+                    value_tag = "buy_low"
+                elif fpoe_z >= 1.0 and role_tag != "stock_up":
+                    value_tag = "sell_high"
+
+        tags = [t for t in (role_tag if role_tag != "hold" else None, value_tag) if t]
 
         reasons = []
         recent_label = "over the last 3 games" if c["uses_l3_window"] else "vs. the last game"
@@ -1403,6 +1499,16 @@ def _compute_trend_scores():
                 f"Early-season sample ({c['games_played']} game{plural}) — comparing most recent game "
                 f"to the game{plural} before it; widens to a full 3-game window at 4+ games."
             )
+        if value_tag == "buy_low":
+            reasons.append(
+                f"Averaging {round(c['recent_actual_fp'], 1)} actual FP vs. {round(c['recent_xfp'], 1)} expected FP "
+                f"{recent_label} — role's been there, results haven't caught up yet."
+            )
+        elif value_tag == "sell_high":
+            reasons.append(
+                f"Averaging {round(c['recent_actual_fp'], 1)} actual FP vs. {round(c['recent_xfp'], 1)} expected FP "
+                f"{recent_label} — likely TD/big-play driven, due for regression."
+            )
 
         out_players.append({
             "player_id":    c["player_id"],
@@ -1420,11 +1526,13 @@ def _compute_trend_scores():
                 {"week": w["week"], **{metric: w[metric] for metric in applicable}}
                 for w in weeks
             ],
-            "momentum":   round(momentum, 1) if momentum is not None else None,
-            "confidence": round(min(100.0, (c["games_played"] / 4.0) * 100)),
-            "tag":        tag,
-            "reasons":    reasons,
-            "source":     "Sleeper API (api.sleeper.app/v1/stats)",
+            "momentum":     round(momentum, 1) if momentum is not None else None,
+            "fpoe":         round(c["recent_fpoe"], 1) if c["recent_fpoe"] is not None else None,
+            "fpoe_z":       round(fpoe_z, 2) if fpoe_z is not None else None,
+            "confidence":   round(min(100.0, (c["games_played"] / 4.0) * 100)),
+            "tags":         tags,
+            "reasons":      reasons,
+            "source":       "Sleeper API (api.sleeper.app/v1/stats)",
         })
 
     return {
@@ -1432,6 +1540,12 @@ def _compute_trend_scores():
         "season":      _trend_season,
         "data_as_of":  _trend_loaded_at,
         "players":     out_players,
+        "xfp_model_note": (
+            "xFP = real targets/carries x this season's league-average conversion rate "
+            "for the position (half-PPR). Doesn't include red-zone/field-position "
+            "weighting (needs play-by-play data not wired up yet) or passing production, "
+            "so Buy Low/Sell High only apply to RB/WR/TE."
+        ),
     }
 
 
