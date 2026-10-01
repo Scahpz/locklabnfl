@@ -1,7 +1,7 @@
 // Fetches live NFL roster (Sleeper API) + per-player projections + schedule/totals (ESPN).
 // Returns a player array with real projected FP attached, compatible with fantasyScore().
 
-const CACHE_KEY = 'locklab_nfl_live_v13'; // v13: fixed ESPN schedule fetch (dates= range query was 400ing)
+const CACHE_KEY = 'locklab_nfl_live_v14'; // v14: no synthetic random props; real stats only
 const CACHE_TTL = 4 * 60 * 60 * 1000;    // 4h
 
 const ESPN_NORM = { WSH: 'WAS' };
@@ -47,32 +47,23 @@ const POS_DEFAULTS = {
 };
 
 function makeProp(prop_type, line, variance, gameTotal = 45.5, isHome = false) {
-  const isInt = INT_TYPES.has(prop_type);
-  const safeVariance = Math.max(variance, 0.3);
   const rawLine = Math.max(line, 0);
   const safeLine = Math.round(rawLine);
-  const games = Array.from({ length: 6 }, () => {
-    const raw = safeLine + (Math.random() * safeVariance * 2 - safeVariance);
-    return Math.max(0, Math.round(raw));
-  });
-  const avg6 = Math.round(games.reduce((a, b) => a + b, 0) / 6);
-  const avg3 = Math.round(games.slice(-3).reduce((a, b) => a + b, 0) / 3);
-  const hits = games.filter(v => v > safeLine).length;
   return {
     prop_type,
     line: safeLine,
     over_odds: -110,
     under_odds: -110,
-    projection: avg3,
-    edge: parseFloat((((avg3 - safeLine) / Math.max(safeLine, 1)) * 100).toFixed(1)),
-    hit_rate_last_10: Math.round((hits / 6) * 100),
-    avg_last_5: avg3,
-    avg_last_10: avg6,
-    streak_info: `Hit over in ${hits} of last 6`,
+    projection: safeLine,
+    edge: 0,
+    hit_rate_last_10: null,
+    avg_last_5: null,
+    avg_last_10: null,
+    streak_info: null,
     confidence_score: 5,
     confidence_tier: 'C',
     is_top_pick: false, is_lock: false, best_value: false, trap_warning: false,
-    last_5_games: games.slice(-3), last_10_games: games,
+    last_5_games: [], last_10_games: [],
     matchup_rating: 'neutral', def_rank_vs_pos: 16,
     game_total: gameTotal, is_home: isHome,
     snap_pct: null, target_share: null,

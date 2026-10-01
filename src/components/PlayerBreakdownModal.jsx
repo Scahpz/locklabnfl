@@ -485,6 +485,24 @@ function TrendEngineSection({ trend }) {
         </ul>
       )}
 
+      {trend.trade_targets?.length > 0 && (
+        <div className="space-y-1.5">
+          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
+            {tags.includes('sell_high') ? 'Ask for one of these in return' : 'Could realistically offer up'}
+          </p>
+          {trend.trade_targets.map(t => (
+            <div key={t.player_id} className="rounded-lg bg-white/3 border border-white/8 px-3 py-2 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <span className="text-[12px] font-semibold text-foreground">{t.player_name}</span>
+                <span className="text-[10px] text-muted-foreground ml-1.5">{t.team} · {t.position}</span>
+                {t.reason && <p className="text-[10px] text-muted-foreground/70 mt-0.5">{t.reason}</p>}
+              </div>
+              <span className="text-[11px] font-semibold text-foreground flex-shrink-0 tabular-nums">{t.recent_actual_fp} FP</span>
+            </div>
+          ))}
+        </div>
+      )}
+
       {metrics.length > 0 && (
         <div className="grid grid-cols-1 gap-3 pt-1">
           {metrics.map(metric => (

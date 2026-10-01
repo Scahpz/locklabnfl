@@ -8,6 +8,7 @@ import { formatMarket } from '@/lib/propLabels';
 import VerdictBadge from '@/components/props/VerdictBadge';
 import { gradeProp } from '@/lib/grading';
 import { calcEVVerdict, TIER_CONFIG } from '@/lib/verdict';
+import { loadSleeperHistory, computeAnalyticsFromSleeper } from '@/lib/sleeperHistory';
 
 function fmtOdds(n) {
   if (n == null) return '—';
@@ -120,9 +121,19 @@ export default function AIPicks() {
     async function load() {
       setLoading(true);
       try {
-        const data = await fetchLiveProps();
-        if (data?.props?.length > 0) {
-          setAllProps(data.props);
+        const [data, sleeperCache] = await Promise.all([
+          fetchLiveProps(),
+          loadSleeperHistory().catch(() => null),
+        ]);
+        let props = data?.props || [];
+        if (props.length > 0 && sleeperCache) {
+          props = props.map(p => {
+            const an = computeAnalyticsFromSleeper(p.player_name, p.prop_type, p.line, sleeperCache);
+            return an ? { ...p, ...an, has_analytics: true } : p;
+          });
+        }
+        if (props.length > 0) {
+          setAllProps(props);
           setIsLive(true);
         } else {
           setAllProps([]);
@@ -144,21 +155,18 @@ export default function AIPicks() {
     );
   }
 
-  // Bucket props by EV tier — only surface GREEN and YELLOW (skip SKIP/TRAP)
+  // Bucket props by EV tier — strictly require real verified analytics (minimum 3 games)
   const buckets = { GREEN: [], YELLOW: [] };
 
   allProps
-    .filter(p => p.injury_status !== 'out' && p.avg_last_10 != null)
+    .filter(p => p.injury_status !== 'out' && p.has_analytics && p.last_10_games?.length >= 3 && p.avg_last_10 != null && p.hit_rate_last_10 != null)
     .forEach(p => {
       const logs = p.last_10_games || [];
-      const gradedProp = (() => {
-        if (logs.length === 0) return p;
-        const hitCount = logs.filter(v => v > p.line).length;
-        const dynamicHitRate = Math.round(hitCount / logs.length * 100);
-        const base = p.projection ?? p.avg_last_10 ?? null;
-        const dynamicEdge = base != null ? Math.round((base - p.line) * 100) / 100 : p.edge;
-        return { ...p, hit_rate_last_10: dynamicHitRate, edge: dynamicEdge };
-      })();
+      const hitCount = logs.filter(v => v > p.line).length;
+      const dynamicHitRate = Math.round(hitCount / logs.length * 100);
+      const base = p.projection ?? p.avg_last_10 ?? null;
+      const dynamicEdge = base != null ? Math.round((base - p.line) * 100) / 100 : p.edge;
+      const gradedProp = { ...p, hit_rate_last_10: dynamicHitRate, edge: dynamicEdge };
       const grade     = gradeProp(gradedProp);
       const evVerdict = calcEVVerdict(gradedProp, grade);
       if (buckets[evVerdict.tier]) {

@@ -1167,6 +1167,19 @@ def _load_trend_data():
 
         year = datetime.datetime.now().year
 
+        # Auto-detect active season: if current year has no weekly stats yet, fall back to prior year
+        for test_year in (year, year - 1):
+            try:
+                test_url = f"https://api.sleeper.app/v1/stats/nfl/regular/{test_year}/1"
+                req = urllib.request.Request(test_url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    t_data = json.loads(resp.read())
+                    if len(t_data) > 50:
+                        year = test_year
+                        break
+            except Exception:
+                continue
+
         with urllib.request.urlopen("https://api.sleeper.app/v1/players/nfl", timeout=30) as resp:
             raw_players: dict = json.loads(resp.read())
 
@@ -1451,30 +1464,53 @@ def _compute_trend_scores():
             if prior_avg and last_snap is not None and last_snap < prior_avg * 0.5:
                 possible_injury_exit = True
 
+        # Star / high-volume producer check:
+        # Players averaging high FP (>= 13.5 FP/g) or commanding high snap/touch volume
+        # (e.g. Bijan Robinson, Jahmyr Gibbs, top bellcows) are elite producers.
+        recent_snaps = c["metrics"]["snap_share"]["l3"] or 0
+        season_snaps = c["metrics"]["snap_share"]["season"] or 0
+        recent_actual = c["recent_actual_fp"] or 0
+        is_elite_producer = (
+            recent_actual >= 13.5
+            or recent_snaps >= 0.60
+            or season_snaps >= 0.60
+        )
+
         role_tag = "hold"
         if momentum is not None:
-            if momentum >= 25 and abs(max_move) >= 0.10:
+            if momentum >= 20 and abs(max_move) >= 0.08:
                 role_tag = "stock_up"
-            elif momentum <= -25 and abs(max_move) >= 0.10 and not possible_injury_exit:
-                role_tag = "stock_down"
+            elif momentum <= -25 and abs(max_move) >= 0.12 and not possible_injury_exit:
+                # Do NOT tag an elite starter as "Stock Down" unless their recent snap share
+                # has genuinely fallen below starter tier (< 0.48) with sustained touch loss (4+ games).
+                # Single-game blowout variance or 4th quarter rest is normal game script, not stock down.
+                if is_elite_producer:
+                    if recent_snaps < 0.48 and c["uses_l3_window"] and recent_actual < 12.0:
+                        role_tag = "stock_down"
+                else:
+                    role_tag = "stock_down"
 
-        # Buy Low / Sell High — FPOE (actual minus expected FP) vs. the position,
-        # paired with role direction. Buy Low = underperforming his real
-        # opportunity while his role isn't shrinking (results should catch up).
-        # Sell High = overperforming (usually TD/big-play driven) while his role
-        # isn't growing (regression risk). A player can carry both a role tag and
-        # a value tag — that combination (e.g. Stock Up + Buy Low) is the
-        # strongest signal per the spec: role's growing, points haven't shown up.
+        # Buy Low / Sell High:
+        # Buy Low = Solid underlying opportunity (snaps >= 45% or role not declining)
+        # whose actual FP is lagging behind expected FP (fpoe_z <= -0.8), due for positive regression.
+        # Sell High = Limited snap/touch volume (< 58% snaps or declining role)
+        # whose fantasy output is inflated by unsustainable TD variance (fpoe_z >= 1.0).
+        # CRITICAL: Elite cornerstone stars (Bijan Robinson, Jahmyr Gibbs, top bellcows/WR1s)
+        # must NEVER be tagged Sell High simply because their elite talent outproduces
+        # an average backup! If an elite player has high FPOE and steady/rising volume, they are Stock Up / Hold.
         value_tag = None
         fpoe_z = None
         if pos in VALUE_TAG_POSITIONS and c["games_played"] >= MIN_GAMES_FOR_TREND and c["recent_fpoe"] is not None:
             mean_v, std_v = fpoe_stats.get(pos, (None, None))
             if std_v:
                 fpoe_z = (c["recent_fpoe"] - mean_v) / std_v
-                if fpoe_z <= -1.0 and role_tag != "stock_down":
+                if fpoe_z <= -0.8 and role_tag != "stock_down" and recent_snaps >= 0.45:
                     value_tag = "buy_low"
-                elif fpoe_z >= 1.0 and role_tag != "stock_up":
-                    value_tag = "sell_high"
+                elif fpoe_z >= 1.0:
+                    if not is_elite_producer and (recent_snaps < 0.58 or role_tag == "stock_down"):
+                        value_tag = "sell_high"
+                    elif is_elite_producer and role_tag == "hold" and (momentum or 0) >= 10:
+                        role_tag = "stock_up"
 
         tags = [t for t in (role_tag if role_tag != "hold" else None, value_tag) if t]
 
@@ -1502,12 +1538,16 @@ def _compute_trend_scores():
         if value_tag == "buy_low":
             reasons.append(
                 f"Averaging {round(c['recent_actual_fp'], 1)} actual FP vs. {round(c['recent_xfp'], 1)} expected FP "
-                f"{recent_label} — role's been there, results haven't caught up yet."
+                f"{recent_label} — heavy opportunity ({round(recent_snaps*100)}% snaps), due for positive regression."
             )
         elif value_tag == "sell_high":
             reasons.append(
                 f"Averaging {round(c['recent_actual_fp'], 1)} actual FP vs. {round(c['recent_xfp'], 1)} expected FP "
-                f"{recent_label} — likely TD/big-play driven, due for regression."
+                f"on limited volume ({round(recent_snaps*100)}% snaps) — TD-dependent, high regression risk."
+            )
+        elif is_elite_producer and role_tag == "stock_up":
+            reasons.append(
+                f"Elite playmaker averaging {round(c['recent_actual_fp'], 1)} FP/g with high-volume featured role."
             )
 
         out_players.append({
@@ -1526,14 +1566,64 @@ def _compute_trend_scores():
                 {"week": w["week"], **{metric: w[metric] for metric in applicable}}
                 for w in weeks
             ],
-            "momentum":     round(momentum, 1) if momentum is not None else None,
-            "fpoe":         round(c["recent_fpoe"], 1) if c["recent_fpoe"] is not None else None,
-            "fpoe_z":       round(fpoe_z, 2) if fpoe_z is not None else None,
-            "confidence":   round(min(100.0, (c["games_played"] / 4.0) * 100)),
-            "tags":         tags,
-            "reasons":      reasons,
-            "source":       "Sleeper API (api.sleeper.app/v1/stats)",
+            "momentum":         round(momentum, 1) if momentum is not None else None,
+            "fpoe":             round(c["recent_fpoe"], 1) if c["recent_fpoe"] is not None else None,
+            "fpoe_z":           round(fpoe_z, 2) if fpoe_z is not None else None,
+            "recent_actual_fp": round(c["recent_actual_fp"], 1) if c["recent_actual_fp"] is not None else None,
+            "confidence":       round(min(100.0, (c["games_played"] / 4.0) * 100)),
+            "tags":             tags,
+            "reasons":          reasons,
+            "source":           "Sleeper API (api.sleeper.app/v1/stats)",
         })
+
+    # ── Trade targets for Buy Low / Sell High ────────────────────────────────
+    # Matched on recent actual FP — the closest real, already-computed number to
+    # "current perceived value" without ADP/trade-value data (not built yet, see
+    # xfp_model_note). Same position only. For a Sell High player: same-tier
+    # Buy Low/Stock Up players to ask for in return. For a Buy Low player:
+    # same-tier Sell High/Stock Down players you could realistically offer up.
+    def _trade_reason(target):
+        if "buy_low" in target["tags"] and "stock_up" in target["tags"]:
+            return "role growing and still underperforming it — the strongest buy signal."
+        if "buy_low" in target["tags"]:
+            return "producing below his real opportunity — buy before results catch up."
+        if "stock_up" in target["tags"]:
+            return "role's been growing — buy before he gets more expensive."
+        if "sell_high" in target["tags"] and "stock_down" in target["tags"]:
+            return "role shrinking and results won't hold either — sell now."
+        if "sell_high" in target["tags"]:
+            return "outproducing his role, likely TD/big-play driven — sell before it regresses."
+        if "stock_down" in target["tags"]:
+            return "role's been shrinking — value is more likely to keep falling than bounce back."
+        return None
+
+    def _trade_targets(ref, pool, n=3):
+        ref_fp = ref.get("recent_actual_fp")
+        if ref_fp is None:
+            return []
+        candidates = [
+            p for p in pool
+            if p["player_id"] != ref["player_id"] and p["position"] == ref["position"] and p.get("recent_actual_fp") is not None
+        ]
+        candidates.sort(key=lambda p: abs(p["recent_actual_fp"] - ref_fp))
+        out = []
+        for p in candidates[:n]:
+            out.append({
+                "player_id": p["player_id"], "player_name": p["player_name"], "team": p["team"],
+                "position": p["position"], "recent_actual_fp": p["recent_actual_fp"], "tags": p["tags"],
+                "reason": _trade_reason(p),
+            })
+        return out
+
+    buy_or_up_pool    = [p for p in out_players if "buy_low" in p["tags"] or "stock_up" in p["tags"]]
+    sell_or_down_pool = [p for p in out_players if "sell_high" in p["tags"] or "stock_down" in p["tags"]]
+    for p in out_players:
+        if "sell_high" in p["tags"]:
+            p["trade_targets"] = _trade_targets(p, buy_or_up_pool)
+        elif "buy_low" in p["tags"]:
+            p["trade_targets"] = _trade_targets(p, sell_or_down_pool)
+        else:
+            p["trade_targets"] = []
 
     return {
         "data_loaded": True,
@@ -1545,6 +1635,11 @@ def _compute_trend_scores():
             "for the position (half-PPR). Doesn't include red-zone/field-position "
             "weighting (needs play-by-play data not wired up yet) or passing production, "
             "so Buy Low/Sell High only apply to RB/WR/TE."
+        ),
+        "trade_targets_note": (
+            "Matched by recent actual fantasy points, same position — the closest real "
+            "number to 'current perceived value' without ADP/trade-value data (not wired "
+            "up yet). Not a full trade-value model."
         ),
     }
 

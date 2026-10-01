@@ -37,7 +37,7 @@ function MomentumBar({ momentum }) {
   );
 }
 
-function TrendPlayerRow({ entry, highlightMetric, onOpen }) {
+function TrendPlayerRow({ entry, highlightMetric, rank, onOpen }) {
   const { trend, player } = entry;
   const showMomentum = highlightMetric === 'momentum' && trend.momentum != null;
   return (
@@ -45,10 +45,20 @@ function TrendPlayerRow({ entry, highlightMetric, onOpen }) {
       onClick={onOpen}
       disabled={!player}
       className={cn(
-        'w-full text-left rounded-2xl border border-white/6 bg-[hsl(222,47%,9%)] transition-colors p-4 flex items-center gap-4',
+        'w-full text-left rounded-2xl border border-white/6 bg-[hsl(222,47%,9%)] transition-colors p-3.5 sm:p-4 flex items-center gap-3 sm:gap-4',
         player ? 'hover:border-white/18 hover:bg-white/2 cursor-pointer' : 'opacity-70 cursor-default',
       )}
     >
+      {/* Rank number */}
+      <div className={cn(
+        'w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs flex-shrink-0 border tabular-nums',
+        rank === 1 ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-[0_0_10px_rgba(245,158,11,0.25)]' :
+        rank === 2 ? 'bg-slate-300/15 text-slate-200 border-slate-300/30' :
+        rank === 3 ? 'bg-amber-700/20 text-amber-500 border-amber-700/30' :
+        'bg-white/5 text-muted-foreground border-white/8'
+      )}>
+        #{rank}
+      </div>
       <PlayerAvatar photo={player?.photo_url} team={trend.team} className="w-10 h-10 flex-shrink-0" />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
@@ -66,6 +76,12 @@ function TrendPlayerRow({ entry, highlightMetric, onOpen }) {
         {showMomentum && <div className="mt-1.5"><MomentumBar momentum={trend.momentum} /></div>}
         {trend.reasons?.[0] && (
           <p className="text-[11px] text-muted-foreground mt-1.5 truncate">{trend.reasons[0]}</p>
+        )}
+        {trend.trade_targets?.length > 0 && (
+          <p className="text-[10px] text-muted-foreground/70 mt-1 truncate">
+            {trend.tags.includes('sell_high') ? 'Ask for: ' : 'Offer: '}
+            {trend.trade_targets.map(t => t.player_name).join(', ')}
+          </p>
         )}
       </div>
       <div className="flex flex-col items-end gap-1 flex-shrink-0">
@@ -108,13 +124,31 @@ export default function TrendEngine() {
 
   const livePlayerById = useMemo(() => {
     const map = {};
-    (livePlayers ?? []).forEach(p => { map[p.id] = p; });
+    (livePlayers ?? []).forEach(p => {
+      map[p.id] = p;
+      if (p.player_name) {
+        const norm = p.player_name.toLowerCase().replace(/\./g, '').replace(/\s+/g, ' ').trim();
+        map[norm] = p;
+      }
+    });
     return map;
   }, [livePlayers]);
 
   const entries = useMemo(() => {
     if (!trendData?.players) return [];
-    return trendData.players.map(trend => ({ trend, player: livePlayerById[trend.player_id] }));
+    return trendData.players.map(trend => {
+      const norm = trend.player_name?.toLowerCase().replace(/\./g, '').replace(/\s+/g, ' ').trim();
+      const matched = livePlayerById[trend.player_id] || (norm ? livePlayerById[norm] : null);
+      const fallbackPlayer = matched || {
+        id: trend.player_id,
+        player_name: trend.player_name,
+        team: trend.team,
+        position: trend.position,
+        photo_url: `https://sleepercdn.com/content/nfl/players/thumb/${trend.player_id}.jpg`,
+        props: [],
+      };
+      return { trend, player: fallbackPlayer };
+    });
   }, [trendData, livePlayerById]);
 
   const activeTabMeta = TABS.find(t => t.key === activeTab);
@@ -126,11 +160,18 @@ export default function TrendEngine() {
       const q = search.toLowerCase();
       result = result.filter(e => e.trend.player_name.toLowerCase().includes(q));
     }
-    const sortKey = activeTabMeta?.metric === 'fpoe'
-      ? (e) => Math.abs(e.trend.fpoe_z ?? 0)
-      : (e) => Math.abs(e.trend.momentum ?? 0);
-    return result.sort((a, b) => sortKey(b) - sortKey(a));
-  }, [entries, activeTab, position, search, activeTabMeta]);
+    // Numbered ranking sort order per category
+    if (activeTab === 'stock_up') {
+      return result.sort((a, b) => (b.trend.momentum ?? 0) - (a.trend.momentum ?? 0));
+    } else if (activeTab === 'stock_down') {
+      return result.sort((a, b) => (a.trend.momentum ?? 0) - (b.trend.momentum ?? 0));
+    } else if (activeTab === 'buy_low') {
+      return result.sort((a, b) => (a.trend.fpoe ?? 0) - (b.trend.fpoe ?? 0));
+    } else if (activeTab === 'sell_high') {
+      return result.sort((a, b) => (b.trend.fpoe ?? 0) - (a.trend.fpoe ?? 0));
+    }
+    return result;
+  }, [entries, activeTab, position, search]);
 
   function openPlayer(entry) {
     const { player, trend } = entry;
@@ -233,10 +274,11 @@ export default function TrendEngine() {
             </div>
           ) : (
             <div className="space-y-2">
-              {filtered.map(entry => (
+              {filtered.map((entry, index) => (
                 <TrendPlayerRow
-                  key={entry.trend.player_id}
+                  key={entry.trend.player_id || entry.trend.player_name}
                   entry={entry}
+                  rank={index + 1}
                   highlightMetric={activeTabMeta?.metric}
                   onOpen={() => openPlayer(entry)}
                 />
