@@ -1662,3 +1662,108 @@ async def trend_scores():
     except Exception as exc:
         print(f"[trend-engine] Compute error: {exc}")
         return {"data_loaded": False, "error": str(exc), "players": [], "season": _trend_season, "data_as_of": _trend_loaded_at}
+
+
+# ── ESPN league import ────────────────────────────────────────────────────────
+# Browsers can't send ESPN's auth cookies cross-site, so the frontend posts the
+# league ID (and, for private leagues, espn_s2 + SWID) here. Cookies are used for
+# this one request only — never logged or stored.
+
+ESPN_LEAGUE_URL = "https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/{season}/segments/0/leagues/{league_id}"
+ESPN_POSITIONS  = {1: "QB", 2: "RB", 3: "WR", 4: "TE", 5: "K", 16: "DEF"}
+ESPN_PRO_TEAMS  = {
+    1: "ATL", 2: "BUF", 3: "CHI", 4: "CIN", 5: "CLE", 6: "DAL", 7: "DEN", 8: "DET",
+    9: "GB", 10: "TEN", 11: "IND", 12: "KC", 13: "LV", 14: "LAR", 15: "MIA", 16: "MIN",
+    17: "NE", 18: "NO", 19: "NYG", 20: "NYJ", 21: "PHI", 22: "ARI", 23: "PIT", 24: "LAC",
+    25: "SF", 26: "SEA", 27: "TB", 28: "WAS", 29: "CAR", 30: "JAX", 33: "BAL", 34: "HOU",
+}
+# ESPN scoring statIds we translate into LockLab league settings
+ESPN_STAT_IDS = {
+    3: "passYdPts", 4: "passTDPts", 24: "rushYdPts", 25: "rushTDPts",
+    42: "recYdPts", 43: "recTDPts", 53: "recPts",
+}
+ESPN_SLOT_TE         = "6"
+ESPN_SLOT_SUPERFLEX  = "7"
+
+
+@app.post("/api/espn/league")
+async def espn_league(request: Request):
+    body = await request.json()
+    league_id = str(body.get("league_id", "")).strip()
+    season    = int(body.get("season") or 0)
+    if not league_id.isdigit() or season < 2000:
+        return {"ok": False, "error": "Enter a valid ESPN league ID."}
+
+    cookies = {}
+    if body.get("espn_s2") and body.get("swid"):
+        swid = str(body["swid"]).strip()
+        if not swid.startswith("{"):
+            swid = "{" + swid.strip("{}") + "}"
+        cookies = {"espn_s2": str(body["espn_s2"]).strip(), "SWID": swid}
+
+    try:
+        async with httpx.AsyncClient(timeout=12, cookies=cookies) as client:
+            r = await client.get(
+                ESPN_LEAGUE_URL.format(season=season, league_id=league_id),
+                params=[("view", "mTeam"), ("view", "mRoster"), ("view", "mSettings")],
+            )
+    except Exception:
+        return {"ok": False, "error": "Couldn't reach ESPN. Try again in a minute."}
+
+    if r.status_code in (401, 403):
+        return {"ok": False, "private": True,
+                "error": "This league is private. Add your espn_s2 and SWID cookies to connect it."}
+    if r.status_code == 404:
+        return {"ok": False, "error": f"No ESPN league {league_id} found for the {season} season."}
+    if r.status_code != 200:
+        return {"ok": False, "error": f"ESPN returned an error (HTTP {r.status_code})."}
+
+    data     = r.json()
+    settings = data.get("settings", {})
+
+    scoring = {}
+    te_premium = False
+    for item in settings.get("scoringSettings", {}).get("scoringItems", []):
+        key = ESPN_STAT_IDS.get(item.get("statId"))
+        if not key:
+            continue
+        scoring[key] = item.get("points", 0)
+        if key == "recPts":
+            te_pts = (item.get("pointsOverrides") or {}).get(ESPN_SLOT_TE)
+            te_premium = te_pts is not None and te_pts > item.get("points", 0)
+
+    slot_counts = settings.get("rosterSettings", {}).get("lineupSlotCounts", {})
+    members = {m.get("id"): m.get("displayName", "") for m in data.get("members", [])}
+
+    teams = []
+    for t in data.get("teams", []):
+        name = t.get("name") or f"{t.get('location', '')} {t.get('nickname', '')}".strip()
+        owner_ids = t.get("owners") or []
+        players = []
+        for e in (t.get("roster") or {}).get("entries", []):
+            p = (e.get("playerPoolEntry") or {}).get("player") or {}
+            pos = ESPN_POSITIONS.get(p.get("defaultPositionId"))
+            if not pos:
+                continue
+            players.append({
+                "name":     p.get("fullName", ""),
+                "position": pos,
+                "team":     ESPN_PRO_TEAMS.get(p.get("proTeamId"), ""),
+            })
+        teams.append({
+            "id":      str(t.get("id")),
+            "name":    name or t.get("abbrev", f"Team {t.get('id')}"),
+            "owner":   members.get(owner_ids[0], "") if owner_ids else "",
+            "players": players,
+        })
+
+    return {
+        "ok":         True,
+        "name":       settings.get("name", f"ESPN League {league_id}"),
+        "season":     season,
+        "size":       len(teams),
+        "scoring":    scoring,
+        "tePremium":  te_premium,
+        "superflex":  int(slot_counts.get(ESPN_SLOT_SUPERFLEX, 0)) > 0,
+        "teams":      teams,
+    }

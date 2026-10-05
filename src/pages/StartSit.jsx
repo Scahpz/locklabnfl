@@ -12,6 +12,10 @@ import { cn } from '@/lib/utils';
 import TeamLogo from '@/components/common/TeamLogo';
 import PlayerAvatar from '@/components/common/PlayerAvatar';
 import PlayerBreakdownModal from '@/components/PlayerBreakdownModal';
+import LeagueConnectModal from '@/components/LeagueConnectModal';
+import {
+  getLeagueConnection, refreshLeagueConnection, isConnectionStale, getMyTeam, getRosteredIds,
+} from '@/lib/leagueConnect';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -855,6 +859,26 @@ export default function StartSit() {
   const [selectedGame, setSelectedGame]           = useState(null); // null | { key, teams: [t1, t2] }
   const [teamFilter, setTeamFilter]               = useState(null); // null | team abbreviation
   const [breakdownEntry, setBreakdownEntry]       = useState(null); // null | { player, prop, score }
+  const [league, setLeague]                       = useState(() => getLeagueConnection());
+  const [showLeague, setShowLeague]               = useState(false);
+  const [myTeamOnly, setMyTeamOnly]               = useState(false);
+
+  // Rosters change through the week — quietly re-sync a stale connection.
+  useEffect(() => {
+    if (league && isConnectionStale(league)) {
+      refreshLeagueConnection(league).then(setLeague).catch(() => {});
+    }
+  }, []);
+
+  function handleLeagueChange(conn) {
+    setLeague(conn);
+    setSettings(getLeagueSettings()); // connecting applies the league's scoring
+    if (!conn) setMyTeamOnly(false);
+  }
+
+  const myTeam      = getMyTeam(league);
+  const myTeamIds   = useMemo(() => new Set(myTeam?.playerIds ?? []), [myTeam]);
+  const rosteredIds = useMemo(() => getRosteredIds(league), [league]);
 
   // Live data state
   const [liveStatus, setLiveStatus] = useState({ loading: true, players: null, hasSchedule: false, week: null, error: false });
@@ -927,6 +951,7 @@ export default function StartSit() {
 
   const filteredRankings = useMemo(() => {
     let result = rankings;
+    if (myTeamOnly && myTeam) result = result.filter(({ player }) => myTeamIds.has(String(player.id)));
     if (selectedGame) {
       result = teamFilter
         ? result.filter(({ player }) => player.team === teamFilter)
@@ -938,7 +963,7 @@ export default function StartSit() {
       player.player_name.toLowerCase().includes(q) ||
       player.team.toLowerCase().includes(q)
     );
-  }, [rankings, selectedGame, teamFilter, searchQuery]);
+  }, [rankings, selectedGame, teamFilter, searchQuery, myTeamOnly, myTeam, myTeamIds]);
 
   // Build waiver candidates from live activePlayers so matchups + projections
   // always match the Rankings tab instead of stale mock data.
@@ -951,14 +976,15 @@ export default function StartSit() {
       }
     }
     return activePlayers
-      .filter(p =>
+      .filter(p => {
         // Only real Sleeper data — no preseason placeholders
-        p.has_real_projection === true &&
-        p.proj_pts_ppr != null &&
-        // Exclude depth-1 starters; they belong in the rankings tab
-        (p.depth_chart_order ?? 99) > 1 &&
-        p.proj_pts_ppr >= 0.5 && p.proj_pts_ppr < 9,
-      )
+        if (p.has_real_projection !== true || p.proj_pts_ppr == null || p.proj_pts_ppr < 0.5) return false;
+        // With a connected league we know exactly who's available, so any
+        // unrostered player qualifies — including starters someone dropped.
+        if (league) return !rosteredIds.has(String(p.id));
+        // Otherwise guess: depth-1 starters belong in the rankings tab
+        return (p.depth_chart_order ?? 99) > 1 && p.proj_pts_ppr < 9;
+      })
       .map(p => {
         const starter = starterMap[`${p.team}_${p.position}`];
         const isHandcuff = p.position === 'RB' && (p.depth_chart_order ?? 99) === 2;
@@ -987,7 +1013,7 @@ export default function StartSit() {
           is_waiver: true,
         };
       });
-  }, [activePlayers]);
+  }, [activePlayers, league, rosteredIds]);
 
   const apiWaiverPosition = waiverPosition === 'D/ST' ? 'DEF' : waiverPosition;
 
@@ -1082,6 +1108,19 @@ export default function StartSit() {
               <RefreshCw className="w-3.5 h-3.5" />
             </button>
           )}
+          <button
+            onClick={() => setShowLeague(true)}
+            title={league ? `${league.name} — ${myTeam?.name ?? 'pick your team'}` : 'Connect your Sleeper or ESPN league'}
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-2 rounded-xl border transition-all text-sm max-w-[160px]',
+              league
+                ? 'border-primary/30 bg-primary/8 text-primary'
+                : 'border-white/10 text-muted-foreground hover:border-primary/40 hover:bg-primary/5 hover:text-primary',
+            )}
+          >
+            <Link2 className="w-4 h-4 flex-shrink-0" />
+            <span className="font-semibold truncate hidden sm:inline">{league ? (myTeam?.name ?? league.name) : 'Connect League'}</span>
+          </button>
           <button
             onClick={() => setShowSettings(true)}
             className="flex items-center gap-2 px-3 py-2 rounded-xl border border-white/10 hover:border-primary/40 hover:bg-primary/5 transition-all text-sm text-muted-foreground hover:text-primary"
@@ -1271,6 +1310,25 @@ export default function StartSit() {
               />
             </div>
 
+            {myTeam && (
+              <div className="flex gap-1 bg-white/4 rounded-xl p-1 w-fit">
+                {[{ v: false, label: 'All players' }, { v: true, label: `My team · ${myTeam.name}` }].map(opt => (
+                  <button
+                    key={String(opt.v)}
+                    onClick={() => setMyTeamOnly(opt.v)}
+                    className={cn(
+                      'px-3 py-1 text-[11px] font-semibold rounded-lg transition-all max-w-[220px] truncate',
+                      myTeamOnly === opt.v
+                        ? 'bg-primary/20 text-primary border border-primary/30'
+                        : 'text-muted-foreground hover:text-foreground border border-transparent',
+                    )}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
             <div className="flex gap-4 text-xs text-muted-foreground">
               <span>
                 <span className="text-primary font-medium">
@@ -1320,7 +1378,7 @@ export default function StartSit() {
                 ))}
                 {filteredRankings.length === 0 && (
                   <div className="text-center text-muted-foreground text-sm py-12">
-                    No players found for this position
+                    {myTeamOnly ? 'No one on your roster at this position this week' : 'No players found for this position'}
                   </div>
                 )}
               </div>
@@ -1352,7 +1410,9 @@ export default function StartSit() {
 
             <div className="rounded-xl bg-blue-500/8 border border-blue-500/15 px-3 py-2 text-[11px] text-blue-300 flex items-center gap-2">
               <Shield className="w-3.5 h-3.5 flex-shrink-0" />
-              Waiver wire targets ranked by projected value and matchup — verify availability in your league.
+              {league
+                ? `Only players available in ${league.name} — rostered players are hidden.`
+                : 'Waiver wire targets ranked by projected value and matchup — connect your league to hide rostered players.'}
             </div>
 
             <div className="space-y-2">
@@ -1387,6 +1447,14 @@ export default function StartSit() {
           onClose={() => setShowComparePicker(null)}
           excludePlayerId={showComparePicker === 'A' ? compareB?.id : compareA?.id}
           settings={settings}
+        />
+      )}
+
+      {showLeague && (
+        <LeagueConnectModal
+          connection={league}
+          onChange={handleLeagueChange}
+          onClose={() => setShowLeague(false)}
         />
       )}
 
