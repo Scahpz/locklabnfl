@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  getSnapshotIndex, getSnapshot, fetchActualResults, scoreSnapshot,
-  deleteSnapshot, clearAllSnapshots,
+  getSnapshotIndex, scoreWeek, deleteSnapshot, clearAllSnapshots,
 } from '@/lib/predictionLog';
 
 // ── Change this PIN to whatever you want ──────────────────────────────────────
@@ -16,6 +15,22 @@ const STAT_LABELS = {
   passing_yards:    'Pass Yds',
   passing_tds:      'Pass TD',
   rush_rec_yards:   'Rush+Rec Yds',
+  passing_ints:     'INT',
+  rushing_tds:      'Rush TD',
+  receiving_tds:    'Rec TD',
+  rush_rec_tds:     'Rush+Rec TD',
+  fantasy_points:   'Fantasy Pts',
+};
+
+const RECHECK_MS = 5 * 60 * 1000; // re-check results while games are still pending
+
+const STATUS_STYLE = {
+  correct:   { label: 'CORRECT',   color: '#22c55e' },
+  wrong:     { label: 'WRONG',     color: '#ef4444' },
+  push:      { label: 'PUSH',      color: '#eab308' },
+  pending:   { label: 'Pending',   color: '#64748b' },
+  void:      { label: 'DNP/Void',  color: '#475569' },
+  untracked: { label: 'No stat',   color: '#475569' },
 };
 
 function AccuracyBar({ correct, total }) {
@@ -60,27 +75,36 @@ function ConfidenceBucket({ items }) {
 function WeekView({ entry }) {
   const [scored, setScored] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [filter, setFilter] = useState('all'); // 'all' | 'correct' | 'wrong' | 'pending'
+  const [filter, setFilter] = useState('all'); // 'all' | 'correct' | 'wrong' | 'pending' | 'other'
+  const [checkedAt, setCheckedAt] = useState(null);
 
   const load = useCallback(async () => {
-    const snap = getSnapshot(entry.season, entry.week);
-    if (!snap) return;
     setLoading(true);
-    const actual = await fetchActualResults(entry.season, entry.week);
-    setScored(scoreSnapshot(snap, actual || {}));
+    const result = await scoreWeek(entry.season, entry.week);
+    if (result) setScored(result);
+    setCheckedAt(new Date());
     setLoading(false);
   }, [entry.season, entry.week]);
 
-  useEffect(() => { load(); }, [load]);
-
   const withResults = scored ? scored.filter(i => i.correct != null) : [];
   const correct     = withResults.filter(i => i.correct).length;
-  const pending     = scored ? scored.filter(i => i.correct == null).length : 0;
+  const pending     = scored ? scored.filter(i => i.status === 'pending').length : 0;
+  const other       = scored ? scored.filter(i => ['push', 'void', 'untracked'].includes(i.status)).length : 0;
+
+  useEffect(() => { load(); }, [load]);
+
+  // Keep grading automatically as games finish.
+  useEffect(() => {
+    if (!pending) return;
+    const t = setInterval(load, RECHECK_MS);
+    return () => clearInterval(t);
+  }, [pending, load]);
 
   const shown = !scored ? [] : scored.filter(i => {
-    if (filter === 'correct') return i.correct === true;
-    if (filter === 'wrong')   return i.correct === false;
-    if (filter === 'pending') return i.correct == null;
+    if (filter === 'correct') return i.status === 'correct';
+    if (filter === 'wrong')   return i.status === 'wrong';
+    if (filter === 'pending') return i.status === 'pending';
+    if (filter === 'other')   return ['push', 'void', 'untracked'].includes(i.status);
     return true;
   });
 
@@ -106,6 +130,15 @@ function WeekView({ entry }) {
           {pending > 0 && (
             <span style={{ color: '#94a3b8', fontSize: 12 }}>{pending} pending</span>
           )}
+          {!loading && checkedAt && (
+            <button
+              onClick={load}
+              title={`Last checked ${checkedAt.toLocaleTimeString()}`}
+              style={{ background: 'none', border: '1px solid #334155', borderRadius: 6, color: '#94a3b8', fontSize: 11, padding: '2px 8px', cursor: 'pointer' }}
+            >
+              Re-check
+            </button>
+          )}
         </div>
       </div>
 
@@ -126,7 +159,7 @@ function WeekView({ entry }) {
       {/* Filter bar */}
       {scored && (
         <div style={{ padding: '8px 18px', borderBottom: '1px solid #1e293b', display: 'flex', gap: 6 }}>
-          {['all', 'correct', 'wrong', 'pending'].map(f => (
+          {['all', 'correct', 'wrong', 'pending', 'other'].map(f => (
             <button
               key={f}
               onClick={() => setFilter(f)}
@@ -141,6 +174,7 @@ function WeekView({ entry }) {
               {f === 'correct' && withResults.length > 0 ? ` (${correct})` : ''}
               {f === 'wrong'   && withResults.length > 0 ? ` (${withResults.length - correct})` : ''}
               {f === 'pending' && pending > 0 ? ` (${pending})` : ''}
+              {f === 'other'   && other > 0 ? ` (${other})` : ''}
             </button>
           ))}
         </div>
@@ -153,7 +187,7 @@ function WeekView({ entry }) {
         )}
         {shown.map((item, i) => {
           const statLabel = STAT_LABELS[item.prop_type] ?? item.prop_type;
-          const resultColor = item.correct === true ? '#22c55e' : item.correct === false ? '#ef4444' : '#64748b';
+          const st = STATUS_STYLE[item.status] ?? STATUS_STYLE.pending;
           const dirBg = item.direction === 'OVER' ? '#16a34a22' : '#dc262622';
           const dirColor = item.direction === 'OVER' ? '#22c55e' : '#ef4444';
           return (
@@ -183,8 +217,8 @@ function WeekView({ entry }) {
               <span style={{ color: '#94a3b8', fontSize: 12 }}>
                 {item.actualVal != null ? `Act: ${item.actualVal}` : '—'}
               </span>
-              <span style={{ color: resultColor, fontSize: 12, fontWeight: 700 }}>
-                {item.correct === true ? 'CORRECT' : item.correct === false ? 'WRONG' : 'Pending'}
+              <span style={{ color: st.color, fontSize: 12, fontWeight: 700 }}>
+                {st.label}
               </span>
             </div>
           );

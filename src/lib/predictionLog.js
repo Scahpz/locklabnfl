@@ -6,7 +6,11 @@ const INDEX_KEY  = 'locklab_pred_index';
 const SNAP_KEY   = (season, week) => `locklab_pred_${season}_w${week}`;
 const MAX_WEEKS  = 20; // keep at most 20 weeks of history
 
-// Map prop_type → Sleeper stat field for result lookup
+import { buildNameToIdFull, normName } from './propsNoBackend';
+
+// Map prop_type → Sleeper stat field(s) for result lookup. Arrays are summed
+// (Sleeper has no combined rush+rec field). Sleeper omits zero-valued stats,
+// so a missing field on a player who played counts as 0.
 const PROP_TO_SLEEPER = {
   receiving_yards:   'rec_yd',
   receptions:        'rec',
@@ -14,11 +18,26 @@ const PROP_TO_SLEEPER = {
   rushing_attempts:  'rush_att',
   passing_yards:     'pass_yd',
   passing_tds:       'pass_td',
-  rush_rec_yards:    'rush_rec_yd',
+  passing_ints:      'pass_int',
+  rushing_tds:       'rush_td',
+  receiving_tds:     'rec_td',
+  rush_rec_yards:    ['rush_yd', 'rec_yd'],
+  rush_rec_tds:      ['rush_td', 'rec_td'],
+  fantasy_points:    'pts_half_ppr',
 };
+
+// A game is treated as final this long after kickoff.
+const GAME_FINAL_MS = 4 * 60 * 60 * 1000;
+// Older snapshots have no kickoff time; give the week this long before giving up.
+const LEGACY_WAIT_MS = 7 * 24 * 60 * 60 * 1000;
 
 export function propTypeToSleeperKey(propType) {
   return PROP_TO_SLEEPER[propType] ?? null;
+}
+
+function readStat(playerStats, key) {
+  const keys = Array.isArray(key) ? key : [key];
+  return keys.reduce((sum, k) => sum + (Number(playerStats[k]) || 0), 0);
 }
 
 // ── Index helpers ─────────────────────────────────────────────────────────────
@@ -52,6 +71,7 @@ export function savePredictionSnapshot(season, week, props) {
       grade:       p.letterGrade ?? '',
       over_prob:   p.overProb    ?? 50,
       rank:        p.rankIdx     ?? 0,
+      scheduled_at: p.scheduled_at ?? '',
     }));
 
   if (!items.length) return;
@@ -100,23 +120,53 @@ export async function fetchActualResults(season, week) {
 }
 
 // ── Score a snapshot against actual results ───────────────────────────────────
-export function scoreSnapshot(snapshot, actualStats) {
+// Props come from Underdog and carry no Sleeper ID, so players are matched by
+// name. Each item gets a `status`:
+//   correct | wrong | push   — graded
+//   pending                  — game not final yet
+//   void                     — game over but player has no stat line (DNP / unmatched)
+//   untracked                — prop type Sleeper doesn't report (quarters, longest, etc.)
+export function scoreSnapshot(snapshot, actualStats, nameToId = {}, now = Date.now()) {
   if (!snapshot?.items || !actualStats) return null;
 
   return snapshot.items.map(pred => {
     const statKey = propTypeToSleeperKey(pred.prop_type);
-    const playerStats = actualStats[pred.player_id] ?? null;
-    const actualVal = statKey && playerStats ? (playerStats[statKey] ?? null) : null;
+    const base = { ...pred, actualVal: null, hit: null, correct: null };
+    if (!statKey) return { ...base, status: 'untracked' };
 
-    let hit = null;           // did the player beat the line?
-    let correct = null;       // did our prediction match?
-    if (actualVal != null) {
-      hit     = actualVal > pred.line;
-      correct = (pred.direction === 'OVER') === hit;
+    const kickoff = pred.scheduled_at ? Date.parse(pred.scheduled_at) : NaN;
+    const isFinal = Number.isFinite(kickoff)
+      ? now > kickoff + GAME_FINAL_MS
+      : null; // unknown for legacy snapshots
+    if (isFinal === false) return { ...base, status: 'pending' };
+
+    const pid = actualStats[pred.player_id] ? pred.player_id : nameToId[normName(pred.player_name)];
+    const playerStats = pid ? actualStats[pid] : null;
+    const played = playerStats && Number(playerStats.gp ?? 1) > 0;
+
+    if (!played) {
+      const stillWaiting = isFinal === null && now < (snapshot.ts ?? 0) + LEGACY_WAIT_MS;
+      return { ...base, status: stillWaiting ? 'pending' : 'void' };
     }
 
-    return { ...pred, actualVal, hit, correct };
+    const actualVal = Math.round(readStat(playerStats, statKey) * 100) / 100;
+    if (actualVal === pred.line) return { ...base, actualVal, status: 'push' };
+
+    const hit = actualVal > pred.line;
+    const correct = (pred.direction === 'OVER') === hit;
+    return { ...base, actualVal, hit, correct, status: correct ? 'correct' : 'wrong' };
   });
+}
+
+// Fetches results + name map and scores in one call.
+export async function scoreWeek(season, week) {
+  const snap = getSnapshot(season, week);
+  if (!snap) return null;
+  const [actual, nameToId] = await Promise.all([
+    fetchActualResults(season, week),
+    buildNameToIdFull().catch(() => ({})),
+  ]);
+  return scoreSnapshot(snap, actual || {}, nameToId);
 }
 
 // ── Delete a snapshot ─────────────────────────────────────────────────────────

@@ -95,7 +95,7 @@ async function buildSeasonStats() {
 // Normalize player names for comparison across data sources.
 // Strips dots (D.J. → DJ), collapses whitespace, lowercases.
 // Handles: "D.J. Moore" ↔ "DJ Moore", "T.J. Watt" ↔ "TJ Watt", etc.
-function normName(n) {
+export function normName(n) {
   return (n || '').toLowerCase().replace(/\./g, '').replace(/\s+/g, ' ').trim();
 }
 
@@ -118,7 +118,7 @@ function buildNameToId() {
 
 // Full name→id lookup: tries nflLiveData cache first, then a dedicated name→id cache,
 // then fetches the Sleeper player list as a last resort (cached 7 days).
-async function buildNameToIdFull() {
+export async function buildNameToIdFull() {
   const fast = buildNameToId();
   if (Object.keys(fast).length > 10) return fast;
 
