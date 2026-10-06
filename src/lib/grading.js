@@ -666,6 +666,41 @@ function gradeFromMarket(prop) {
   };
 }
 
+// ── TD UNDER suppression ─────────────────────────────────────────────────────
+// "Player won't score a TD" is true most weeks for most players, so a TD UNDER
+// pick is usually a non-pick. Only keep it when it goes against the book — the
+// UNDER is the underdog side, i.e. the market expects the player to score.
+const impliedProb = odds => (odds > 0 ? 100 / (100 + odds) : Math.abs(odds) / (Math.abs(odds) + 100));
+
+export function isTdProp(prop) {
+  return /_tds$/.test(prop?.prop_type || '');
+}
+
+// Grades the same way rankScore / AI Picks do (hit rate + edge recomputed from logs)
+// so the direction matches what the user actually sees.
+export function isHiddenTdUnder(prop) {
+  if (!isTdProp(prop)) return false;
+  const logs = prop.last_10_games || [];
+  let p = prop;
+  if (logs.length > 0) {
+    const ewma = ewmaAvg(logs);
+    p = {
+      ...prop,
+      hit_rate_last_10: Math.round(logs.filter(v => v > prop.line).length / logs.length * 100),
+      edge: ewma != null ? Math.round((ewma - prop.line) * 100) / 100 : prop.edge,
+    };
+  }
+  const grade = gradeProp(p);
+  const direction = grade.verdict === 'OVER' || grade.verdict === 'UNDER' ? grade.verdict : grade.lean;
+  if (direction !== 'UNDER') return false;
+  const underIsUnderdog = impliedProb(prop.under_odds ?? -110) < impliedProb(prop.over_odds ?? -110);
+  return !underIsUnderdog;
+}
+
+export function dropHiddenTdUnders(props) {
+  return (props || []).filter(p => !isHiddenTdUnder(p));
+}
+
 export function rankScore(prop) {
   const logs = prop.last_10_games || [];
   let p = prop;

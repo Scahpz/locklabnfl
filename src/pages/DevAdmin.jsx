@@ -72,11 +72,66 @@ function ConfidenceBucket({ items }) {
   );
 }
 
+// TD props and anything on a 0.5 line are mostly "will a backup score?" —
+// the UNDER hits so often it inflates accuracy without saying much.
+const isGimme = i => /_tds$/.test(i.prop_type) || i.line <= 0.5;
+
+// Same rule as the rest of the app (grading.js isHiddenTdUnder): a TD UNDER only
+// counts when the UNDER was the underdog side. Older snapshots have no odds saved,
+// so their TD UNDERs are always excluded.
+const implied = o => (o > 0 ? 100 / (100 + o) : Math.abs(o) / (Math.abs(o) + 100));
+const isHiddenTdUnder = i =>
+  /_tds$/.test(i.prop_type) && i.direction === 'UNDER' &&
+  !(i.over_odds != null && i.under_odds != null && implied(i.under_odds) < implied(i.over_odds));
+
+const selectStyle = {
+  background: '#1e293b', color: '#cbd5e1', border: '1px solid #334155',
+  borderRadius: 6, fontSize: 12, padding: '3px 6px', cursor: 'pointer',
+};
+
+// Accuracy per prop type, next to what blindly taking the UNDER would have hit.
+// If the AI isn't beating that baseline, the accuracy number is hollow.
+function PropTypeBreakdown({ items }) {
+  const rows = Object.entries(
+    items.filter(i => i.correct != null).reduce((acc, i) => {
+      (acc[i.prop_type] ??= []).push(i);
+      return acc;
+    }, {}),
+  ).sort((a, b) => b[1].length - a[1].length);
+  if (!rows.length) return null;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr 90px', gap: 8, color: '#475569', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        <span>Prop</span><span>AI accuracy</span><span style={{ textAlign: 'right' }}>Always-UNDER</span>
+      </div>
+      {rows.map(([type, group]) => {
+        const correct = group.filter(i => i.correct).length;
+        const underRate = Math.round(group.filter(i => i.hit === false).length / group.length * 100);
+        const aiRate = Math.round(correct / group.length * 100);
+        const beats = aiRate > Math.max(underRate, 100 - underRate);
+        return (
+          <div key={type} style={{ display: 'grid', gridTemplateColumns: '110px 1fr 90px', gap: 8, alignItems: 'center' }}>
+            <span style={{ color: '#94a3b8', fontSize: 12 }}>{STAT_LABELS[type] ?? type}</span>
+            <AccuracyBar correct={correct} total={group.length} />
+            <span style={{ color: beats ? '#64748b' : '#eab308', fontSize: 12, textAlign: 'right' }} title={beats ? '' : 'AI is not beating the simplest blind pick on this prop'}>
+              {underRate}%{beats ? '' : ' ⚠'}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function WeekView({ entry }) {
   const [scored, setScored] = useState(null);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState('all'); // 'all' | 'correct' | 'wrong' | 'pending' | 'other'
   const [checkedAt, setCheckedAt] = useState(null);
+  const [hideGimmes, setHideGimmes] = useState(true);
+  const [propType, setPropType] = useState('all');
+  const [minConf, setMinConf] = useState(0);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -86,21 +141,31 @@ function WeekView({ entry }) {
     setLoading(false);
   }, [entry.season, entry.week]);
 
-  const withResults = scored ? scored.filter(i => i.correct != null) : [];
+  // Everything below (accuracy, buckets, counts) is computed from the filtered set.
+  const base = !scored ? [] : scored.filter(i =>
+    !isHiddenTdUnder(i) &&
+    (!hideGimmes || !isGimme(i)) &&
+    (propType === 'all' || i.prop_type === propType) &&
+    i.confidence >= minConf,
+  );
+  const propTypes   = scored ? [...new Set(scored.map(i => i.prop_type))].sort() : [];
+  const gimmeCount  = scored ? scored.filter(isGimme).length : 0;
+  const withResults = base.filter(i => i.correct != null);
   const correct     = withResults.filter(i => i.correct).length;
-  const pending     = scored ? scored.filter(i => i.status === 'pending').length : 0;
-  const other       = scored ? scored.filter(i => ['push', 'void', 'untracked'].includes(i.status)).length : 0;
+  const pending     = base.filter(i => i.status === 'pending').length;
+  const anyPending  = scored ? scored.some(i => i.status === 'pending') : false;
+  const other       = base.filter(i => ['push', 'void', 'untracked'].includes(i.status)).length;
 
   useEffect(() => { load(); }, [load]);
 
   // Keep grading automatically as games finish.
   useEffect(() => {
-    if (!pending) return;
+    if (!anyPending) return;
     const t = setInterval(load, RECHECK_MS);
     return () => clearInterval(t);
-  }, [pending, load]);
+  }, [anyPending, load]);
 
-  const shown = !scored ? [] : scored.filter(i => {
+  const shown = base.filter(i => {
     if (filter === 'correct') return i.status === 'correct';
     if (filter === 'wrong')   return i.status === 'wrong';
     if (filter === 'pending') return i.status === 'pending';
@@ -151,8 +216,33 @@ function WeekView({ entry }) {
           </div>
           <div>
             <p style={{ color: '#64748b', fontSize: 11, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>By Confidence Level</p>
-            <ConfidenceBucket items={scored} />
+            <ConfidenceBucket items={base} />
           </div>
+          <div style={{ gridColumn: '1 / -1' }}>
+            <p style={{ color: '#64748b', fontSize: 11, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>By Prop Type</p>
+            <PropTypeBreakdown items={base} />
+          </div>
+        </div>
+      )}
+
+      {/* Prop filters */}
+      {scored && (
+        <div style={{ padding: '8px 18px', borderBottom: '1px solid #1e293b', display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#94a3b8', fontSize: 12, cursor: 'pointer' }}>
+            <input type="checkbox" checked={hideGimmes} onChange={e => setHideGimmes(e.target.checked)} />
+            Hide TD &amp; 0.5-line props ({gimmeCount})
+          </label>
+          <select value={propType} onChange={e => setPropType(e.target.value)} style={selectStyle}>
+            <option value="all">All prop types</option>
+            {propTypes.map(t => <option key={t} value={t}>{STAT_LABELS[t] ?? t}</option>)}
+          </select>
+          <select value={minConf} onChange={e => setMinConf(Number(e.target.value))} style={selectStyle}>
+            <option value={0}>Any confidence</option>
+            <option value={60}>60%+ confidence</option>
+            <option value={70}>70%+ confidence</option>
+            <option value={80}>80%+ confidence</option>
+          </select>
+          <span style={{ color: '#475569', fontSize: 12 }}>Showing {base.length} of {scored.length}</span>
         </div>
       )}
 

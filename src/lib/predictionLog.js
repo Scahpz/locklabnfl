@@ -72,6 +72,8 @@ export function savePredictionSnapshot(season, week, props) {
       over_prob:   p.overProb    ?? 50,
       rank:        p.rankIdx     ?? 0,
       scheduled_at: p.scheduled_at ?? '',
+      over_odds:   p.over_odds   ?? null,
+      under_odds:  p.under_odds  ?? null,
     }));
 
   if (!items.length) return;

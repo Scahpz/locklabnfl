@@ -6,7 +6,7 @@ import { Link } from 'react-router-dom';
 import PlayerAvatar from '@/components/common/PlayerAvatar';
 import { formatMarket } from '@/lib/propLabels';
 import VerdictBadge from '@/components/props/VerdictBadge';
-import { gradeProp } from '@/lib/grading';
+import { gradeProp, isHiddenTdUnder } from '@/lib/grading';
 import { calcEVVerdict, TIER_CONFIG } from '@/lib/verdict';
 import { loadSleeperHistory, computeAnalyticsFromSleeper } from '@/lib/sleeperHistory';
 
@@ -160,6 +160,7 @@ export default function AIPicks() {
 
   allProps
     .filter(p => p.injury_status !== 'out' && p.has_analytics && p.last_10_games?.length >= 3 && p.avg_last_10 != null && p.hit_rate_last_10 != null)
+    .filter(p => !isHiddenTdUnder(p))
     .forEach(p => {
       const logs = p.last_10_games || [];
       const hitCount = logs.filter(v => v > p.line).length;

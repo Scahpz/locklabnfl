@@ -10,7 +10,7 @@ import TeamLogo from '@/components/common/TeamLogo';
 import { calcEVVerdict, TIER_CONFIG } from '@/lib/verdict';
 import PlayerRow from '@/components/props/PlayerRow';
 import { cn } from '@/lib/utils';
-import { rankScore, gradeProp } from '@/lib/grading';
+import { rankScore, gradeProp, dropHiddenTdUnders } from '@/lib/grading';
 import { formatMarket, toLetterGrade } from '@/lib/propLabels';
 import { NFL_API } from '@/lib/config';
 import { TEAM_STATS, updateLeagueAvgs, updateTeamDefStats } from '@/lib/teamStats';
@@ -399,7 +399,9 @@ export default function Props() {
     const spreads   = ctx.game_spreads  || {};
     const totals    = ctx.game_totals   || {};
 
-    return rawProps.map(prop => {
+    // TD UNDERs are dropped here (after enrichment, so the grade is the real one)
+    // unless the UNDER is the underdog side — see isHiddenTdUnder.
+    return dropHiddenTdUnders(rawProps.map(prop => {
       // 1. Game log analytics
       // playerAnalytics[name] === undefined  → not yet fetched (show loading)
       // playerAnalytics[name] === null       → fetched, player not found (show "not available")
@@ -522,7 +524,7 @@ export default function Props() {
         // Weather for this game (keyed by home team)
         weather:      weatherData[prop.home || ''] ?? null,
       };
-    });
+    }));
   }, [rawProps, playerAnalytics, teamContext, weatherData]);
 
   // Auto-save prediction snapshot for dev accuracy tracking — fires once per (season, week),
