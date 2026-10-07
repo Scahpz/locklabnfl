@@ -676,21 +676,23 @@ export function isTdProp(prop) {
   return /_tds$/.test(prop?.prop_type || '');
 }
 
-// Grades the same way rankScore / AI Picks do (hit rate + edge recomputed from logs)
-// so the direction matches what the user actually sees.
+// Grades the way prop cards / AI Picks display it: hit rate + edge recomputed
+// from the raw game logs against this exact line. Use this anywhere a grade is
+// shown next to a pick so the numbers match across the app.
+export function gradeForDisplay(prop) {
+  const logs = prop.last_10_games || [];
+  if (!logs.length) return gradeProp(prop);
+  const ewma = ewmaAvg(logs);
+  return gradeProp({
+    ...prop,
+    hit_rate_last_10: Math.round(logs.filter(v => v > prop.line).length / logs.length * 100),
+    edge: ewma != null ? Math.round((ewma - prop.line) * 100) / 100 : prop.edge,
+  });
+}
+
 export function isHiddenTdUnder(prop) {
   if (!isTdProp(prop)) return false;
-  const logs = prop.last_10_games || [];
-  let p = prop;
-  if (logs.length > 0) {
-    const ewma = ewmaAvg(logs);
-    p = {
-      ...prop,
-      hit_rate_last_10: Math.round(logs.filter(v => v > prop.line).length / logs.length * 100),
-      edge: ewma != null ? Math.round((ewma - prop.line) * 100) / 100 : prop.edge,
-    };
-  }
-  const grade = gradeProp(p);
+  const grade = gradeForDisplay(prop);
   const direction = grade.verdict === 'OVER' || grade.verdict === 'UNDER' ? grade.verdict : grade.lean;
   if (direction !== 'UNDER') return false;
   const underIsUnderdog = impliedProb(prop.under_odds ?? -110) < impliedProb(prop.over_odds ?? -110);

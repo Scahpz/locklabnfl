@@ -7,6 +7,7 @@ const SNAP_KEY   = (season, week) => `locklab_pred_${season}_w${week}`;
 const MAX_WEEKS  = 20; // keep at most 20 weeks of history
 
 import { buildNameToIdFull, normName } from './propsNoBackend';
+import { getNFLWeek, getNFLSeason } from './nflWeek';
 
 // Map prop_type → Sleeper stat field(s) for result lookup. Arrays are summed
 // (Sleeper has no combined rush+rec field). Sleeper omits zero-valued stats,
@@ -184,4 +185,37 @@ export function clearAllSnapshots() {
     try { localStorage.removeItem(SNAP_KEY(e.season, e.week)); } catch {}
   });
   try { localStorage.removeItem(INDEX_KEY); } catch {}
+}
+
+// ── Grade arbitrary saved picks (parlay legs, tracked props) ──────────────────
+// picks: [{ player_name, prop_type, line, direction: 'OVER'|'UNDER', scheduled_at }]
+// Returns a parallel array of statuses (same values as scoreSnapshot). Picks
+// without a kickoff time can't be placed in a week and stay 'pending'.
+export async function gradePicks(picks) {
+  const byWeek = {};
+  picks.forEach((p, i) => {
+    const week = getNFLWeek(p.scheduled_at);
+    if (!week) return;
+    const key = `${getNFLSeason(p.scheduled_at)}_${week}`;
+    (byWeek[key] ??= []).push(i);
+  });
+
+  const statuses = picks.map(() => 'pending');
+  const keys = Object.keys(byWeek);
+  if (!keys.length) return statuses;
+
+  const nameToId = await buildNameToIdFull().catch(() => ({}));
+  await Promise.all(keys.map(async key => {
+    const [season, week] = key.split('_').map(Number);
+    const actual = await fetchActualResults(season, week);
+    if (!actual) return;
+    const idx = byWeek[key];
+    const scored = scoreSnapshot(
+      { ts: Date.now(), items: idx.map(i => ({ ...picks[i], direction: String(picks[i].direction).toUpperCase() })) },
+      actual,
+      nameToId,
+    );
+    scored.forEach((r, j) => { statuses[idx[j]] = r.status; });
+  }));
+  return statuses;
 }

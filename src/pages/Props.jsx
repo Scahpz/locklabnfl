@@ -10,6 +10,7 @@ import TeamLogo from '@/components/common/TeamLogo';
 import { calcEVVerdict, TIER_CONFIG } from '@/lib/verdict';
 import PlayerRow from '@/components/props/PlayerRow';
 import { cn } from '@/lib/utils';
+import { getNFLWeek } from '@/lib/nflWeek';
 import { rankScore, gradeProp, dropHiddenTdUnders } from '@/lib/grading';
 import { formatMarket, toLetterGrade } from '@/lib/propLabels';
 import { NFL_API } from '@/lib/config';
@@ -88,21 +89,6 @@ function localDateStr(utcIso) {
   return new Date(utcIso).toLocaleDateString('en-CA'); // YYYY-MM-DD in local tz
 }
 
-// NFL week number for a given date. Week 1 starts the Thursday after Labor Day.
-function getNFLWeek(dateStr) {
-  if (!dateStr) return null;
-  const d = new Date(dateStr);
-  const year = d.getUTCFullYear();
-  const sep1 = new Date(Date.UTC(year, 8, 1));
-  // Labor Day = first Monday of September
-  const daysToMonday = (1 - sep1.getUTCDay() + 7) % 7;
-  const laborDay = new Date(Date.UTC(year, 8, 1 + daysToMonday));
-  // Week 1 kicks off the Thursday after Labor Day
-  const week1Start = new Date(laborDay.getTime() + 3 * 24 * 60 * 60 * 1000);
-  if (d < week1Start) return null; // preseason
-  const weekNum = Math.floor((d.getTime() - week1Start.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
-  return weekNum >= 1 && weekNum <= 18 ? weekNum : null;
-}
 
 const todayLocalStr    = new Date().toLocaleDateString('en-CA');
 const tomorrowLocalStr = new Date(Date.now() + 86400000).toLocaleDateString('en-CA');

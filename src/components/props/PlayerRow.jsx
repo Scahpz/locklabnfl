@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { ChevronDown, TrendingUp, TrendingDown, BookmarkPlus, Check, ArrowUpRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { getNFLWeek } from '@/lib/nflWeek';
 import TeamLogo from '@/components/common/TeamLogo';
 import PropGradeChecklist from '@/components/props/PropGradeChecklist';
 import { gradeProp } from '@/lib/grading';
@@ -9,18 +10,6 @@ import { useParlay } from '@/lib/ParlayContext';
 import { base44 } from '@/api/base44Client';
 import { toast } from 'sonner';
 
-function getNFLWeek(dateStr) {
-  if (!dateStr) return null;
-  const d = new Date(dateStr);
-  const year = d.getUTCFullYear();
-  const sep1 = new Date(Date.UTC(year, 8, 1));
-  const daysToMonday = (1 - sep1.getUTCDay() + 7) % 7;
-  const laborDay = new Date(Date.UTC(year, 8, 1 + daysToMonday));
-  const week1Start = new Date(laborDay.getTime() + 3 * 24 * 60 * 60 * 1000);
-  if (d < week1Start) return null;
-  const n = Math.floor((d.getTime() - week1Start.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
-  return n >= 1 && n <= 18 ? n : null;
-}
 
 function PlayerAvatar({ prop, name }) {
   const [err, setErr] = React.useState(false);
@@ -123,6 +112,7 @@ export default function PlayerRow({ playerName, props, allPlayerProps, rank, tot
         grade_label: evVerdict.label,
         tier:        evVerdict.tier,
         game_date:   new Date().toLocaleDateString('en-CA'),
+        scheduled_at: gradedProp.scheduled_at ?? '', // lets auto-settle find the game week
         result:      'pending',
       });
       setTracked(true);

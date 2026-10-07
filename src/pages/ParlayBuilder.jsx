@@ -1,7 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Layers, X, TrendingUp, TrendingDown, Trophy, Loader2, History, ArrowRight, AlertTriangle } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
-import { gradeProp } from '@/lib/grading';
+import { Layers, X, TrendingUp, TrendingDown, Trophy, Loader2, History, ArrowRight, Link2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -55,25 +53,19 @@ export default function ParlayBuilder() {
   const combinedOdds = calculateCombinedOdds(legs);
   const riskLevel = getRiskLevel(legs);
 
-  // Detect correlated legs: same game (opponent match) or same player
-  const correlationWarnings = useMemo(() => {
-    const warnings = [];
-    const propLegs = legs.filter(l => !l.is_game_bet);
-    for (let i = 0; i < propLegs.length; i++) {
-      for (let j = i + 1; j < propLegs.length; j++) {
-        const a = propLegs[i];
-        const b = propLegs[j];
-        if (a.player_name === b.player_name) {
-          warnings.push(`${a.player_name} has multiple legs — same-player correlation`);
-        } else if (
-          a.opponent && b.opponent &&
-          ((a.team === b.opponent && a.opponent === b.team) || (a.opponent === b.opponent && a.team === b.team))
-        ) {
-          warnings.push(`${a.player_name} & ${b.player_name} share the same game — correlated legs`);
-        }
-      }
-    }
-    return [...new Set(warnings)];
+  // Same-game parlays are normal — just label them, no warnings.
+  const isSameGame = useMemo(() => {
+    const games = new Set(
+      legs.filter(l => !l.is_game_bet && l.team && l.opponent).map(l => [l.team, l.opponent].sort().join('_')),
+    );
+    return legs.length >= 2 && games.size === 1;
+  }, [legs]);
+
+  // Model's chance every leg hits, treating legs as independent. Only shown
+  // when every leg has a model probability.
+  const modelHitChance = useMemo(() => {
+    if (legs.length < 2 || legs.some(l => l.is_game_bet || l.model_prob == null)) return null;
+    return Math.round(legs.reduce((acc, l) => acc * (l.model_prob / 100), 1) * 1000) / 10;
   }, [legs]);
 
   const payout = (() => {
@@ -101,6 +93,9 @@ export default function ParlayBuilder() {
           line: l.line,
           pick: l.pick,
           odds: l.odds,
+          scheduled_at: l.scheduled_at ?? '',
+          model_prob: l.model_prob ?? null,
+          is_game_bet: !!l.is_game_bet,
         })),
         wager,
         combined_odds: combinedOdds,
@@ -113,8 +108,8 @@ export default function ParlayBuilder() {
       setParlayName('');
       setHistoryKey(k => k + 1);
       setActiveTab('history');
-    } catch (e) {
-      toast.error('Failed to submit parlay');
+    } catch {
+      toast.error('Couldn’t save the parlay — your browser may be blocking site storage.');
     } finally {
       setSubmitting(false);
     }
@@ -178,7 +173,7 @@ export default function ParlayBuilder() {
               <p className="text-sm font-medium mb-1">No legs added yet</p>
               <p className="text-xs text-muted-foreground/60 mb-4">Pick props from the Props page to build your parlay</p>
               <Link
-                to="/props"
+                to="/"
                 className="inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-lg bg-primary/15 border border-primary/30 text-primary hover:bg-primary/25 transition-colors"
               >
                 Browse Props <ArrowRight className="w-3.5 h-3.5" />
@@ -187,9 +182,9 @@ export default function ParlayBuilder() {
           ) : (
               <div className="space-y-2 mb-4">
                 {legs.map((leg, i) => {
-                  const legGrade = leg.is_game_bet ? null : gradeProp(leg);
                   const isOver = leg.pick === 'over';
-                  const prob = legGrade ? (isOver ? legGrade.overProb : legGrade.underProb) : null;
+                  // Saved when the leg was added (with full game-log data); older slips may not have it
+                  const prob = leg.is_game_bet ? null : leg.model_prob;
                   return (
                     <div key={i} className={cn(
                       "flex items-center justify-between rounded-lg p-2.5 border",
@@ -238,14 +233,9 @@ export default function ParlayBuilder() {
               </div>
             )}
 
-          {correlationWarnings.length > 0 && (
-            <div className="space-y-1.5 mb-3">
-              {correlationWarnings.map((w, i) => (
-                <div key={i} className="flex items-start gap-2 rounded-lg bg-amber-500/8 border border-amber-500/25 px-3 py-2 text-[11px] text-amber-400">
-                  <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-                  <span>⚠ {w}</span>
-                </div>
-              ))}
+          {isSameGame && (
+            <div className="flex items-center gap-1.5 mb-3 text-[11px] text-sky-300">
+              <Link2 className="w-3.5 h-3.5" /> Same-game parlay
             </div>
           )}
 
@@ -255,6 +245,12 @@ export default function ParlayBuilder() {
                 <span className="text-xs text-muted-foreground">Combined Odds</span>
                 <span className="font-bold text-foreground">{combinedOdds}</span>
               </div>
+              {modelHitChance != null && (
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">Model hit chance</span>
+                  <span className="font-bold text-foreground tabular-nums">{modelHitChance}%</span>
+                </div>
+              )}
               <div className="flex items-center justify-between">
                 <span className="text-xs text-muted-foreground">Risk Level</span>
                 <Badge variant="outline" className={cn("text-[10px]", riskColors[riskLevel])}>
@@ -289,9 +285,12 @@ export default function ParlayBuilder() {
                 {submitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Trophy className="w-4 h-4 mr-2" />}
                 Submit Parlay
               </Button>
+              {legs.length < 2 && (
+                <p className="text-[11px] text-muted-foreground text-center -mt-1">Add at least one more leg to submit.</p>
+              )}
               <div className="flex items-center justify-between">
                 <Link
-                  to="/props"
+                  to="/"
                   className="text-xs text-muted-foreground hover:text-primary transition-colors flex items-center gap-1"
                 >
                   <ArrowRight className="w-3 h-3" /> Add more props

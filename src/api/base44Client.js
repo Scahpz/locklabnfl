@@ -1,4 +1,26 @@
 import { NFL_API } from '../lib/config';
+import { gradePicks } from '../lib/predictionLog';
+
+// Minimal localStorage-backed collection with the same async shape the pages
+// already call (list / create / update / delete).
+function localCollection(key) {
+  const read = () => { try { return JSON.parse(localStorage.getItem(key) || '[]'); } catch { return []; } };
+  const write = rows => { localStorage.setItem(key, JSON.stringify(rows)); };
+  return {
+    list: async () => read(),
+    create: async data => {
+      const row = { ...data, id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`, created_date: new Date().toISOString() };
+      write([row, ...read()]);
+      return row;
+    },
+    update: async (id, data) => {
+      const rows = read().map(r => (r.id === id ? { ...r, ...data } : r));
+      write(rows);
+      return rows.find(r => r.id === id) ?? null;
+    },
+    delete: async id => { write(read().filter(r => r.id !== id)); return { ok: true }; },
+  };
+}
 
 const AUTH_TOKEN_KEY = 'locklab_auth_token';
 
@@ -108,19 +130,47 @@ export const base44 = {
     },
   },
 
+  // Saved parlays and tracked props live on this device. The backend never had
+  // /api/parlays or /api/prop-history routes (every save 404'd), and with auth
+  // disabled there's no user to attach server-side records to anyway.
   entities: {
     SavedParlay: {
-      list: async () => apiRequest('/api/parlays'),
-      create: async (data) => apiRequest('/api/parlays', { method: 'POST', body: JSON.stringify(data) }),
-      update: async (id, data) => apiRequest(`/api/parlays/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-      delete: async (id) => apiRequest(`/api/parlays/${id}`, { method: 'DELETE' }),
+      ...localCollection('locklab_saved_parlays'),
+      // Grades pending parlays whose prop legs have final stats. Any losing leg
+      // loses the parlay; it wins only when every leg is a confirmed hit
+      // (game-line legs can't be graded automatically, so those stay pending).
+      settle: async () => {
+        const store = localCollection('locklab_saved_parlays');
+        const pending = (await store.list()).filter(p => p.status === 'pending');
+        const legs = pending.flatMap(p => p.legs.filter(l => !l.is_game_bet));
+        if (!legs.length) return { settled: 0 };
+        const statuses = await gradePicks(legs.map(l => ({ ...l, direction: l.pick })));
+        const statusOf = new Map(legs.map((l, i) => [l, statuses[i]]));
+        let settled = 0;
+        for (const p of pending) {
+          const results = p.legs.map(l => (l.is_game_bet ? 'pending' : statusOf.get(l)));
+          const status = results.includes('wrong') ? 'lost'
+            : results.every(r => r === 'correct' || r === 'push') && results.some(r => r === 'correct') ? 'won'
+            : null;
+          if (status) { await store.update(p.id, { status, auto_settled: true }); settled++; }
+        }
+        return { settled };
+      },
     },
     PropHistory: {
-      list: async () => apiRequest('/api/prop-history'),
-      create: async (data) => apiRequest('/api/prop-history', { method: 'POST', body: JSON.stringify(data) }),
-      update: async (id, data) => apiRequest(`/api/prop-history/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-      delete: async (id) => apiRequest(`/api/prop-history/${id}`, { method: 'DELETE' }),
-      settle: async () => apiRequest('/api/prop-history/settle', { method: 'POST', body: JSON.stringify({}) }),
+      ...localCollection('locklab_prop_history'),
+      settle: async () => {
+        const store = localCollection('locklab_prop_history');
+        const pending = (await store.list()).filter(e => e.result === 'pending');
+        if (!pending.length) return { settled: 0 };
+        const statuses = await gradePicks(pending);
+        let settled = 0;
+        for (const [i, e] of pending.entries()) {
+          const result = statuses[i] === 'correct' ? 'hit' : statuses[i] === 'wrong' ? 'miss' : null;
+          if (result) { await store.update(e.id, { result }); settled++; }
+        }
+        return { settled };
+      },
     },
   },
 };

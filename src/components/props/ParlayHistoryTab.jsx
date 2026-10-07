@@ -133,6 +133,8 @@ export default function ParlayHistoryTab({ refreshKey }) {
   async function load() {
     setLoading(true);
     try {
+      // Grade any finished games first so results show up without manual settling
+      await base44.entities.SavedParlay.settle().catch(() => {});
       const data = await base44.entities.SavedParlay.list();
       // Sort newest first (fallback: reverse insertion order)
       const sorted = Array.isArray(data)
