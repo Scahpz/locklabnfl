@@ -5,7 +5,7 @@ import { isDemoMode } from '@/lib/mockData';
 import { getAIVerdicts } from '@/lib/aiVerdicts';
 import LockCards from '@/components/props/LockCards';
 import DemonPickCard from '@/components/props/DemonPickCard';
-import { RefreshCw, Wifi, WifiOff, Zap, SlidersHorizontal, Search, X, Info, LayoutGrid, List, TrendingUp, TrendingDown } from 'lucide-react';
+import { RefreshCw, Wifi, WifiOff, Zap, Sparkles, SlidersHorizontal, Search, X, Info, LayoutGrid, List, TrendingUp, TrendingDown } from 'lucide-react';
 import TeamLogo from '@/components/common/TeamLogo';
 import { calcEVVerdict, TIER_CONFIG } from '@/lib/verdict';
 import PlayerRow from '@/components/props/PlayerRow';
@@ -18,6 +18,8 @@ import { loadSleeperHistory, computeAnalyticsFromSleeper } from '@/lib/sleeperHi
 import { useSeasonStats } from '@/lib/nflSeasonStats';
 import { savePredictionSnapshot, getSnapshot } from '@/lib/predictionLog';
 import PropDetailModal from '@/components/props/PropDetailModal';
+import PageTabs, { useTabParam } from '@/components/common/PageTabs';
+import AIPicksPanel from '@/pages/AIPicks';
 import { useParlay } from '@/lib/ParlayContext';
 
 // ── Game-log localStorage cache ───────────────────────────────────────────────
@@ -108,6 +110,7 @@ const tomorrowLocalStr = new Date(Date.now() + 86400000).toLocaleDateString('en-
 export default function Props() {
   const { addLeg: parlayAddLeg } = useParlay();
   const navigate = useNavigate();
+  const [view, setView] = useTabParam('all', ['all', 'ai']);
   // Live 2026 season stats — updates TEAM_STATS defensive data in place each session
   const liveSeasonStats = useSeasonStats();
   useEffect(() => {
@@ -128,6 +131,12 @@ export default function Props() {
   const _urlInit = (() => {
     try { return new URLSearchParams(window.location.search); } catch { return new URLSearchParams(); }
   })();
+  // Deep link (/?player=X&prop=Y) captured once — the URL sync below rewrites the
+  // query string before props finish loading, so it can't be re-read later.
+  const deepLinkRef = useRef(null);
+  if (deepLinkRef.current === null) {
+    deepLinkRef.current = { player: _urlInit.get('player'), prop: _urlInit.get('prop') };
+  }
   const savedFilters = (() => { try { return JSON.parse(sessionStorage.getItem('props_filters') || '{}'); } catch { return {}; } })();
   const [selectedGames, setSelectedGames] = useState(() => {
     const u = _urlInit.get('games'); if (u) return u.split(',').filter(Boolean);
@@ -153,7 +162,8 @@ export default function Props() {
   const [aiLoading, setAiLoading] = useState(false);
   const [playerAnalytics, setPlayerAnalytics] = useState({});
   const [sleeperHistory, setSleeperHistory] = useState(null);
-  const [playerSearch, setPlayerSearch] = useState('');
+  // Global search (sidebar / drawer) lands here as /?q=Name
+  const [playerSearch, setPlayerSearch] = useState(() => new URLSearchParams(window.location.search).get('q') ?? '');
   const [showPlayerDrop, setShowPlayerDrop] = useState(false);
   const [selectedPlayers, setSelectedPlayers] = useState(() => {
     const u = _urlInit.get('players'); if (u) return u.split(',').filter(Boolean);
@@ -164,6 +174,7 @@ export default function Props() {
   const [detailKey, setDetailKey] = useState(null); // { player_name, prop_type }
   const [detailDemon, setDetailDemon] = useState(false);
   const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'table'
+  const [showFilters, setShowFilters] = useState(false); // phones only — desktop always shows filters
   const [lastFetchedAt, setLastFetchedAt] = useState(null); // Date when odds last loaded
   const searchRef = useRef(null);
   // Pre-seed with hardcoded stats so pace/defense show immediately
@@ -181,6 +192,7 @@ export default function Props() {
   // Sync filter state + open modal to URL for shareable/refreshable links
   useEffect(() => {
     const params = new URLSearchParams();
+    if (view !== 'all') params.set('tab', view);
     if (selectedTypes.length > 0) params.set('types', selectedTypes.join(','));
     if (selectedPositions.length > 0) params.set('pos', selectedPositions.join(','));
     if (listHomeAway !== 'all') params.set('ha', listHomeAway);
@@ -190,7 +202,7 @@ export default function Props() {
     if (detailKey) { params.set('player', detailKey.player_name); params.set('prop', detailKey.prop_type); }
     const qs = params.toString();
     navigate({ search: qs ? `?${qs}` : '' }, { replace: true });
-  }, [selectedTypes, selectedPositions, listHomeAway, selectedGames, sortBy, selectedPlayers, detailKey]);
+  }, [selectedTypes, selectedPositions, listHomeAway, selectedGames, sortBy, selectedPlayers, detailKey, view]);
 
   // Load 2025 season stats from Sleeper on mount — same source as the start/sit section
   useEffect(() => {
@@ -565,12 +577,11 @@ export default function Props() {
   // Open modal from URL params once data is loaded — must be after enrichedProps declaration
   useEffect(() => {
     if (!enrichedProps.length) return;
-    const params = new URLSearchParams(window.location.search);
-    const player = params.get('player');
-    const propType = params.get('prop');
+    const { player, prop: propType } = deepLinkRef.current;
     if (player && propType && !detailKey) {
       const found = enrichedProps.find(p => p.player_name === player && p.prop_type === propType);
       if (found) setDetailKey({ player_name: player, prop_type: propType });
+      deepLinkRef.current = {};
     }
   }, [enrichedProps.length]);
 
@@ -986,8 +997,58 @@ export default function Props() {
     return groups;
   }, [filteredAndRanked]);
 
+  const propsHeader = (
+    <div className="flex items-start justify-between gap-3">
+      <div className="min-w-0">
+        <h1 className="text-xl sm:text-2xl font-bold text-foreground flex items-center gap-2">
+          <Zap className="w-5 h-5 text-primary flex-shrink-0 hidden sm:block" />
+          NFL Props
+        </h1>
+        <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1.5 flex-wrap">
+          {isLive ? (
+            <><Wifi className="w-3 h-3 text-primary" /><span className="text-primary font-medium">Live</span>{gameDate && <span>· {gameDate}</span>}</>
+          ) : loading ? 'Loading…' : (
+            <><WifiOff className="w-3 h-3" />No live data available</>
+          )}
+          {(aiLoading || refreshing) && <span className="flex items-center gap-1"><RefreshCw className="w-3 h-3 animate-spin" />{refreshing ? 'Updating…' : 'AI analyzing…'}</span>}
+        </p>
+      </div>
+      <button
+        onClick={() => loadData(true)}
+        disabled={refreshing || loading}
+        title="Refresh props"
+        className="w-9 h-9 flex-shrink-0 flex items-center justify-center rounded-xl border border-white/10 text-muted-foreground hover:text-primary hover:border-primary/40 transition-all disabled:opacity-50"
+      >
+        <RefreshCw className={cn('w-4 h-4', refreshing && 'animate-spin')} />
+      </button>
+    </div>
+  );
+  const viewTabs = (
+    <PageTabs
+      value={view}
+      onChange={setView}
+      tabs={[
+        { key: 'all', label: 'All Props', icon: Zap },
+        { key: 'ai',  label: 'AI Picks',  icon: Sparkles },
+      ]}
+    />
+  );
+
+  if (view === 'ai') {
+    return (
+      <div className="space-y-4 sm:space-y-5">
+        {propsHeader}
+        {viewTabs}
+        <AIPicksPanel />
+      </div>
+    );
+  }
+
   if (loading) {
     return (
+      <div className="space-y-4 sm:space-y-5">
+      {propsHeader}
+      {viewTabs}
       <div className="flex flex-col items-center justify-center py-24 gap-3 text-center">
         <RefreshCw className="w-6 h-6 animate-spin text-primary" />
         <span className="text-sm text-muted-foreground">
@@ -999,68 +1060,12 @@ export default function Props() {
           </span>
         )}
       </div>
+      </div>
     );
   }
 
-  return (
+  const weekAndGames = (
     <>
-    <div className="space-y-6">
-      {/* Demo mode banner */}
-      {isDemoMode() && (
-        <div className="flex items-center gap-2 text-xs px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 font-medium">
-          <Zap className="w-3.5 h-3.5 flex-shrink-0" />
-          Demo Mode — showing example props with mock data. Remove <code className="font-mono bg-amber-500/20 px-1 rounded">?demo</code> from the URL to see live props.
-        </div>
-      )}
-
-      {/* Season state banner */}
-      {seasonBanner && (
-        <div className="flex items-start gap-2.5 text-xs px-4 py-3 rounded-xl bg-sky-500/8 border border-sky-500/20 text-sky-300/80">
-          <Info className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-sky-400" />
-          <div>
-            {seasonBanner.type === 'preseason' ? (
-              <>
-                <span className="font-semibold text-sky-300">Preseason — </span>
-                model predictions use <span className="font-semibold">{seasonBanner.priorYear} season history</span> until regular-season games begin.
-                Confidence scores will sharpen as {new Date().getFullYear()} game data accumulates.
-              </>
-            ) : (
-              <>
-                <span className="font-semibold text-sky-300">Week {seasonBanner.week} model — </span>
-                grading is anchored to <span className="font-semibold">{seasonBanner.priorYear} season history</span>.
-                Confidence improves week-over-week as {new Date().getFullYear()} logs accumulate (full signal by Week 4).
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-foreground flex items-center gap-2">
-            <Zap className="w-7 h-7 text-primary" />
-            NFL Props
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1 flex items-center gap-1.5">
-            {isLive ? (
-              <><Wifi className="w-3.5 h-3.5 text-primary" /><span className="text-primary font-medium">Live</span>{gameDate && <span className="text-muted-foreground">· {gameDate}</span>}</>
-            ) : (
-              <><WifiOff className="w-3.5 h-3.5" />No live data available</>
-            )}
-            {(aiLoading || refreshing) && <span className="text-muted-foreground flex items-center gap-1"><RefreshCw className="w-3 h-3 animate-spin" />{refreshing ? 'Updating…' : 'AI analyzing…'}</span>}
-          </p>
-        </div>
-        <button
-          onClick={() => loadData(true)}
-          disabled={refreshing}
-          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-border text-foreground bg-secondary hover:bg-secondary/80 transition-all disabled:opacity-50"
-        >
-          <RefreshCw className={cn("w-3.5 h-3.5", refreshing && "animate-spin")} />
-          Refresh
-        </button>
-      </div>
-
       {/* Week selector — shown when multiple weeks have data, or always once data is loaded */}
       {availableWeeks.length > 0 && (
         <div className="flex items-center gap-2 flex-wrap">
@@ -1196,6 +1201,51 @@ export default function Props() {
         </div>
       )}
 
+    </>
+  );
+
+  const activeFilterCount = selectedGames.length + selectedTypes.length + selectedPositions.length
+    + selectedSources.length + (listHomeAway !== 'all' ? 1 : 0) + (sortBy !== 'ai_rank' ? 1 : 0);
+
+  return (
+    <>
+    <div className="space-y-4 sm:space-y-5">
+      {/* Demo mode banner */}
+      {isDemoMode() && (
+        <div className="flex items-center gap-2 text-xs px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 font-medium">
+          <Zap className="w-3.5 h-3.5 flex-shrink-0" />
+          Demo Mode — showing example props with mock data. Remove <code className="font-mono bg-amber-500/20 px-1 rounded">?demo</code> from the URL to see live props.
+        </div>
+      )}
+
+      {/* Season state banner */}
+      {seasonBanner && (
+        <div className="flex items-start gap-2.5 text-xs px-4 py-3 rounded-xl bg-sky-500/8 border border-sky-500/20 text-sky-300/80">
+          <Info className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-sky-400" />
+          <div>
+            {seasonBanner.type === 'preseason' ? (
+              <>
+                <span className="font-semibold text-sky-300">Preseason — </span>
+                model predictions use <span className="font-semibold">{seasonBanner.priorYear} season history</span> until regular-season games begin.
+                Confidence scores will sharpen as {new Date().getFullYear()} game data accumulates.
+              </>
+            ) : (
+              <>
+                <span className="font-semibold text-sky-300">Week {seasonBanner.week} model — </span>
+                grading is anchored to <span className="font-semibold">{seasonBanner.priorYear} season history</span>.
+                Confidence improves week-over-week as {new Date().getFullYear()} logs accumulate (full signal by Week 4).
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {propsHeader}
+      {viewTabs}
+
+      {/* Week + game pickers — inline on desktop, inside the Filters panel on phones */}
+      <div className="hidden md:block space-y-5">{weekAndGames}</div>
+
       {/* Empty state — no data at all (fetch failed or offseason) */}
       {enrichedProps.length === 0 && (
         <div className="text-center py-20 text-muted-foreground space-y-3">
@@ -1264,6 +1314,128 @@ export default function Props() {
 
           {/* Filters */}
           <div className="flex flex-col gap-2" ref={searchRef}>
+            {/* Search + (phones) Filters toggle */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Player search */}
+              <div className="relative flex-1 min-w-0 md:flex-none">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder={selectedPlayers.length > 0 ? 'Add player or team…' : 'Search players or teams…'}
+                  value={playerSearch}
+                  onChange={e => { setPlayerSearch(e.target.value); setShowPlayerDrop(true); }}
+                  onFocus={() => setShowPlayerDrop(true)}
+                  className="w-full md:w-44 pl-8 pr-7 py-2 md:py-1.5 text-sm md:text-xs bg-secondary border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+                {playerSearch && (
+                  <button
+                    onClick={() => { setPlayerSearch(''); setShowPlayerDrop(false); }}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+                {showPlayerDrop && playerSuggestions.length > 0 && (
+                  <div className="absolute top-full mt-1 w-64 bg-popover border border-border rounded-lg shadow-xl z-50 overflow-hidden">
+                    {playerSuggestions.filter(name => !selectedPlayers.includes(name)).map(name => {
+                      const p = weekFilteredProps.find(ep => ep.player_name === name);
+                      const propCount = weekFilteredProps.filter(ep => ep.player_name === name).length;
+                      return (
+                        <button
+                          key={name}
+                          onClick={() => { setSelectedPlayers(prev => [...prev, name]); setPlayerSearch(''); setShowPlayerDrop(false); }}
+                          className="w-full flex items-center justify-between gap-3 px-3 py-2.5 hover:bg-secondary transition-colors text-left"
+                        >
+                          <div>
+                            <p className="text-sm font-medium text-foreground">{name}</p>
+                            <p className="text-[10px] text-muted-foreground">{p?.team} · {p?.position}</p>
+                          </div>
+                          <span className="text-[10px] text-muted-foreground bg-secondary px-2 py-0.5 rounded-full">{propCount}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <button
+                onClick={() => setShowFilters(v => !v)}
+                className={cn(
+                  'md:hidden flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm font-semibold flex-shrink-0 transition-all',
+                  showFilters || activeFilterCount > 0
+                    ? 'bg-primary/15 border-primary/40 text-primary'
+                    : 'bg-secondary border-border text-muted-foreground',
+                )}
+              >
+                <SlidersHorizontal className="w-4 h-4" />
+                Filters{activeFilterCount > 0 ? ` · ${activeFilterCount}` : ''}
+              </button>
+
+              <div className={cn('items-center gap-2', showFilters ? 'flex w-full md:w-auto' : 'hidden md:flex')}>
+              {/* Sort */}
+                <span className="text-xs text-muted-foreground flex-shrink-0">Sort:</span>
+                {(() => {
+                  const hasEdge      = weekFilteredProps.some(p => p.edge != null && p.edge !== 0);
+                  const hasHitRate   = weekFilteredProps.some(p => p.hit_rate_last_10 != null);
+                  const hasConf      = weekFilteredProps.some(p => (p.confidence_score || 0) > 5);
+                  const disabled = {
+                    confidence: !hasConf,
+                    edge:       !hasEdge,
+                    hit_rate:   !hasHitRate,
+                  };
+                  return (
+                    <div className="flex items-center gap-1">
+                      {SORT_OPTIONS.map(o => {
+                        const off = disabled[o.value] === true;
+                        const active = sortBy === o.value;
+                        return (
+                          <button
+                            key={o.value}
+                            disabled={off}
+                            onClick={() => !off && setSortBy(o.value)}
+                            title={off ? `No ${o.label.toLowerCase()} data yet — loads once analytics are available` : undefined}
+                            className={cn(
+                              'text-xs px-2.5 py-1.5 rounded-lg border transition-all font-medium whitespace-nowrap',
+                              off
+                                ? 'opacity-35 cursor-not-allowed bg-secondary/30 border-border/30 text-muted-foreground/40'
+                                : active
+                                ? 'bg-primary/20 border-primary/40 text-primary'
+                                : 'bg-secondary/40 border-border text-muted-foreground hover:text-foreground hover:border-white/15'
+                            )}
+                          >
+                            {o.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+  
+              </div>
+
+              {/* Selected player chips */}
+              {selectedPlayers.map(name => (
+                <button
+                  key={name}
+                  onClick={() => setSelectedPlayers(prev => prev.filter(n => n !== name))}
+                  className="flex items-center gap-1 text-xs bg-primary/15 border border-primary/30 text-primary px-2.5 py-1 rounded-full hover:bg-primary/25 transition-colors whitespace-nowrap"
+                >
+                  {name} <X className="w-3 h-3" />
+                </button>
+              ))}
+              {selectedPlayers.length > 1 && (
+                <button
+                  onClick={() => setSelectedPlayers([])}
+                  className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Clear all
+                </button>
+              )}
+            </div>
+
+            {/* Everything else — always shown on desktop, behind the Filters button on phones */}
+            <div className={cn('flex-col gap-2', showFilters ? 'flex' : 'hidden md:flex')}>
+              {showFilters && <div className="md:hidden space-y-4 pb-2">{weekAndGames}</div>}
             {/* Platform switcher */}
             {availableSources.length > 0 && (() => {
               const hasOnlyFreeSources = availableSources.every(s => SOURCE_META[s]?.free);
@@ -1413,107 +1585,6 @@ export default function Props() {
               </div>
             </div>
 
-            {/* Row 2: player search + sort */}
-            <div className="flex items-center gap-2 flex-wrap">
-              {/* Player search */}
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
-                <input
-                  type="text"
-                  placeholder={selectedPlayers.length > 0 ? 'Add player or team…' : 'Search players or teams…'}
-                  value={playerSearch}
-                  onChange={e => { setPlayerSearch(e.target.value); setShowPlayerDrop(true); }}
-                  onFocus={() => setShowPlayerDrop(true)}
-                  className="w-44 pl-8 pr-7 py-1.5 text-xs bg-secondary border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                />
-                {playerSearch && (
-                  <button
-                    onClick={() => { setPlayerSearch(''); setShowPlayerDrop(false); }}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                )}
-                {showPlayerDrop && playerSuggestions.length > 0 && (
-                  <div className="absolute top-full mt-1 w-64 bg-popover border border-border rounded-lg shadow-xl z-50 overflow-hidden">
-                    {playerSuggestions.filter(name => !selectedPlayers.includes(name)).map(name => {
-                      const p = weekFilteredProps.find(ep => ep.player_name === name);
-                      const propCount = weekFilteredProps.filter(ep => ep.player_name === name).length;
-                      return (
-                        <button
-                          key={name}
-                          onClick={() => { setSelectedPlayers(prev => [...prev, name]); setPlayerSearch(''); setShowPlayerDrop(false); }}
-                          className="w-full flex items-center justify-between gap-3 px-3 py-2.5 hover:bg-secondary transition-colors text-left"
-                        >
-                          <div>
-                            <p className="text-sm font-medium text-foreground">{name}</p>
-                            <p className="text-[10px] text-muted-foreground">{p?.team} · {p?.position}</p>
-                          </div>
-                          <span className="text-[10px] text-muted-foreground bg-secondary px-2 py-0.5 rounded-full">{propCount}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* Sort */}
-              <span className="text-xs text-muted-foreground flex-shrink-0">Sort:</span>
-              {(() => {
-                const hasEdge      = weekFilteredProps.some(p => p.edge != null && p.edge !== 0);
-                const hasHitRate   = weekFilteredProps.some(p => p.hit_rate_last_10 != null);
-                const hasConf      = weekFilteredProps.some(p => (p.confidence_score || 0) > 5);
-                const disabled = {
-                  confidence: !hasConf,
-                  edge:       !hasEdge,
-                  hit_rate:   !hasHitRate,
-                };
-                return (
-                  <div className="flex items-center gap-1">
-                    {SORT_OPTIONS.map(o => {
-                      const off = disabled[o.value] === true;
-                      const active = sortBy === o.value;
-                      return (
-                        <button
-                          key={o.value}
-                          disabled={off}
-                          onClick={() => !off && setSortBy(o.value)}
-                          title={off ? `No ${o.label.toLowerCase()} data yet — loads once analytics are available` : undefined}
-                          className={cn(
-                            'text-xs px-2.5 py-1.5 rounded-lg border transition-all font-medium whitespace-nowrap',
-                            off
-                              ? 'opacity-35 cursor-not-allowed bg-secondary/30 border-border/30 text-muted-foreground/40'
-                              : active
-                              ? 'bg-primary/20 border-primary/40 text-primary'
-                              : 'bg-secondary/40 border-border text-muted-foreground hover:text-foreground hover:border-white/15'
-                          )}
-                        >
-                          {o.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                );
-              })()}
-
-              {/* Selected player chips */}
-              {selectedPlayers.map(name => (
-                <button
-                  key={name}
-                  onClick={() => setSelectedPlayers(prev => prev.filter(n => n !== name))}
-                  className="flex items-center gap-1 text-xs bg-primary/15 border border-primary/30 text-primary px-2.5 py-1 rounded-full hover:bg-primary/25 transition-colors whitespace-nowrap"
-                >
-                  {name} <X className="w-3 h-3" />
-                </button>
-              ))}
-              {selectedPlayers.length > 1 && (
-                <button
-                  onClick={() => setSelectedPlayers([])}
-                  className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  Clear all
-                </button>
-              )}
             </div>
           </div>
 

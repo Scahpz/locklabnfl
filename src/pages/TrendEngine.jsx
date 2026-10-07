@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { TrendingUp, TrendingDown, DollarSign, Flame, Activity, Search } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Flame, Search } from 'lucide-react';
 import { fetchTrendScores, TAG_META } from '@/lib/trendEngine';
 import { fetchLivePlayers } from '@/lib/nflLiveData';
 import { fantasyScore } from '@/lib/fantasyScoring';
@@ -8,15 +8,18 @@ import { mockPlayers, isDemoMode } from '@/lib/mockData';
 import PlayerAvatar from '@/components/common/PlayerAvatar';
 import TeamLogo from '@/components/common/TeamLogo';
 import PlayerBreakdownModal from '@/components/PlayerBreakdownModal';
+import HotStreaksPanel from '@/components/trends/HotStreaksPanel';
+import PageTabs, { useTabParam } from '@/components/common/PageTabs';
 import { cn } from '@/lib/utils';
 
 const POSITIONS = ['All', 'QB', 'RB', 'WR', 'TE'];
 
 const TABS = [
-  { key: 'stock_up',   label: 'Stock Up',   icon: TrendingUp,  metric: 'momentum' },
-  { key: 'stock_down', label: 'Stock Down', icon: TrendingDown, metric: 'momentum' },
+  { key: 'stock_up',   label: 'Stock Up',   short: 'Up',      icon: TrendingUp,  metric: 'momentum' },
+  { key: 'stock_down', label: 'Stock Down', short: 'Down',    icon: TrendingDown, metric: 'momentum' },
   { key: 'buy_low',    label: 'Buy Low',    icon: DollarSign,  metric: 'fpoe' },
   { key: 'sell_high',  label: 'Sell High',  icon: Flame,       metric: 'fpoe' },
+  { key: 'streaks',    label: 'Hot Streaks', short: 'Streaks', icon: Flame },
 ];
 
 const TAG_CHIP_CLS = {
@@ -104,9 +107,10 @@ export default function TrendEngine() {
   const [trendData, setTrendData]     = useState(null);
   const [livePlayers, setLivePlayers] = useState(null);
   const [loading, setLoading]         = useState(true);
-  const [activeTab, setActiveTab]     = useState('stock_up');
+  const [activeTab, setActiveTab]     = useTabParam('stock_up', TABS.map(t => t.key));
   const [position, setPosition]       = useState('All');
-  const [search, setSearch]           = useState('');
+  // Sidebar search lands here as /trends?player=Name
+  const [search, setSearch]           = useState(() => new URLSearchParams(window.location.search).get('player') ?? '');
   const [breakdownEntry, setBreakdownEntry] = useState(null);
 
   useEffect(() => {
@@ -186,109 +190,98 @@ export default function TrendEngine() {
     setBreakdownEntry({ player, prop: topProp, score, trend });
   }
 
+  const positionFilter = (
+    <div className="flex gap-1">
+      {POSITIONS.map(pos => (
+        <button
+          key={pos}
+          onClick={() => setPosition(pos)}
+          className={cn(
+            'flex-1 sm:flex-none px-3 py-1.5 text-[12px] font-semibold rounded-lg transition-colors',
+            position === pos
+              ? 'bg-primary/20 text-primary border border-primary/30'
+              : 'text-muted-foreground hover:text-foreground hover:bg-white/5 border border-white/6',
+          )}
+        >
+          {pos}
+        </button>
+      ))}
+    </div>
+  );
+
   return (
-    <div className="space-y-6 max-w-4xl mx-auto pb-8">
+    <div className="space-y-4 sm:space-y-5 max-w-4xl mx-auto pb-8">
       {/* Header */}
-      <div className="flex items-center gap-3">
-        <div className="w-9 h-9 rounded-xl bg-primary/15 flex items-center justify-center flex-shrink-0">
-          <Activity className="w-5 h-5 text-primary" />
-        </div>
-        <div>
-          <h1 className="text-xl font-bold text-foreground">Player Trend Engine</h1>
-          <p className="text-sm text-muted-foreground">
-            {trendData?.data_loaded && trendData.data_as_of
-              ? `Data as of ${new Date(trendData.data_as_of).toLocaleString()} · real usage & production trend, not gut feel`
-              : 'Real usage & production trend — snap %, target %, carry %, and actual-vs-expected points'}
-          </p>
-        </div>
-      </div>
-
-      {/* Tag tabs */}
-      <div className="flex gap-1.5 overflow-x-auto pb-1">
-        {TABS.map(tab => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={cn(
-              'px-3.5 py-2 rounded-xl border text-[12px] font-semibold flex-shrink-0 transition-all flex items-center gap-1.5',
-              activeTab === tab.key
-                ? 'bg-primary/20 border-primary/40 text-primary'
-                : 'border-white/8 text-muted-foreground hover:border-white/18 hover:text-foreground',
-            )}
-          >
-            {tab.icon && <tab.icon className="w-3.5 h-3.5" />}
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {activeTab === 'buy_low' || activeTab === 'sell_high' ? (
-        <p className="text-[11px] text-muted-foreground/60 -mt-2">
-          Based on real targets/carries priced at this season's league-average conversion rate (RB/WR/TE only) vs. actual points —
-          not yet weighted for market/trade value.
+      <div>
+        <h1 className="text-xl sm:text-2xl font-bold text-foreground">Trends</h1>
+        <p className="text-xs text-muted-foreground mt-1">
+          {activeTab === 'streaks'
+            ? 'Props that keep clearing — or missing — this week’s line'
+            : trendData?.data_loaded && trendData.data_as_of
+              ? `Usage & production trends · data as of ${new Date(trendData.data_as_of).toLocaleDateString()}`
+              : 'Snap %, target %, carry % and actual-vs-expected points'}
         </p>
-      ) : null}
+      </div>
 
-      {!trendData?.data_loaded && !loading ? (
-        <div className="text-center text-muted-foreground text-sm py-16 rounded-2xl border border-dashed border-white/10">
-          Could not reach the trend engine — check your connection and reload.
-        </div>
+      <PageTabs tabs={TABS} value={activeTab} onChange={setActiveTab} />
+
+      {positionFilter}
+
+      {activeTab === 'streaks' ? (
+        <HotStreaksPanel position={position} />
       ) : (
         <>
-          {/* Position filter + search */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <div className="flex gap-1">
-              {POSITIONS.map(pos => (
-                <button
-                  key={pos}
-                  onClick={() => setPosition(pos)}
-                  className={cn(
-                    'px-3 py-1 text-[11px] font-semibold rounded-lg transition-colors',
-                    position === pos
-                      ? 'bg-primary/20 text-primary border border-primary/30'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-white/5 border border-transparent',
-                  )}
-                >
-                  {pos}
-                </button>
-              ))}
-            </div>
-            <div className="relative flex-1 min-w-[160px]">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
-              <input
-                type="text"
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                placeholder="Search player..."
-                className="w-full bg-white/5 border border-white/10 rounded-xl pl-9 pr-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
-              />
-            </div>
-            <span className="text-[11px] text-muted-foreground/60">{filtered.length} player{filtered.length !== 1 ? 's' : ''}</span>
-          </div>
+          {(activeTab === 'buy_low' || activeTab === 'sell_high') && (
+            <p className="text-[11px] text-muted-foreground/70">
+              Real targets/carries priced at this season’s league-average conversion rate (RB/WR/TE) vs. actual points.
+            </p>
+          )}
 
-          {loading ? (
-            <div className="space-y-2">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="rounded-2xl border border-white/6 bg-[hsl(222,47%,9%)] p-4 h-20 animate-pulse" />
-              ))}
+          {!trendData?.data_loaded && !loading ? (
+            <div className="text-center text-muted-foreground text-sm py-16 rounded-2xl border border-dashed border-white/10">
+              Could not reach the trend engine — check your connection and reload.
             </div>
           ) : (
-            <div className="space-y-2">
-              {filtered.map((entry, index) => (
-                <TrendPlayerRow
-                  key={entry.trend.player_id || entry.trend.player_name}
-                  entry={entry}
-                  rank={index + 1}
-                  highlightMetric={activeTabMeta?.metric}
-                  onOpen={() => openPlayer(entry)}
-                />
-              ))}
-              {filtered.length === 0 && (
-                <div className="text-center text-muted-foreground text-sm py-12">
-                  No {activeTabMeta?.label.toLowerCase()} players{position !== 'All' ? ` at ${position}` : ''} right now.
+            <>
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1 min-w-0">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                    placeholder="Search player..."
+                    className="w-full bg-white/5 border border-white/10 rounded-xl pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
+                  />
+                </div>
+                <span className="text-[11px] text-muted-foreground/60 flex-shrink-0">{filtered.length} player{filtered.length !== 1 ? 's' : ''}</span>
+              </div>
+
+              {loading ? (
+                <div className="space-y-2">
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <div key={i} className="rounded-2xl border border-white/6 bg-[hsl(222,47%,9%)] p-4 h-20 animate-pulse" />
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {filtered.map((entry, index) => (
+                    <TrendPlayerRow
+                      key={entry.trend.player_id || entry.trend.player_name}
+                      entry={entry}
+                      rank={index + 1}
+                      highlightMetric={activeTabMeta?.metric}
+                      onOpen={() => openPlayer(entry)}
+                    />
+                  ))}
+                  {filtered.length === 0 && (
+                    <div className="text-center text-muted-foreground text-sm py-12">
+                      No {activeTabMeta?.label.toLowerCase()} players{position !== 'All' ? ` at ${position}` : ''}{search ? ` matching “${search}”` : ''} right now.
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
+            </>
           )}
         </>
       )}

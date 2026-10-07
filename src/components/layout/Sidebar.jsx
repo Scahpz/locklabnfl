@@ -1,16 +1,13 @@
 import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
-import { TrendingUp, Zap, Layers, Bell, User, GitCompare, Activity, ChevronLeft, ChevronRight, Sparkles, Search, ClipboardList, Trophy, ArrowUpDown } from 'lucide-react';
+import { TrendingUp, Zap, Layers, Bell, User, Activity, ChevronLeft, ChevronRight, Search, ClipboardList, Trophy } from 'lucide-react';
 import logo from '@/assets/logo.png';
 
 const navItems = [
-  { path: '/', label: 'Props', icon: Zap },
-  { path: '/ai-picks', label: 'AI Picks', icon: Sparkles },
-  { path: '/trends', label: 'Streaks & Trends', icon: TrendingUp },
-  { path: '/compare', label: 'Compare', icon: GitCompare },
+  { path: '/', label: 'Props & AI Picks', icon: Zap },
   { path: '/start-sit', label: 'Start/Sit', icon: Trophy },
-  { path: '/trend-engine', label: 'Trend Engine', icon: ArrowUpDown },
+  { path: '/trends', label: 'Trends', icon: TrendingUp },
   { path: '/odds', label: 'Live Odds', icon: Activity },
   { path: '/parlay', label: 'Parlay Builder', icon: Layers },
   { path: '/history', label: 'Prop History', icon: ClipboardList },
@@ -27,7 +24,7 @@ export default function Sidebar({ collapsed, setCollapsed }) {
     e.preventDefault();
     const q = search.trim();
     if (!q) return;
-    navigate(`/trends?player=${encodeURIComponent(q)}`);
+    navigate(`/?q=${encodeURIComponent(q)}`);
     setSearch('');
   };
 

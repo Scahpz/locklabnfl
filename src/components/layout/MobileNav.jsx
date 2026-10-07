@@ -1,13 +1,13 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Zap, Sparkles, Trophy, ArrowUpDown, LayoutGrid } from 'lucide-react';
+import { Zap, Trophy, TrendingUp, Layers, LayoutGrid } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const navItems = [
   { path: '/', label: 'Props', icon: Zap },
-  { path: '/ai-picks', label: 'AI Picks', icon: Sparkles },
   { path: '/start-sit', label: 'Start/Sit', icon: Trophy },
-  { path: '/trend-engine', label: 'Trends', icon: ArrowUpDown },
+  { path: '/trends', label: 'Trends', icon: TrendingUp },
+  { path: '/parlay', label: 'Parlay', icon: Layers },
 ];
 
 export default function MobileNav({ onOpenMenu }) {

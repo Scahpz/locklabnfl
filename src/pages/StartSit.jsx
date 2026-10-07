@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
-  Trophy, Users, TrendingUp, ChevronDown, X, Search, Plus,
-  Settings, Shield, Zap, AlertTriangle, Link2, Loader2, RefreshCw, Wifi,
+  Trophy, TrendingUp, ChevronDown, X, Search, Plus,
+  Settings, Shield, Zap, AlertTriangle, Link2, Loader2, RefreshCw, Wifi, GitCompare,
 } from 'lucide-react';
 import { fantasyScore, compareStartSit, rankPlayers, rankWaiverWire, computeConfidence } from '@/lib/fantasyScoring';
 import { mockPlayers, isDemoMode } from '@/lib/mockData';
@@ -13,6 +13,7 @@ import TeamLogo from '@/components/common/TeamLogo';
 import PlayerAvatar from '@/components/common/PlayerAvatar';
 import PlayerBreakdownModal from '@/components/PlayerBreakdownModal';
 import LeagueConnectModal from '@/components/LeagueConnectModal';
+import PageTabs, { useTabParam } from '@/components/common/PageTabs';
 import {
   getLeagueConnection, refreshLeagueConnection, isConnectionStale, getMyTeam, getRosteredIds,
 } from '@/lib/leagueConnect';
@@ -397,114 +398,120 @@ function isBreakout(player, prop) {
   return trendingUp && (softMatchup || hotStreak);
 }
 
-function PlayerRankCard({ rank, posRank, player, prop, score, trend, onCompare, onOpen }) {
-  const propLabel = PROP_LABELS[prop.prop_type] ?? prop.prop_type;
+function ConfidenceChip({ score }) {
+  const conf = computeConfidence(score);
+  if (!conf) return null;
+  return (
+    <span className={cn(
+      'text-[9px] font-bold px-1.5 py-0.5 rounded-full border tracking-wider',
+      conf === 'high'   ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400' :
+      conf === 'medium' ? 'bg-amber-500/15 border-amber-500/30 text-amber-400' :
+                          'bg-red-500/15 border-red-500/30 text-red-400',
+    )}>
+      {conf === 'high' ? 'HIGH' : conf === 'medium' ? 'MED' : 'LOW'} CONF
+    </span>
+  );
+}
+
+// Floor / Proj / Ceiling — label over value so it never wraps mid-number on phones.
+function FpStats({ score }) {
+  return (
+    <div className="flex items-center gap-4">
+      {[
+        { label: 'Floor', value: score.floor,      cls: 'text-foreground' },
+        { label: 'Proj',  value: score.projection, cls: 'text-primary' },
+        { label: 'Ceil',  value: score.ceiling,    cls: 'text-foreground' },
+      ].map(s => (
+        <div key={s.label} className="leading-tight">
+          <div className="text-[10px] text-muted-foreground">{s.label}</div>
+          <div className={cn('text-sm font-semibold tabular-nums', s.cls)}>{s.value}</div>
+        </div>
+      ))}
+      <span className="text-[10px] text-muted-foreground self-end mb-0.5">FP</span>
+    </div>
+  );
+}
+
+function PlayerRankCard({ rank, posRank, player, prop, score, trend, onCompare, onOpen, isCompared }) {
   const breakout  = isBreakout(player, prop);
+  const mg        = matchupGrade(player.def_rank_vs_pos);
+  const reasons   = getMatchupReasons(player, prop);
 
   return (
     <div
       onClick={onOpen}
       className={cn(
-        "rounded-2xl border p-4 flex items-center gap-4 hover:bg-white/2 transition-colors cursor-pointer",
+        'rounded-2xl border p-3.5 sm:p-4 space-y-3 hover:bg-white/2 transition-colors cursor-pointer',
         breakout
-          ? "border-amber-500/30 bg-amber-500/5 hover:border-amber-500/50"
-          : "border-white/6 bg-[hsl(222,47%,9%)] hover:border-white/18",
+          ? 'border-amber-500/30 bg-amber-500/5 hover:border-amber-500/50'
+          : 'border-white/6 bg-[hsl(222,47%,9%)] hover:border-white/18',
       )}
     >
-      <div className="w-8 text-center flex-shrink-0">
+      {/* Row 1 — who + verdict */}
+      <div className="flex items-center gap-3">
         <span className={cn(
-          'text-sm font-bold',
+          'w-7 text-sm font-bold tabular-nums flex-shrink-0',
           rank === 1 ? 'text-yellow-400' : rank <= 3 ? 'text-primary' : 'text-muted-foreground',
         )}>
           #{rank}
         </span>
+        <PlayerAvatar photo={player.photo_url} team={player.team} className="w-10 h-10 flex-shrink-0" />
+        <div className="flex-1 min-w-0">
+          <div className="text-[15px] font-semibold text-foreground truncate">{player.player_name}</div>
+          <div className="text-[11px] text-muted-foreground truncate">
+            {player.position}{posRank != null ? ` #${posRank}` : ''} · {player.team} {prop?.is_home ? 'vs' : '@'} {player.opponent}
+          </div>
+        </div>
+        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+          <VerdictChip verdict={score.verdict} />
+          <div className="flex items-center gap-1.5">
+            <span className="text-base font-bold text-foreground tabular-nums">{score.total}</span>
+            <GradeBadge grade={score.grade} />
+          </div>
+        </div>
       </div>
 
-      <PlayerAvatar photo={player.photo_url} team={player.team} className="w-9 h-9" />
-
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-semibold text-foreground truncate">{player.player_name}</span>
-          <span className="text-[10px] bg-white/8 text-muted-foreground px-1.5 py-0.5 rounded font-medium">
-            {player.position}
-          </span>
-          {(() => {
-            const mg = matchupGrade(player.def_rank_vs_pos);
-            if (!mg) return null;
-            return (
-              <span className={cn('text-[9px] font-bold px-1.5 py-0.5 rounded-md border', mg.bg, mg.color)}>
-                vs {mg.letter}
-              </span>
-            );
-          })()}
+      {/* Row 2 — why (only when there's something to say) */}
+      {(mg || breakout || trend || reasons.length > 0) && (
+        <div className="flex gap-1.5 flex-wrap">
+          {mg && (
+            <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded-md border', mg.bg, mg.color)}>
+              Matchup {mg.letter}
+            </span>
+          )}
           {breakout && (
-            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 uppercase tracking-wide flex items-center gap-0.5">
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 uppercase tracking-wide flex items-center gap-0.5">
               <TrendingUp className="w-2.5 h-2.5" /> Breakout
             </span>
           )}
           <TrendTagChip trend={trend} />
-        </div>
-        <div className="text-[11px] text-muted-foreground mt-0.5">
-          {player.team} {prop?.is_home ? 'vs' : '@'} {player.opponent} · {propLabel} {prop.line}
-          {posRank != null && (
-            <span className="ml-1 text-muted-foreground/60">
-              · {player.position} #{posRank}
+          {reasons.map((r, i) => (
+            <span key={i} className="text-[10px] text-muted-foreground bg-white/4 border border-white/8 px-1.5 py-0.5 rounded">
+              {r}
             </span>
-          )}
+          ))}
         </div>
-        {(() => {
-          const reasons = getMatchupReasons(player, prop);
-          if (!reasons.length) return null;
-          return (
-            <div className="flex gap-1.5 flex-wrap mt-1">
-              {reasons.map((r, i) => (
-                <span key={i} className="text-[9px] text-muted-foreground bg-white/4 border border-white/8 px-1.5 py-0.5 rounded">
-                  {r}
-                </span>
-              ))}
-            </div>
-          );
-        })()}
-        <div className="mt-2"><ScoreBar total={score.total} /></div>
-        <div className="flex items-center gap-3 mt-1.5">
-          <span className="text-[10px] text-muted-foreground">
-            Floor <span className="text-foreground font-medium">{score.floor} FP</span>
-          </span>
-          <span className="text-[10px] text-muted-foreground">
-            Proj <span className="text-primary font-medium">{score.projection} FP</span>
-          </span>
-          <span className="text-[10px] text-muted-foreground">
-            Ceil <span className="text-foreground font-medium">{score.ceiling} FP</span>
-          </span>
+      )}
+
+      {/* Row 3 — numbers + actions */}
+      <div className="flex items-center justify-between gap-3 pt-2.5 border-t border-white/5">
+        <FpStats score={score} />
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <ConfidenceChip score={score} />
+          <button
+            onClick={e => { e.stopPropagation(); onCompare(player, prop); }}
+            title={isCompared ? 'In comparison' : 'Add to comparison'}
+            className={cn(
+              'w-8 h-8 flex items-center justify-center rounded-xl border transition-colors',
+              isCompared
+                ? 'border-primary/40 bg-primary/15 text-primary'
+                : 'border-white/10 text-muted-foreground hover:text-primary hover:border-primary/40',
+            )}
+          >
+            <GitCompare className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
-
-      <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
-        <div className="text-lg font-bold text-foreground">{score.total}</div>
-        <GradeBadge grade={score.grade} />
-        <VerdictChip verdict={score.verdict} />
-        {(() => {
-          const conf = computeConfidence(score);
-          if (!conf) return null;
-          return (
-            <span className={cn(
-              'text-[9px] font-bold px-1.5 py-0.5 rounded-full border tracking-wider',
-              conf === 'high'   ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400' :
-              conf === 'medium' ? 'bg-amber-500/15 border-amber-500/30 text-amber-400' :
-                                  'bg-red-500/15 border-red-500/30 text-red-400',
-            )}>
-              {conf === 'high' ? 'HIGH' : conf === 'medium' ? 'MED' : 'LOW'}
-            </span>
-          );
-        })()}
-      </div>
-
-      <button
-        onClick={e => { e.stopPropagation(); onCompare(player, prop); }}
-        className="flex-shrink-0 text-[11px] text-muted-foreground hover:text-primary border border-white/10 hover:border-primary/40 rounded-xl px-2.5 py-1.5 transition-colors"
-      >
-        Compare
-      </button>
     </div>
   );
 }
@@ -512,7 +519,6 @@ function PlayerRankCard({ rank, posRank, player, prop, score, trend, onCompare, 
 // ─── Waiver Wire Card ─────────────────────────────────────────────────────────
 
 function WaiverCard({ rank, player, prop, score, waiverReason, injuryUpside, isHandcuff, waiverPriority }) {
-  const propLabel = PROP_LABELS[prop?.prop_type] ?? prop?.prop_type ?? '';
 
   const priorityStyle = {
     high:   'bg-primary/20 border-primary/40 text-primary',
@@ -521,25 +527,20 @@ function WaiverCard({ rank, player, prop, score, waiverReason, injuryUpside, isH
   }[waiverPriority] ?? 'bg-white/8 border-white/15 text-muted-foreground';
 
   return (
-    <div className="rounded-2xl border border-white/6 bg-[hsl(222,47%,9%)] p-4 space-y-3 hover:border-white/12 transition-colors">
+    <div className="rounded-2xl border border-white/6 bg-[hsl(222,47%,9%)] p-3.5 sm:p-4 space-y-3 hover:border-white/12 transition-colors">
       <div className="flex items-center gap-3">
-        <div className="w-7 text-center flex-shrink-0">
-          <span className={cn(
-            'text-sm font-bold',
-            rank === 1 ? 'text-yellow-400' : rank <= 3 ? 'text-primary' : 'text-muted-foreground',
-          )}>
-            #{rank}
-          </span>
-        </div>
+        <span className={cn(
+          'w-7 text-sm font-bold tabular-nums flex-shrink-0',
+          rank === 1 ? 'text-yellow-400' : rank <= 3 ? 'text-primary' : 'text-muted-foreground',
+        )}>
+          #{rank}
+        </span>
 
-        <PlayerAvatar photo={player.photo_url} team={player.team} className="w-9 h-9" />
+        <PlayerAvatar photo={player.photo_url} team={player.team} className="w-10 h-10 flex-shrink-0" />
 
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-semibold text-foreground truncate">{player.player_name}</span>
-            <span className="text-[10px] bg-white/8 text-muted-foreground px-1.5 py-0.5 rounded font-medium">
-              {player.position}
-            </span>
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-[15px] font-semibold text-foreground truncate">{player.player_name}</span>
             {isHandcuff && (
               <span className="text-[10px] bg-blue-500/15 border border-blue-500/30 text-blue-400 px-1.5 py-0.5 rounded-full font-semibold flex items-center gap-0.5">
                 <Link2 className="w-2.5 h-2.5" />
@@ -547,40 +548,30 @@ function WaiverCard({ rank, player, prop, score, waiverReason, injuryUpside, isH
               </span>
             )}
           </div>
-          <div className="text-[11px] text-muted-foreground mt-0.5">
-            {player.team} {prop?.is_home ? 'vs' : '@'} {player.opponent}{prop ? ` · ${propLabel} ${prop.line}` : ''}
+          <div className="text-[11px] text-muted-foreground truncate">
+            {player.position} · {player.team} {prop?.is_home ? 'vs' : '@'} {player.opponent}
           </div>
         </div>
 
-        <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+        <div className="flex flex-col items-end gap-1 flex-shrink-0">
           <span className={cn('text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border', priorityStyle)}>
-            {waiverPriority === 'high' ? 'HIGH' : waiverPriority === 'medium' ? 'MED' : 'LOW'}
+            {waiverPriority === 'high' ? 'HIGH' : waiverPriority === 'medium' ? 'MED' : 'LOW'} PRIORITY
           </span>
           {score && (
-            <>
-              <div className="text-base font-bold text-foreground">{score.total}</div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-base font-bold text-foreground tabular-nums">{score.total}</span>
               <GradeBadge grade={score.grade} />
-            </>
+            </div>
           )}
         </div>
       </div>
 
-      {score && <ScoreBar total={score.total} />}
-
       {score && (
-        <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-[10px] text-muted-foreground">
-            Floor <span className="text-foreground font-medium">{score.floor} FP</span>
-          </span>
-          <span className="text-[10px] text-muted-foreground">
-            Proj <span className="text-primary font-medium">{score.projection} FP</span>
-          </span>
-          <span className="text-[10px] text-muted-foreground">
-            Ceil <span className="text-foreground font-medium">{score.ceiling} FP</span>
-          </span>
+        <div className="flex items-center justify-between gap-3 pt-2.5 border-t border-white/5">
+          <FpStats score={score} />
           {score.waiverBoost > 0 && (
-            <span className="text-[10px] text-muted-foreground">
-              Boost <span className="text-primary font-medium">+{score.waiverBoost}</span>
+            <span className="text-[11px] text-muted-foreground">
+              Boost <span className="text-primary font-semibold">+{score.waiverBoost}</span>
             </span>
           )}
         </div>
@@ -847,7 +838,7 @@ function PlayerPickerModal({ players: allPlayers, onSelect, onClose, excludePlay
 export default function StartSit() {
   const [settings, setSettings]                   = useState(() => getLeagueSettings());
   const [showSettings, setShowSettings]           = useState(false);
-  const [rankTab, setRankTab]                     = useState('rankings');
+  const [rankTab, setRankTab]                     = useTabParam('rankings', ['rankings', 'compare', 'waiver']);
   const [position, setPosition]                   = useState('QB');
   const [waiverPosition, setWaiverPosition]       = useState('QB');
   const [compareA, setCompareA]                   = useState(null);
@@ -1053,8 +1044,10 @@ export default function StartSit() {
   }
 
   function handleCompareFromRanking(player, prop) {
+    if (compareA?.id === player.id) { setCompareA(null); setPropA(null); return; }
+    if (compareB?.id === player.id) { setCompareB(null); setPropB(null); return; }
     if (!compareA)      { setCompareA(player); setPropA(prop); }
-    else if (!compareB) { setCompareB(player); setPropB(prop); }
+    else if (!compareB) { setCompareB(player); setPropB(prop); setRankTab('compare'); }
     else                { setCompareA(player); setPropA(prop); }
   }
 
@@ -1064,55 +1057,50 @@ export default function StartSit() {
   const weekLabel = liveStatus.week ? `Week ${liveStatus.week}` : null;
 
   return (
-    <div className="space-y-6 max-w-4xl mx-auto pb-8">
+    <div className="space-y-4 sm:space-y-5 max-w-4xl mx-auto pb-8">
 
       {/* ── Header ── */}
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-primary/15 flex items-center justify-center flex-shrink-0">
-            <Trophy className="w-5 h-5 text-primary" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl font-bold text-foreground">Fantasy Start/Sit</h1>
-              {liveStatus.loading ? (
-                <span className="flex items-center gap-1 text-[10px] text-muted-foreground bg-white/5 border border-white/10 px-2 py-0.5 rounded-full">
-                  <Loader2 className="w-2.5 h-2.5 animate-spin" /> Loading
-                </span>
-              ) : isLive ? (
-                <span className="flex items-center gap-1 text-[10px] font-bold text-primary bg-primary/15 border border-primary/30 px-2 py-0.5 rounded-full">
-                  <Wifi className="w-2.5 h-2.5" /> LIVE{weekLabel ? ` · ${weekLabel}` : ''}
-                </span>
-              ) : (
-                <span className="text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full font-semibold">
-                  DEMO
-                </span>
-              )}
-            </div>
-            <p className="text-sm text-muted-foreground">
-              {isLive
-                ? `${filteredRankings.length} ranked · ${activePlayers.length} loaded`
-                : 'AI-powered start/sit decisions for your lineup'
-              }
-            </p>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-xl sm:text-2xl font-bold text-foreground flex items-center gap-2">
+            <Trophy className="w-5 h-5 text-primary flex-shrink-0 hidden sm:block" />
+            Start/Sit
+          </h1>
+          <div className="flex items-center gap-2 mt-1 flex-wrap">
+            {liveStatus.loading ? (
+              <span className="flex items-center gap-1 text-[10px] text-muted-foreground bg-white/5 border border-white/10 px-2 py-0.5 rounded-full">
+                <Loader2 className="w-2.5 h-2.5 animate-spin" /> Loading
+              </span>
+            ) : isLive ? (
+              <span className="flex items-center gap-1 text-[10px] font-bold text-primary bg-primary/15 border border-primary/30 px-2 py-0.5 rounded-full whitespace-nowrap">
+                <Wifi className="w-2.5 h-2.5" /> LIVE{weekLabel ? ` · ${weekLabel}` : ''}
+              </span>
+            ) : (
+              <span className="text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full font-semibold">
+                DEMO
+              </span>
+            )}
+            <span className="text-xs text-muted-foreground">
+              {scoringLabel}{settings.superflex ? ' · SF' : ''}{settings.tePremium ? ' · TE+' : ''}
+            </span>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 flex-shrink-0">
           {!isDemoMode() && !liveStatus.loading && (
             <button
               onClick={() => loadLivePlayers(true)}
               title="Refresh live roster"
-              className="w-8 h-8 flex items-center justify-center rounded-xl border border-white/10 hover:border-primary/40 hover:bg-primary/5 text-muted-foreground hover:text-primary transition-all"
+              className="w-9 h-9 flex items-center justify-center rounded-xl border border-white/10 hover:border-primary/40 hover:bg-primary/5 text-muted-foreground hover:text-primary transition-all"
             >
-              <RefreshCw className="w-3.5 h-3.5" />
+              <RefreshCw className="w-4 h-4" />
             </button>
           )}
           <button
             onClick={() => setShowLeague(true)}
             title={league ? `${league.name} — ${myTeam?.name ?? 'pick your team'}` : 'Connect your Sleeper or ESPN league'}
             className={cn(
-              'flex items-center gap-1.5 px-3 py-2 rounded-xl border transition-all text-sm max-w-[160px]',
+              'h-9 flex items-center gap-1.5 px-2.5 rounded-xl border transition-all text-sm max-w-[170px]',
               league
                 ? 'border-primary/30 bg-primary/8 text-primary'
                 : 'border-white/10 text-muted-foreground hover:border-primary/40 hover:bg-primary/5 hover:text-primary',
@@ -1123,12 +1111,10 @@ export default function StartSit() {
           </button>
           <button
             onClick={() => setShowSettings(true)}
-            className="flex items-center gap-2 px-3 py-2 rounded-xl border border-white/10 hover:border-primary/40 hover:bg-primary/5 transition-all text-sm text-muted-foreground hover:text-primary"
+            title="Scoring settings"
+            className="w-9 h-9 flex items-center justify-center rounded-xl border border-white/10 hover:border-primary/40 hover:bg-primary/5 transition-all text-muted-foreground hover:text-primary"
           >
             <Settings className="w-4 h-4" />
-            <span className="font-semibold">{scoringLabel}</span>
-            {settings.tePremium && <span className="text-[10px] text-amber-400 font-bold">TE+</span>}
-            {settings.superflex && <span className="text-[10px] text-amber-400 font-bold">SF</span>}
           </button>
         </div>
       </div>
@@ -1141,99 +1127,88 @@ export default function StartSit() {
         </div>
       )}
 
-      {/* ── Head-to-Head Comparison ── */}
-      <section className="space-y-3">
-        <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
-          <Users className="w-4 h-4 text-primary" />
-          Head-to-Head Comparison
-        </h2>
+      <PageTabs
+        value={rankTab}
+        onChange={key => { if (key === 'waiver' && rankTab !== 'waiver') setWaiverPosition(position); setRankTab(key); }}
+        tabs={[
+          { key: 'rankings', label: 'Rankings', icon: TrendingUp },
+          { key: 'compare',  label: 'Compare',  icon: GitCompare, count: [compareA, compareB].filter(Boolean).length || null },
+          { key: 'waiver',   label: 'Waiver',   icon: Shield },
+        ]}
+      />
 
-        <div className="flex flex-col sm:flex-row gap-3 sm:items-stretch">
-          <PlayerSlot
-            label="Player A"
-            player={compareA}
-            prop={propA}
-            score={scoreA}
-            availableProps={compareA?.props}
-            onChangeProp={setPropA}
-            onClear={() => { setCompareA(null); setPropA(null); }}
-            onPick={() => setShowComparePicker('A')}
-          />
-          <div className="flex sm:flex-col items-center justify-center sm:w-10 flex-shrink-0 py-1 sm:py-0">
-            <span className="text-xs font-bold text-muted-foreground bg-white/5 rounded-full w-8 h-8 flex items-center justify-center border border-white/8">
-              VS
-            </span>
+      {/* ── Compare ── */}
+      {rankTab === 'compare' && (
+        <section className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Pick two players — or tap <GitCompare className="w-3 h-3 inline -mt-0.5" /> on any ranking — to see who to start.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-3 sm:items-stretch">
+            <PlayerSlot
+              label="Player A"
+              player={compareA}
+              prop={propA}
+              score={scoreA}
+              availableProps={compareA?.props}
+              onChangeProp={setPropA}
+              onClear={() => { setCompareA(null); setPropA(null); }}
+              onPick={() => setShowComparePicker('A')}
+            />
+            <div className="flex sm:flex-col items-center justify-center sm:w-10 flex-shrink-0 -my-1 sm:my-0">
+              <span className="text-[10px] font-bold text-muted-foreground bg-white/5 rounded-full w-7 h-7 flex items-center justify-center border border-white/8">
+                VS
+              </span>
+            </div>
+            <PlayerSlot
+              label="Player B"
+              player={compareB}
+              prop={propB}
+              score={scoreB}
+              availableProps={compareB?.props}
+              onChangeProp={setPropB}
+              onClear={() => { setCompareB(null); setPropB(null); }}
+              onPick={() => setShowComparePicker('B')}
+            />
           </div>
-          <PlayerSlot
-            label="Player B"
-            player={compareB}
-            prop={propB}
-            score={scoreB}
-            availableProps={compareB?.props}
-            onChangeProp={setPropB}
-            onClear={() => { setCompareB(null); setPropB(null); }}
-            onPick={() => setShowComparePicker('B')}
-          />
-        </div>
 
-        {compResult && <ComparisonResult result={compResult} playerA={compareA} playerB={compareB} />}
-
-        {(compareA || compareB) && (!compareA || !compareB) && (
-          <div className="text-center text-xs text-muted-foreground py-2">
-            Pick a second player to see the full comparison
-          </div>
-        )}
-      </section>
+          {compResult && <ComparisonResult result={compResult} playerA={compareA} playerB={compareB} />}
+        </section>
+      )}
 
       {/* ── Rankings / Waiver Wire ── */}
+      {rankTab !== 'compare' && (
       <section className="space-y-3">
 
-        {/* Tab + position filter row */}
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-1 bg-white/4 rounded-xl p-1">
+        <div className="flex gap-1">
+          {POSITIONS.map(pos => (
             <button
-              onClick={() => setRankTab('rankings')}
+              key={pos}
+              onClick={() => setActivePosition(pos)}
               className={cn(
-                'flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold rounded-lg transition-all',
-                rankTab === 'rankings'
+                'flex-1 sm:flex-none px-3 py-1.5 text-[12px] font-semibold rounded-lg transition-colors',
+                activePosition === pos
                   ? 'bg-primary/20 text-primary border border-primary/30'
-                  : 'text-muted-foreground hover:text-foreground',
+                  : 'text-muted-foreground hover:text-foreground hover:bg-white/5 border border-white/6',
               )}
             >
-              <TrendingUp className="w-3.5 h-3.5" />
-              Rankings
+              {pos}
             </button>
-            <button
-              onClick={() => { setWaiverPosition(position); setRankTab('waiver'); }}
-              className={cn(
-                'flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold rounded-lg transition-all',
-                rankTab === 'waiver'
-                  ? 'bg-primary/20 text-primary border border-primary/30'
-                  : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              <Shield className="w-3.5 h-3.5" />
-              Waiver Wire
-            </button>
-          </div>
-
-          <div className="flex gap-1">
-            {POSITIONS.map(pos => (
-              <button
-                key={pos}
-                onClick={() => setActivePosition(pos)}
-                className={cn(
-                  'px-3 py-1 text-[11px] font-semibold rounded-lg transition-colors capitalize',
-                  activePosition === pos
-                    ? 'bg-primary/20 text-primary border border-primary/30'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-white/5 border border-transparent',
-                )}
-              >
-                {pos}
-              </button>
-            ))}
-          </div>
+          ))}
         </div>
+
+        {/* Compare tray — shows what's queued without leaving the rankings */}
+        {rankTab === 'rankings' && (compareA || compareB) && (
+          <button
+            onClick={() => setRankTab('compare')}
+            className="w-full flex items-center justify-between gap-2 rounded-xl border border-primary/25 bg-primary/8 px-3 py-2 text-left"
+          >
+            <span className="text-xs text-foreground truncate">
+              <GitCompare className="w-3.5 h-3.5 inline -mt-0.5 mr-1.5 text-primary" />
+              {compareA?.player_name ?? '—'} <span className="text-muted-foreground">vs</span> {compareB?.player_name ?? 'pick one more'}
+            </span>
+            <span className="text-xs font-semibold text-primary flex-shrink-0">{compareA && compareB ? 'See result →' : 'Open →'}</span>
+          </button>
+        )}
 
         {/* ── Rankings ── */}
         {rankTab === 'rankings' && (
@@ -1373,6 +1348,7 @@ export default function StartSit() {
                     score={score}
                     trend={trendIndex[player.id]}
                     onCompare={handleCompareFromRanking}
+                    isCompared={compareA?.id === player.id || compareB?.id === player.id}
                     onOpen={() => setBreakdownEntry({ player, prop, score, trend: trendIndex[player.id] })}
                   />
                 ))}
@@ -1438,6 +1414,7 @@ export default function StartSit() {
           </>
         )}
       </section>
+      )}
 
       {/* ── Modals ── */}
       {showComparePicker && (

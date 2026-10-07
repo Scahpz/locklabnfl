@@ -33,10 +33,10 @@ export default function MobileHeader({ onOpenMenu }) {
         {/* Right: Quick actions */}
         <div className="flex items-center gap-1.5">
           <Link
-            to="/ai-picks"
+            to="/?tab=ai"
             className={cn(
               'px-2.5 py-1 rounded-xl text-[11px] font-bold flex items-center gap-1 transition-all border',
-              location.pathname === '/ai-picks'
+              location.pathname === '/' && location.search.includes('tab=ai')
                 ? 'bg-primary/20 text-primary border-primary/40'
                 : 'bg-primary/10 text-primary/90 border-primary/20 hover:bg-primary/20'
             )}

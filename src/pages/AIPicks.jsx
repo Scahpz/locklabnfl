@@ -50,7 +50,7 @@ function PickCard({ prop }) {
           <PlayerAvatar photo={prop.image_url} team={prop.team} className="w-10 h-10" />
           <div>
             <Link
-              to={`/trends?player=${encodeURIComponent(prop.player_name)}`}
+              to={`/?player=${encodeURIComponent(prop.player_name)}&prop=${prop.prop_type}`}
               className="font-semibold text-sm text-foreground hover:text-primary transition-colors"
             >
               {prop.player_name}
@@ -112,7 +112,8 @@ function PickCard({ prop }) {
   );
 }
 
-export default function AIPicks() {
+// Rendered as the "AI Picks" tab on the Props page.
+export default function AIPicksPanel() {
   const [allProps, setAllProps] = useState([]);
   const [isLive, setIsLive]     = useState(false);
   const [loading, setLoading]   = useState(true);
@@ -183,19 +184,13 @@ export default function AIPicks() {
   const hasAny = buckets.GREEN.length > 0 || buckets.YELLOW.length > 0;
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl md:text-3xl font-bold text-foreground flex items-center gap-2">
-          <Sparkles className="w-7 h-7 text-primary" />
-          AI Pick Recommendations
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1 flex items-center gap-1.5">
-          {isLive
-            ? <><Wifi className="w-3.5 h-3.5 text-primary" /><span className="text-primary font-medium">Live · Over &amp; Under picks ranked by model edge</span></>
-            : <><WifiOff className="w-3.5 h-3.5" />No live data</>
-          }
-        </p>
-      </div>
+    <div className="space-y-5">
+      <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+        {isLive
+          ? <><Wifi className="w-3 h-3 text-primary" />Only props where the model finds a real edge, ranked by edge size</>
+          : <><WifiOff className="w-3 h-3" />No live data</>
+        }
+      </p>
 
       {!hasAny && (
         <div className="text-center py-20 text-muted-foreground">

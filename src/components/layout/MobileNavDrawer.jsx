@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
-  Zap, Sparkles, TrendingUp, GitCompare, Trophy, ArrowUpDown,
+  Zap, TrendingUp, Trophy,
   Activity, Layers, ClipboardList, Bell, User, Search, X
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -11,8 +11,7 @@ const navSections = [
   {
     title: 'Betting & Live Props',
     items: [
-      { path: '/', label: 'Props', icon: Zap, badge: 'LIVE' },
-      { path: '/ai-picks', label: 'AI Picks', icon: Sparkles, badge: 'AI MODEL', badgeColor: 'bg-primary/20 text-primary border-primary/30' },
+      { path: '/', label: 'Props & AI Picks', icon: Zap, badge: 'LIVE' },
       { path: '/parlay', label: 'Parlay Builder', icon: Layers },
       { path: '/odds', label: 'Live Odds', icon: Activity },
       { path: '/history', label: 'Prop History', icon: ClipboardList },
@@ -21,10 +20,8 @@ const navSections = [
   {
     title: 'Fantasy & Trends',
     items: [
-      { path: '/start-sit', label: 'Start/Sit Tool', icon: Trophy, badge: 'FANTASY', badgeColor: 'bg-amber-500/20 text-amber-400 border-amber-500/30' },
-      { path: '/trend-engine', label: 'Trend Engine', icon: ArrowUpDown, badge: 'NEW', badgeColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' },
-      { path: '/trends', label: 'Streaks & Trends', icon: TrendingUp },
-      { path: '/compare', label: 'Player Compare', icon: GitCompare },
+      { path: '/start-sit', label: 'Start/Sit & Compare', icon: Trophy, badge: 'FANTASY', badgeColor: 'bg-amber-500/20 text-amber-400 border-amber-500/30' },
+      { path: '/trends', label: 'Trends & Streaks', icon: TrendingUp },
     ],
   },
   {
@@ -67,7 +64,7 @@ export default function MobileNavDrawer({ isOpen, onClose }) {
     const q = search.trim();
     if (!q) return;
     onClose();
-    navigate(`/trends?player=${encodeURIComponent(q)}`);
+    navigate(`/?q=${encodeURIComponent(q)}`);
     setSearch('');
   };
 

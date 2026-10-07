@@ -8,14 +8,11 @@ import { AuthProvider, useAuth } from '@/lib/AuthContext';
 import { ParlayProvider } from '@/lib/ParlayContext';
 import AppLayout from '@/components/layout/AppLayout';
 import Props from '@/pages/Props.jsx';
-import Trends from '@/pages/Trends.jsx';
 import Login from '@/pages/Login.jsx';
 import ParlayBuilder from '@/pages/ParlayBuilder.jsx';
 import Alerts from '@/pages/Alerts';
 import Profile from '@/pages/Profile.jsx';
-import Compare from '@/pages/Compare';
 import LiveOdds from '@/pages/LiveOdds';
-import AIPicks from '@/pages/AIPicks.jsx';
 import PropHistory from '@/pages/PropHistory.jsx';
 import StartSit from '@/pages/StartSit.jsx';
 import TrendEngine from '@/pages/TrendEngine.jsx';
@@ -46,18 +43,19 @@ const AuthenticatedApp = () => {
     <Routes>
       <Route element={<AppLayout />}>
         <Route path="/" element={<Props />} />
-        <Route path="/trends" element={<Trends />} />
+        <Route path="/trends" element={<TrendEngine />} />
         <Route path="/parlay" element={<ParlayBuilder />} />
         <Route path="/alerts" element={<Alerts />} />
         <Route path="/profile" element={<Profile />} />
-        <Route path="/compare" element={<Compare />} />
         <Route path="/odds" element={<LiveOdds />} />
-        <Route path="/ai-picks" element={<AIPicks />} />
         <Route path="/history" element={<PropHistory />} />
         <Route path="/start-sit" element={<StartSit />} />
-        <Route path="/trend-engine" element={<TrendEngine />} />
+        {/* Merged pages — old links land on the matching tab */}
+        <Route path="/ai-picks" element={<Navigate to="/?tab=ai" replace />} />
+        <Route path="/compare" element={<Navigate to="/start-sit?tab=compare" replace />} />
+        <Route path="/trend-engine" element={<Navigate to="/trends" replace />} />
         <Route path="/live-odds" element={<Navigate to="/odds" replace />} />
-        <Route path="/streaks" element={<Navigate to="/trends" replace />} />
+        <Route path="/streaks" element={<Navigate to="/trends?tab=streaks" replace />} />
         <Route path="*" element={<PageNotFound />} />
       </Route>
     </Routes>
