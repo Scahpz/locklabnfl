@@ -369,17 +369,37 @@ function gradeWithContext(prop) {
     category:        'rest',
   });
 
-  if (isReturning) {
+  const isDoubtful = ownInjStatus.includes('doubt');
+  if (isReturning || isDoubtful) {
     const statusLabel = ownInjStatus.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
     criteria.push({
       label:           `Injury Status: ${statusLabel}`,
-      detail:          `Listed as ${statusLabel} — may play on a snap limit or be a late scratch`,
+      detail:          isDoubtful
+        ? `Listed as Doubtful — likely inactive; if he plays it's on a reduced role`
+        : `Listed as ${statusLabel} — may play on a snap limit or be a late scratch`,
       pass:            false,
-      continuousScore: 0.2,
-      weight:          14,
+      continuousScore: isDoubtful ? 0.05 : 0.2,
+      weight:          isDoubtful ? 20 : 14,
       available:       true,
       category:        'rest',
     });
+  } else if (prop.injury_key === 'returning') {
+    criteria.push({
+      label: 'Injury Status: Returning', detail: prop.injury_reasons?.[0] ?? 'Back from injury — possible snap limit',
+      pass: false, continuousScore: 0.35, weight: 8, available: true, category: 'rest',
+    });
+  }
+
+  // Teammate / opponent injuries from Sleeper (see injuries.js): next-man-up
+  // bumps help the OVER, a backup QB hurts pass catchers.
+  const injReasons = prop.injury_reasons ?? [];
+  const roleBump = injReasons.find(r => /next man up|expanded role/i.test(r));
+  const qbOut    = injReasons.find(r => /^QB .* is out/i.test(r));
+  if (roleBump) {
+    criteria.push({ label: 'Teammate Injury: Role Up', detail: roleBump, pass: true, continuousScore: 0.8, weight: 10, available: true, category: 'usage' });
+  }
+  if (qbOut) {
+    criteria.push({ label: 'Teammate Injury: QB Out', detail: qbOut, pass: false, continuousScore: 0.25, weight: 10, available: true, category: 'usage' });
   }
 
   // ── 10. WEATHER (QB & WR props weighted highest) ─────────────────────────────

@@ -1,5 +1,6 @@
 import { TEAM_STATS, NFL_LEAGUE_AVGS } from '@/lib/teamStats';
 import { getLeagueSettings } from '@/lib/leagueSettings';
+import { normalizeInjury, INJURY_META } from '@/lib/injuries';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -110,7 +111,6 @@ export function fantasyScore(player, prop, settings) {
   const propType   = prop.prop_type    ?? 'receiving_yards';
   const opponent   = player.opponent   ?? '';
   const depthOrder = player.depth_chart_order ?? (player.is_starter ? 1 : 99);
-  const injStatus  = (player.injury_status ?? 'healthy').toLowerCase();
   const gameTotal  = prop.game_total   ?? 45.5;
   const isHome     = prop.is_home      ?? false;
 
@@ -160,6 +160,12 @@ export function fantasyScore(player, prop, settings) {
 
   // ── TIER 2 – Matchup (20 pts) ─────────────────────────────────────────────
 
+  // D/ST gets its own matchup model (opponent offense, pressure/turnovers, implied
+  // points, injuries both sides) — the yards-allowed tables below don't apply.
+  if (position === 'DEF') {
+    return finishScore(player, prop, s, criteria, tier1, projFPBase, dstMatchup(player, criteria));
+  }
+
   const defStatKey   = getDefStatKey(propType, position);
   const teamDefStats = (defStatKey && opponent) ? TEAM_STATS[opponent] ?? null : null;
   const oppStat      = teamDefStats ? teamDefStats[defStatKey] : null;
@@ -183,16 +189,96 @@ export function fantasyScore(player, prop, settings) {
 
   const tier2 = defScore + totalScore + homeScore;
 
+  return finishScore(player, prop, s, criteria, tier1, projFPBase, { tier2 });
+}
+
+// ─── D/ST matchup ─────────────────────────────────────────────────────────────
+// player.dst_context comes from the season outlook (attachOutlookContext):
+//   oppVsDst  — FP fantasy defenses score per game against this opponent's offense
+//   own / opp — per-game sacks + takeaways for this defense / allowed by that offense
+// player.opp_implied_pts comes from the betting total + spread; dst_injuries from injuries.js.
+function dstMatchup(player, criteria) {
+  const ctx = player.dst_context;
+  const opp = player.opponent ?? '';
+  const pct = (v, max) => parseFloat((clamp(v, 0, 1) * max).toFixed(2));
+
+  // Opponent offense vs fantasy defenses (8)
+  let offScore = 0.5, offTip = 'Season data loading — neutral';
+  if (ctx?.oppVsDst) {
+    const { allowed, leagueAvg, rank, teams } = ctx.oppVsDst;
+    offScore = 0.5 + (allowed - leagueAvg) / (Math.abs(leagueAvg) + 5) * 1.2;
+    offTip = `${opp} offense gives up ${allowed.toFixed(1)} FP/g to D/STs (#${rank} of ${teams}, avg ${leagueAvg.toFixed(1)})`;
+  }
+  criteria.push({ label: 'Opponent Offense', score: pct(offScore, 8), maxScore: 8, tip: offTip });
+
+  // Sacks / turnover potential (6)
+  let ptScore = 0.5, ptTip = 'Season data loading — neutral';
+  if (ctx?.own && ctx?.opp && ctx.avg) {
+    const sacks = (ctx.own.sacks + ctx.opp.sacks_allowed) / 2;
+    const tos   = (ctx.own.takeaways + ctx.opp.giveaways) / 2;
+    ptScore = 0.5 + 0.5 * ((sacks / (ctx.avg.sacks || 1) - 1) + (tos / (ctx.avg.takeaways || 1) - 1));
+    ptTip = `~${sacks.toFixed(1)} sacks & ${tos.toFixed(1)} takeaways expected (avg ${ctx.avg.sacks.toFixed(1)} / ${ctx.avg.takeaways.toFixed(1)})`;
+  }
+  criteria.push({ label: 'Sacks / Turnovers', score: pct(ptScore, 6), maxScore: 6, tip: ptTip });
+
+  // Implied points allowed (4) — fewer opponent points = more D/ST points
+  const implied = player.opp_implied_pts;
+  const impScore = implied != null ? 0.5 + (22 - implied) / 12 : 0.5;
+  criteria.push({
+    label: 'Implied Points Allowed', score: pct(impScore, 4), maxScore: 4,
+    tip: implied != null ? `${opp} implied for ${implied.toFixed(1)} pts (from total & spread)` : 'No betting line yet — neutral',
+  });
+
+  const isHome = player.props?.[0]?.is_home ?? false;
+  const homeScore = (isHome ? 0.65 : 0.35) * 2;
+  criteria.push({ label: 'Home/Away', score: parseFloat(homeScore.toFixed(2)), maxScore: 2, tip: isHome ? 'Home game' : 'Away game' });
+
+  const tier2 = criteria.slice(-4).reduce((a, c) => a + c.score, 0);
+
+  // Injuries both sides (10) + defense quality (5) replace role/usage, which don't apply to D/ST
+  const inj = player.dst_injuries ?? { own_out: [], opp_qb_out: null };
+  const injScoreRaw = 0.6 - Math.min(inj.own_out.length, 3) * 0.12 + (inj.opp_qb_out ? 0.3 : 0);
+  const injTip = [
+    inj.own_out.length ? `Missing ${inj.own_out.slice(0, 3).join(', ')}` : 'No defensive starters out',
+    inj.opp_qb_out ? `${opp} QB ${inj.opp_qb_out} out` : null,
+  ].filter(Boolean).join(' · ');
+  const injC = { label: 'Injuries (both sides)', score: pct(injScoreRaw, 10), maxScore: 10, tip: injTip };
+
+  let qScore = 0.5, qTip = 'Season data loading — neutral';
+  if (ctx?.own && ctx.avg) {
+    qScore = 0.5 + (ctx.avg.pts_allowed - ctx.own.pts_allowed) / 14;
+    qTip = `Allows ${ctx.own.pts_allowed.toFixed(1)} pts/g (avg ${ctx.avg.pts_allowed.toFixed(1)})`;
+  }
+  const qC = { label: 'Defense Quality', score: pct(qScore, 5), maxScore: 5, tip: qTip };
+
+  return { tier2, tier3Override: { criteria: [injC, qC], score: injC.score + qC.score } };
+}
+
+// Tiers 3–4, format bonus, verdict and floor/ceiling — shared by every position.
+// `dst` carries D/ST-specific tier-2/3 results so they slot in without forking the model.
+function finishScore(player, prop, s, criteria, tier1, projFPBase, { tier2, tier3Override = null }) {
+  const position   = player.position   ?? 'WR';
+  const depthOrder = player.depth_chart_order ?? (player.is_starter ? 1 : 99);
+  const injKey     = player.injury_key ?? normalizeInjury(player.injury_status);
+  const snapPct     = prop.snap_pct     ?? null;
+  const targetShare = prop.target_share ?? null;
+
   // ── TIER 3 – Health / Role (15 pts) ──────────────────────────────────────
 
-  let injMult = 1.0;
-  if      (injStatus.includes('out'))          injMult = 0.0;
-  else if (injStatus.includes('doubtful'))     injMult = 0.1;
-  else if (injStatus.includes('questionable')) injMult = 0.45;
+  // Normalized status — previously IR / PUP / suspended matched none of the
+  // checks and scored as fully healthy.
+  const INJ_HEALTH = { out: 0, ir: 0, pup: 0, sus: 0, doubtful: 0.1, questionable: 0.45, returning: 0.8 };
+  const injMult  = injKey ? (INJ_HEALTH[injKey] ?? 1) : 1;
+  const injReasons = player.injury_reasons ?? [];
+  if (tier3Override) {
+    criteria.push(...tier3Override.criteria);
+    const tier3 = tier3Override.score;
+    return assemble(player, s, criteria, tier1, tier2, tier3, projFPBase, position);
+  }
   const injScore = injMult * 8;
   criteria.push({
     label: 'Injury Status', score: parseFloat(injScore.toFixed(2)), maxScore: 8,
-    tip: injStatus.charAt(0).toUpperCase() + injStatus.slice(1) || 'Healthy',
+    tip: [injKey ? INJURY_META[injKey].long : 'Healthy', ...injReasons].join(' · '),
   });
 
   const roleMulti = depthOrder === 1 ? 1.0 : depthOrder === 2 ? 0.5 : 0.15;
@@ -202,8 +288,6 @@ export function fantasyScore(player, prop, settings) {
     tip: depthOrder === 1 ? 'Confirmed starter' : depthOrder === 2 ? 'Backup (depth 2)' : 'Deep depth chart',
   });
 
-  const targetShare = prop.target_share ?? null;
-  const snapPct     = prop.snap_pct     ?? null;
   // Fallback: estimate from player-level volume data when prop doesn't carry usage fields
   // (happens with stale cache or POS_DEFAULTS props). This keeps Grade Breakdown and
   // Player Snapshot showing the same value.
@@ -255,6 +339,10 @@ export function fantasyScore(player, prop, settings) {
   criteria.push({ label: 'Trap Warning', score: parseFloat(trapScore.toFixed(2)), maxScore: 2, tip: prop.trap_warning ? 'TRAP: public fade' : 'No trap warning' });
 
   const tier4 = restScore + trapScore;
+  return assemble(player, s, criteria, tier1, tier2, tier3, projFPBase, position, tier4);
+}
+
+function assemble(player, s, criteria, tier1, tier2, tier3, projFPBase, position, tier4 = 5) {
 
   // ── Format Bonus ──────────────────────────────────────────────────────────
   const fmtBonus = formatBonus(position, s);

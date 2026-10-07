@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 import { Lock, AlertTriangle, Award, Zap, ChevronDown, ChevronUp, Check, TrendingUp, TrendingDown } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import TeamLogo from '@/components/common/TeamLogo';
+import InjuryTag from '@/components/common/InjuryTag';
 import { useParlay } from '@/lib/ParlayContext';
 import VerdictBadge from '@/components/props/VerdictBadge';
 import PropGradeChecklist from '@/components/props/PropGradeChecklist';
@@ -150,6 +151,7 @@ export default function RankedPropCard({ prop, rank, aiVerdict, aiLoading, activ
                 className="font-semibold text-sm text-foreground hover:text-primary transition-colors">
                 {baseProp.player_name}
               </Link>
+              <InjuryTag player={baseProp} className="ml-1.5 inline-block align-middle" />
               <p className="text-[11px] text-muted-foreground/70 mt-0.5">{baseProp.team} vs {baseProp.opponent} · {baseProp.position}</p>
             </div>
           </div>

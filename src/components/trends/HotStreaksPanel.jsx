@@ -6,6 +6,8 @@ import { loadSleeperHistory, computeAnalyticsFromSleeper } from '@/lib/sleeperHi
 import { isTdProp } from '@/lib/grading';
 import { formatMarket } from '@/lib/propLabels';
 import PlayerAvatar from '@/components/common/PlayerAvatar';
+import InjuryTag from '@/components/common/InjuryTag';
+import { loadInjuryIndexByName, injuryForName } from '@/lib/injuries';
 import { cn } from '@/lib/utils';
 
 const MIN_GAMES   = 5;
@@ -35,6 +37,7 @@ export default function HotStreaksPanel({ position = 'All' }) {
   const [props, setProps]     = useState(null);
   const [mode, setMode]       = useState('hot');
   const [search, setSearch]   = useState('');
+  const injuryIndex = useMemo(() => loadInjuryIndexByName(), []);
 
   useEffect(() => {
     Promise.all([fetchLiveProps(), loadSleeperHistory().catch(() => null)])
@@ -130,7 +133,10 @@ export default function HotStreaksPanel({ position = 'All' }) {
               <span className="w-6 text-xs font-bold text-muted-foreground tabular-nums flex-shrink-0">{i + 1}</span>
               <PlayerAvatar photo={prop.image_url} team={prop.team} className="w-10 h-10 flex-shrink-0" />
               <div className="flex-1 min-w-0">
-                <div className="text-[15px] font-semibold text-foreground truncate">{prop.player_name}</div>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="text-[15px] font-semibold text-foreground truncate">{prop.player_name}</span>
+                  {(() => { const inj = injuryForName(injuryIndex, prop.player_name); return inj ? <InjuryTag player={inj} /> : null; })()}
+                </div>
                 <div className="text-[11px] text-muted-foreground truncate">
                   {formatMarket(prop.prop_type)} {mode === 'hot' ? 'O' : 'U'} {prop.line} · {prop.team}{prop.opponent ? ` vs ${prop.opponent}` : ''}
                 </div>

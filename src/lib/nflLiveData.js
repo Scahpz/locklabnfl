@@ -1,7 +1,9 @@
+import { applyInjuryContext, buildTeamDefenseInjuries } from './injuries';
+
 // Fetches live NFL roster (Sleeper API) + per-player projections + schedule/totals (ESPN).
 // Returns a player array with real projected FP attached, compatible with fantasyScore().
 
-const CACHE_KEY = 'locklab_nfl_live_v14'; // v14: no synthetic random props; real stats only
+const CACHE_KEY = 'locklab_nfl_live_v15'; // v15: D/ST + K included, injury-adjusted projections, spreads
 const CACHE_TTL = 4 * 60 * 60 * 1000;    // 4h
 
 const ESPN_NORM = { WSH: 'WAS' };
@@ -12,11 +14,11 @@ const BAD_STATUS = new Set([
   'Physically Unable to Perform', 'Inactive',
 ]);
 
-const POSITIONS = new Set(['QB', 'RB', 'WR', 'TE', 'DEF']);
+const POSITIONS = new Set(['QB', 'RB', 'WR', 'TE', 'K', 'DEF']);
 
 // Max depth-chart slot to include per position — keeps the list to active-roster players
 // and avoids UDFA / camp bodies with no real fantasy value.
-const MAX_DEPTH = { QB: 3, RB: 4, WR: 5, TE: 3, DEF: 1 };
+const MAX_DEPTH = { QB: 3, RB: 4, WR: 5, TE: 3, K: 1, DEF: 1 };
 
 const INT_TYPES = new Set(['passing_tds', 'rushing_tds', 'receiving_tds', 'receptions']);
 
@@ -184,10 +186,17 @@ async function fetchESPNSchedule() {
   return { events, seasonYear, weekNum };
 }
 
+// ESPN odds.details looks like "KC -3.5" (favorite + spread) or "EVEN".
+function parseSpread(details) {
+  const m = String(details ?? '').match(/^([A-Z]{2,3})\s+(-?\d+(?:\.\d+)?)/);
+  return m ? { fav: normESPN(m[1]), points: Math.abs(parseFloat(m[2])) } : null;
+}
+
 function buildScheduleMaps({ events = [] } = {}) {
   const teamToOpp   = {};
   const teamToTotal = {};
   const teamIsHome  = {};
+  const teamImplied = {}; // team → implied points scored (from total + spread)
   for (const event of events) {
     const comp = event.competitions?.[0];
     if (!comp) continue;
@@ -200,8 +209,13 @@ function buildScheduleMaps({ events = [] } = {}) {
     teamIsHome[h] = true;  teamIsHome[a] = false;
     const total = comp.odds?.[0]?.overUnder ?? 45.5;
     teamToTotal[h] = total;  teamToTotal[a] = total;
+    const spread = parseSpread(comp.odds?.[0]?.details);
+    const half = total / 2;
+    const adj = spread ? spread.points / 2 : 0;
+    teamImplied[h] = spread?.fav === h ? half + adj : spread ? half - adj : half;
+    teamImplied[a] = spread?.fav === a ? half + adj : spread ? half - adj : half;
   }
-  return { teamToOpp, teamToTotal, teamIsHome };
+  return { teamToOpp, teamToTotal, teamIsHome, teamImplied };
 }
 
 // Estimate PPR fantasy points from default props when no Sleeper projection exists.
@@ -215,12 +229,15 @@ function estimateFPPPR(props) {
   return parseFloat((passing * 0.04 + rushing * 0.1 + receiving * 0.1 + rec * 1.0 + fgAtt * 2).toFixed(1));
 }
 
-function buildPlayers(sleeperRaw, projections, { teamToOpp, teamToTotal, teamIsHome }) {
+function buildPlayers(sleeperRaw, projections, { teamToOpp, teamToTotal, teamIsHome, teamImplied = {} }) {
   const players = [];
 
   for (const [id, p] of Object.entries(sleeperRaw)) {
     if (!POSITIONS.has(p.position)) continue;
-    if (!p.team || !p.full_name) continue;
+    // Team defenses have no full_name in Sleeper ("Kansas City" + "Chiefs") — without
+    // this fallback every D/ST was silently dropped and the D/ST tab was empty.
+    const fullName = p.full_name || (p.position === 'DEF' && p.first_name ? `${p.first_name} ${p.last_name} D/ST` : null);
+    if (!p.team || !fullName) continue;
     if (p.active === false) continue;
     if (BAD_STATUS.has(p.status ?? '')) continue;
     // Exclude camp bodies / UDFAs beyond reasonable roster depth.
@@ -272,13 +289,18 @@ function buildPlayers(sleeperRaw, projections, { teamToOpp, teamToTotal, teamIsH
 
     players.push({
       id,
-      player_name:         p.full_name,
+      player_name:         fullName,
       team,
       opponent,
       position:            p.position,
-      photo_url:           `https://sleepercdn.com/content/nfl/players/thumb/${id}.jpg`,
-      is_starter:          p.depth_chart_order === 1,
-      depth_chart_order:   p.depth_chart_order ?? 99,
+      photo_url:           p.position === 'DEF'
+        ? `https://sleepercdn.com/images/team_logos/nfl/${team.toLowerCase()}.png`
+        : `https://sleepercdn.com/content/nfl/players/thumb/${id}.jpg`,
+      is_starter:          p.position === 'DEF' || p.depth_chart_order === 1,
+      depth_chart_order:   p.position === 'DEF' ? 1 : (p.depth_chart_order ?? 99),
+      implied_pts:         teamImplied[team] ?? null,
+      opp_implied_pts:     teamImplied[opponent] ?? null,
+      game_total:          gameTotal,
       injury_status:       injStatus,
       injury_note:         injNote,
       has_real_projection: hasRealData,
@@ -290,6 +312,9 @@ function buildPlayers(sleeperRaw, projections, { teamToOpp, teamToTotal, teamIsH
       proj_rush_yd:        proj?.rush_yd  ?? null,
       proj_rec_yd:         proj?.rec_yd   ?? null,
       proj_pass_yd:        proj?.pass_yd  ?? null,
+      proj_def:            p.position === 'DEF' && proj ? {
+        sacks: proj.sack ?? null, ints: proj.int ?? null, fum_rec: proj.fum_rec ?? null, pts_allow: proj.pts_allow ?? null,
+      } : null,
       props,
     });
   }
@@ -304,11 +329,25 @@ function buildPlayers(sleeperRaw, projections, { teamToOpp, teamToTotal, teamIsH
   return players;
 }
 
+// Compact id → { name, position, team, injury } for every fantasy-relevant player,
+// including IR / deep-bench guys the rankings skip — so league rosters can always
+// show a name even when a player has no projection.
+function buildRosterIndex(sleeperRaw) {
+  const idx = {};
+  for (const [id, p] of Object.entries(sleeperRaw)) {
+    if (!POSITIONS.has(p.position)) continue;
+    const name = p.full_name || (p.position === 'DEF' ? `${p.first_name} ${p.last_name} D/ST` : null);
+    if (!name) continue;
+    idx[id] = { n: name, p: p.position, t: p.team ?? null, i: p.injury_status ?? null };
+  }
+  return idx;
+}
+
 export async function fetchLivePlayers() {
   try {
     const cached = JSON.parse(localStorage.getItem(CACHE_KEY) ?? '{}');
     if (cached.ts && Date.now() - cached.ts < CACHE_TTL) {
-      return { players: cached.players, hasSchedule: cached.hasSchedule, week: cached.week };
+      return { players: cached.players, hasSchedule: cached.hasSchedule, week: cached.week, index: cached.index ?? {} };
     }
   } catch {}
 
@@ -331,19 +370,28 @@ export async function fetchLivePlayers() {
   const projections = await fetchSleeperProjections(season, weekNum);
 
   const players = buildPlayers(sleeperResult.value, projections, schedMaps);
+  // Injury context: own projection, next-man-up, QB-out, opponent defensive starters.
+  // "Returning" tags are layered on later from the season outlook (see StartSit).
+  applyInjuryContext(players, { teamDefense: buildTeamDefenseInjuries(sleeperResult.value) });
+
+  const index = buildRosterIndex(sleeperResult.value);
 
   try {
     localStorage.setItem(CACHE_KEY, JSON.stringify({
-      ts: Date.now(), players, hasSchedule, week: weekNum,
+      ts: Date.now(), players, hasSchedule, week: weekNum, index,
     }));
-  } catch {}
+  } catch {
+    // Quota exceeded on some phones — the index is the nice-to-have part
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), players, hasSchedule, week: weekNum })); } catch {}
+  }
 
-  return { players, hasSchedule, week: weekNum };
+  return { players, hasSchedule, week: weekNum, index };
 }
 
 export function clearLiveCache() {
   try {
     localStorage.removeItem(CACHE_KEY);
+    localStorage.removeItem('locklab_nfl_live_v14');
     localStorage.removeItem('locklab_nfl_live_v12');
     localStorage.removeItem('locklab_nfl_live_v11');
     localStorage.removeItem('locklab_nfl_live_v10');

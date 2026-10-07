@@ -13,6 +13,7 @@ import { buildNameToIdFull, normName } from './propsNoBackend';
 
 const STORAGE_KEY = 'locklab_nfl_league_connection';
 const STALE_MS    = 6 * 60 * 60 * 1000; // rosters change — re-sync after 6h
+const NON_STARTING_SLOTS = new Set(['BN', 'IR', 'TAXI', 'RES']);
 
 export const PLATFORMS = {
   sleeper: { label: 'Sleeper' },
@@ -114,6 +115,8 @@ async function fetchSleeperLeague(leagueId) {
   return {
     name:   league.name || `Sleeper League ${leagueId}`,
     season: Number(league.season) || currentSeason(),
+    // Starting lineup slots, e.g. ["QB","RB","RB","WR","WR","TE","FLEX","K","DEF"]
+    slots:  positions.filter(sl => !NON_STARTING_SLOTS.has(sl)),
     settings: toLockLabSettings({
       recPts:    s.rec,
       passTDPts: s.pass_td,
@@ -133,6 +136,7 @@ async function fetchSleeperLeague(leagueId) {
         name:      u?.metadata?.team_name || u?.display_name || `Team ${r.roster_id}`,
         owner:     u?.display_name || '',
         playerIds: (r.players || []).map(String),
+        starters:  (r.starters || []).filter(id => id && id !== '0').map(String),
         unmatched: 0,
       };
     }),
@@ -172,14 +176,20 @@ async function fetchEspnLeague(leagueId, season, creds = {}) {
       superflex:  data.superflex,
       leagueSize: data.size,
     }),
+    slots:       data.slots ?? [],
+    currentWeek: data.current_week ?? null,
+    schedule:    data.schedule ?? [],
     teams: data.teams.map(t => {
       const ids = [];
+      const starters = [];
       let unmatched = 0;
       for (const p of t.players) {
         const id = p.position === 'DEF' ? p.team : byKey[matchKey(p.name)];
-        if (id) ids.push(String(id)); else unmatched++;
+        if (!id) { unmatched++; continue; }
+        ids.push(String(id));
+        if (p.slot && p.slot !== 'BN' && p.slot !== 'IR') starters.push(String(id));
       }
-      return { id: t.id, name: t.name, owner: t.owner, playerIds: ids, unmatched };
+      return { id: t.id, name: t.name, owner: t.owner, playerIds: ids, starters, unmatched };
     }),
   };
 }
@@ -216,7 +226,10 @@ export async function refreshLeagueConnection(conn = getLeagueConnection()) {
     espnS2:   conn.creds?.espnS2,
     swid:     conn.creds?.swid,
   });
-  const next = { ...conn, name: fresh.name, teams: fresh.teams, syncedAt: Date.now() };
+  const next = {
+    ...conn, name: fresh.name, teams: fresh.teams, slots: fresh.slots,
+    schedule: fresh.schedule, currentWeek: fresh.currentWeek, syncedAt: Date.now(),
+  };
   saveLeagueConnection(next);
   return next;
 }
@@ -227,4 +240,37 @@ export function getMyTeam(conn) {
 
 export function getRosteredIds(conn) {
   return new Set((conn?.teams ?? []).flatMap(t => t.playerIds));
+}
+
+// Fallback lineup when a league doesn't report slots (older saved connections)
+export const DEFAULT_SLOTS = ['QB', 'RB', 'RB', 'WR', 'WR', 'TE', 'FLEX', 'K', 'DEF'];
+
+/**
+ * This week's head-to-head for my team. Returns
+ *   { week, opponentTeamId, myStarters[], oppStarters[] } or null (bye / no schedule).
+ * Sleeper: live from /matchups/{week} (starters as currently set).
+ * ESPN:    from the schedule + lineup slots captured at the last sync.
+ */
+export async function fetchWeekMatchup(conn, week) {
+  if (!conn?.myTeamId) return null;
+  if (conn.platform === 'sleeper') {
+    let rows;
+    try { rows = await getJson(`https://api.sleeper.app/v1/league/${conn.leagueId}/matchups/${week}`); }
+    catch { throw new Error("Couldn't load this week's matchup from Sleeper."); }
+    const mine = rows?.find(r => String(r.roster_id) === String(conn.myTeamId));
+    if (!mine?.matchup_id) return null;
+    const opp = rows.find(r => r.matchup_id === mine.matchup_id && r.roster_id !== mine.roster_id);
+    if (!opp) return null;
+    const clean = arr => (arr || []).filter(id => id && id !== '0').map(String);
+    return { week, opponentTeamId: String(opp.roster_id), myStarters: clean(mine.starters), oppStarters: clean(opp.starters) };
+  }
+  if (conn.platform === 'espn') {
+    const wk = conn.currentWeek ?? week;
+    const m = (conn.schedule ?? []).find(g => g.week === wk && (g.home === conn.myTeamId || g.away === conn.myTeamId));
+    if (!m?.away) return null;
+    const opponentTeamId = m.home === conn.myTeamId ? m.away : m.home;
+    const team = id => conn.teams.find(t => t.id === id);
+    return { week: wk, opponentTeamId, myStarters: team(conn.myTeamId)?.starters ?? [], oppStarters: team(opponentTeamId)?.starters ?? [] };
+  }
+  return null;
 }

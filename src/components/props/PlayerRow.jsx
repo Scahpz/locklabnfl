@@ -3,6 +3,7 @@ import { ChevronDown, TrendingUp, TrendingDown, BookmarkPlus, Check, ArrowUpRigh
 import { cn } from '@/lib/utils';
 import { getNFLWeek } from '@/lib/nflWeek';
 import TeamLogo from '@/components/common/TeamLogo';
+import InjuryTag from '@/components/common/InjuryTag';
 import PropGradeChecklist from '@/components/props/PropGradeChecklist';
 import { gradeProp } from '@/lib/grading';
 import { calcEVVerdict, TIER_CONFIG } from '@/lib/verdict';
@@ -144,6 +145,7 @@ export default function PlayerRow({ playerName, props, allPlayerProps, rank, tot
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5 flex-wrap">
               <p className="font-bold text-sm text-foreground leading-tight">{playerName}</p>
+              <InjuryTag player={activeProp} />
               {activeProp.position && (
                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-primary/15 text-primary border border-primary/20 flex-shrink-0">
                   {activeProp.position}

@@ -8,6 +8,7 @@ import { mockPlayers, isDemoMode } from '@/lib/mockData';
 import PlayerAvatar from '@/components/common/PlayerAvatar';
 import TeamLogo from '@/components/common/TeamLogo';
 import PlayerBreakdownModal from '@/components/PlayerBreakdownModal';
+import InjuryTag from '@/components/common/InjuryTag';
 import HotStreaksPanel from '@/components/trends/HotStreaksPanel';
 import PageTabs, { useTabParam } from '@/components/common/PageTabs';
 import { cn } from '@/lib/utils';
@@ -66,6 +67,7 @@ function TrendPlayerRow({ entry, highlightMetric, rank, onOpen }) {
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm font-semibold text-foreground truncate">{trend.player_name}</span>
+          {player && <InjuryTag player={player} />}
           <span className="text-[10px] bg-white/8 text-muted-foreground px-1.5 py-0.5 rounded font-medium">
             {trend.position}
           </span>

@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
-  Trophy, TrendingUp, ChevronDown, X, Search, Plus,
+  Trophy, TrendingUp, Users, ChevronDown, X, Search, Plus,
   Settings, Shield, Zap, AlertTriangle, Link2, Loader2, RefreshCw, Wifi, GitCompare,
 } from 'lucide-react';
 import { fantasyScore, compareStartSit, rankPlayers, rankWaiverWire, computeConfidence } from '@/lib/fantasyScoring';
@@ -13,6 +13,12 @@ import TeamLogo from '@/components/common/TeamLogo';
 import PlayerAvatar from '@/components/common/PlayerAvatar';
 import PlayerBreakdownModal from '@/components/PlayerBreakdownModal';
 import LeagueConnectModal from '@/components/LeagueConnectModal';
+import InjuryTag from '@/components/common/InjuryTag';
+import RosCard from '@/components/startsit/RosCard';
+import MyTeamPanel from '@/components/myteam/MyTeamPanel';
+import ScheduleChartModal from '@/components/startsit/ScheduleChartModal';
+import { fetchOutlook, attachOutlookContext } from '@/lib/fantasyOutlook';
+import { buildRosRankings } from '@/lib/rosRankings';
 import PageTabs, { useTabParam } from '@/components/common/PageTabs';
 import {
   getLeagueConnection, refreshLeagueConnection, isConnectionStale, getMyTeam, getRosteredIds,
@@ -436,6 +442,8 @@ function PlayerRankCard({ rank, posRank, player, prop, score, trend, onCompare, 
   const breakout  = isBreakout(player, prop);
   const mg        = matchupGrade(player.def_rank_vs_pos);
   const reasons   = getMatchupReasons(player, prop);
+  // First injury line that affects this player (own status, next-man-up, QB out…)
+  const injuryNote = player.injury_reasons?.[0] ?? null;
 
   return (
     <div
@@ -457,9 +465,12 @@ function PlayerRankCard({ rank, posRank, player, prop, score, trend, onCompare, 
         </span>
         <PlayerAvatar photo={player.photo_url} team={player.team} className="w-10 h-10 flex-shrink-0" />
         <div className="flex-1 min-w-0">
-          <div className="text-[15px] font-semibold text-foreground truncate">{player.player_name}</div>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="text-[15px] font-semibold text-foreground truncate">{player.player_name}</span>
+            <InjuryTag player={player} />
+          </div>
           <div className="text-[11px] text-muted-foreground truncate">
-            {player.position}{posRank != null ? ` #${posRank}` : ''} · {player.team} {prop?.is_home ? 'vs' : '@'} {player.opponent}
+            {player.position === 'DEF' ? 'D/ST' : player.position}{posRank != null ? ` #${posRank}` : ''} · {player.team} {prop?.is_home ? 'vs' : '@'} {player.opponent}
           </div>
         </div>
         <div className="flex flex-col items-end gap-1 flex-shrink-0">
@@ -472,8 +483,13 @@ function PlayerRankCard({ rank, posRank, player, prop, score, trend, onCompare, 
       </div>
 
       {/* Row 2 — why (only when there's something to say) */}
-      {(mg || breakout || trend || reasons.length > 0) && (
+      {(mg || breakout || trend || reasons.length > 0 || injuryNote) && (
         <div className="flex gap-1.5 flex-wrap">
+          {injuryNote && (
+            <span className="text-[10px] text-amber-300 bg-amber-500/8 border border-amber-500/20 px-1.5 py-0.5 rounded">
+              {injuryNote}
+            </span>
+          )}
           {mg && (
             <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded-md border', mg.bg, mg.color)}>
               Matchup {mg.letter}
@@ -541,6 +557,7 @@ function WaiverCard({ rank, player, prop, score, waiverReason, injuryUpside, isH
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 min-w-0">
             <span className="text-[15px] font-semibold text-foreground truncate">{player.player_name}</span>
+            <InjuryTag player={player} />
             {isHandcuff && (
               <span className="text-[10px] bg-blue-500/15 border border-blue-500/30 text-blue-400 px-1.5 py-0.5 rounded-full font-semibold flex items-center gap-0.5">
                 <Link2 className="w-2.5 h-2.5" />
@@ -622,8 +639,11 @@ function PlayerSlot({ label, player, prop, score, availableProps, onChangeProp, 
       <div className="flex items-center gap-3">
         <PlayerAvatar photo={player.photo_url} team={player.team} className="w-10 h-10" />
         <div>
-          <div className="font-semibold text-foreground text-sm">{player.player_name}</div>
-          <div className="text-[11px] text-muted-foreground">{player.team} · {player.position}</div>
+          <div className="flex items-center gap-1.5">
+            <span className="font-semibold text-foreground text-sm">{player.player_name}</span>
+            <InjuryTag player={player} />
+          </div>
+          <div className="text-[11px] text-muted-foreground">{player.team} · {player.position === 'DEF' ? 'D/ST' : player.position}</div>
         </div>
       </div>
 
@@ -733,7 +753,7 @@ function PlayerPickerModal({ players: allPlayers, onSelect, onClose, excludePlay
     const s = settings || getLeagueSettings();
     return (allPlayers ?? mockPlayers)
       .filter(p => p.id !== excludePlayerId)
-      .filter(p => posFilter === 'all' || p.position === posFilter)
+      .filter(p => posFilter === 'all' || p.position === (posFilter === 'D/ST' ? 'DEF' : posFilter))
       .filter(p =>
         !search.trim() ||
         p.player_name.toLowerCase().includes(search.toLowerCase()) ||
@@ -811,8 +831,9 @@ function PlayerPickerModal({ players: allPlayers, onSelect, onClose, excludePlay
                   <div className="flex items-center gap-1.5">
                     <span className="text-sm font-medium text-foreground truncate">{player.player_name}</span>
                     <span className="text-[10px] bg-white/8 text-muted-foreground px-1.5 py-0.5 rounded font-medium">
-                      {player.position}
+                      {player.position === 'DEF' ? 'D/ST' : player.position}
                     </span>
+                    <InjuryTag player={player} />
                   </div>
                   <div className="text-[11px] text-muted-foreground">
                     {player.team} · {topProp ? `${PROP_LABELS[topProp.prop_type] ?? topProp.prop_type} ${topProp.line}` : ''}
@@ -838,7 +859,7 @@ function PlayerPickerModal({ players: allPlayers, onSelect, onClose, excludePlay
 export default function StartSit() {
   const [settings, setSettings]                   = useState(() => getLeagueSettings());
   const [showSettings, setShowSettings]           = useState(false);
-  const [rankTab, setRankTab]                     = useTabParam('rankings', ['rankings', 'compare', 'waiver']);
+  const [rankTab, setRankTab]                     = useTabParam('rankings', ['rankings', 'compare', 'waiver', 'myteam']);
   const [position, setPosition]                   = useState('QB');
   const [waiverPosition, setWaiverPosition]       = useState('QB');
   const [compareA, setCompareA]                   = useState(null);
@@ -853,6 +874,8 @@ export default function StartSit() {
   const [league, setLeague]                       = useState(() => getLeagueConnection());
   const [showLeague, setShowLeague]               = useState(false);
   const [myTeamOnly, setMyTeamOnly]               = useState(false);
+  const [rankMode, setRankMode]                   = useState('weekly'); // 'weekly' | 'ros'
+  const [scheduleEntry, setScheduleEntry]         = useState(null);
 
   // Rosters change through the week — quietly re-sync a stale connection.
   useEffect(() => {
@@ -883,7 +906,7 @@ export default function StartSit() {
     try {
       if (forceRefresh) clearLiveCache();
       const result = await fetchLivePlayers();
-      setLiveStatus({ loading: false, players: result.players, hasSchedule: result.hasSchedule, week: result.week, error: false });
+      setLiveStatus({ loading: false, players: result.players, hasSchedule: result.hasSchedule, week: result.week, index: result.index ?? {}, error: false });
     } catch {
       setLiveStatus({ loading: false, players: mockPlayers, hasSchedule: false, week: null, error: true });
     }
@@ -898,7 +921,18 @@ export default function StartSit() {
     fetchTrendScores().then(data => setTrendIndex(indexTrendByPlayerId(data))).catch(() => {});
   }, []);
 
-  const activePlayers = liveStatus.players ?? mockPlayers;
+  // Season outlook: D/ST matchup context, returning-from-injury tags, ROS + schedule
+  const [outlook, setOutlook] = useState(null);
+  const [outlookFailed, setOutlookFailed] = useState(false);
+  useEffect(() => {
+    if (isDemoMode()) return;
+    fetchOutlook().then(o => { if (o) setOutlook(o); else setOutlookFailed(true); });
+  }, []);
+
+  const activePlayers = useMemo(
+    () => attachOutlookContext(liveStatus.players ?? mockPlayers, outlook, settings.scoring),
+    [liveStatus.players, outlook, settings.scoring],
+  );
   const isLive = !isDemoMode() && !liveStatus.error && liveStatus.players !== mockPlayers && !liveStatus.loading;
 
   function handleSaveSettings(newSettings) {
@@ -955,6 +989,20 @@ export default function StartSit() {
       player.team.toLowerCase().includes(q)
     );
   }, [rankings, selectedGame, teamFilter, searchQuery, myTeamOnly, myTeam, myTeamIds]);
+
+  const rosByPos = useMemo(
+    () => (outlook ? buildRosRankings(activePlayers, outlook, settings, trendIndex) : {}),
+    [activePlayers, outlook, settings, trendIndex],
+  );
+  const filteredRos = useMemo(() => {
+    let list = rosByPos[apiPosition] ?? [];
+    if (myTeamOnly && myTeam) list = list.filter(e => myTeamIds.has(String(e.player.id)));
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter(e => e.player.player_name.toLowerCase().includes(q) || e.player.team.toLowerCase().includes(q));
+    }
+    return list;
+  }, [rosByPos, apiPosition, myTeamOnly, myTeam, myTeamIds, searchQuery]);
 
   // Build waiver candidates from live activePlayers so matchups + projections
   // always match the Rankings tab instead of stale mock data.
@@ -1134,6 +1182,7 @@ export default function StartSit() {
           { key: 'rankings', label: 'Rankings', icon: TrendingUp },
           { key: 'compare',  label: 'Compare',  icon: GitCompare, count: [compareA, compareB].filter(Boolean).length || null },
           { key: 'waiver',   label: 'Waiver',   icon: Shield },
+          { key: 'myteam',   label: 'My Team',  short: 'Team', icon: Users },
         ]}
       />
 
@@ -1175,8 +1224,23 @@ export default function StartSit() {
         </section>
       )}
 
+      {/* ── My Team ── */}
+      {rankTab === 'myteam' && (
+        <MyTeamPanel
+          league={league}
+          players={activePlayers}
+          index={liveStatus.index}
+          rosByPos={rosByPos}
+          outlook={outlook}
+          trendIndex={trendIndex}
+          settings={settings}
+          week={liveStatus.week ?? outlook?.week}
+          onConnect={() => setShowLeague(true)}
+        />
+      )}
+
       {/* ── Rankings / Waiver Wire ── */}
-      {rankTab !== 'compare' && (
+      {(rankTab === 'rankings' || rankTab === 'waiver') && (
       <section className="space-y-3">
 
         <div className="flex gap-1">
@@ -1213,7 +1277,24 @@ export default function StartSit() {
         {/* ── Rankings ── */}
         {rankTab === 'rankings' && (
           <>
-            {availableGames.length > 0 && (
+            <div className="flex gap-1 bg-white/4 rounded-xl p-1 w-fit">
+              {[{ v: 'weekly', label: weekLabel ?? 'Weekly' }, { v: 'ros', label: 'Rest of Season' }].map(opt => (
+                <button
+                  key={opt.v}
+                  onClick={() => setRankMode(opt.v)}
+                  className={cn(
+                    'px-3 py-1 text-[11px] font-semibold rounded-lg transition-all',
+                    rankMode === opt.v
+                      ? 'bg-primary/20 text-primary border border-primary/30'
+                      : 'text-muted-foreground hover:text-foreground border border-transparent',
+                  )}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+
+            {rankMode === 'weekly' && availableGames.length > 0 && (
               <div className="space-y-2">
                 <div
                   className="flex gap-1.5 overflow-x-auto pb-1"
@@ -1304,6 +1385,36 @@ export default function StartSit() {
               </div>
             )}
 
+            {rankMode === 'ros' ? (
+              <div className="space-y-2">
+                {!outlook ? (
+                  outlookFailed ? (
+                    <div className="text-center text-muted-foreground text-sm py-12 rounded-2xl border border-dashed border-white/10">
+                      Couldn’t load season data from the LockLab server — try again shortly.
+                    </div>
+                  ) : (
+                    Array.from({ length: 6 }).map((_, i) => (
+                      <div key={i} className="rounded-2xl border border-white/6 bg-[hsl(222,47%,9%)] p-4 h-24 animate-pulse" />
+                    ))
+                  )
+                ) : (
+                  <>
+                    <p className="text-[11px] text-muted-foreground">
+                      Weeks {outlook.week}–18 · projections adjusted for this season’s points allowed by position, usage trend and injuries.
+                      Data through week {outlook.last_completed_week}. Tap a player for their schedule.
+                    </p>
+                    {filteredRos.map(entry => (
+                      <RosCard key={entry.player.id} entry={entry} onOpen={() => setScheduleEntry(entry)} />
+                    ))}
+                    {filteredRos.length === 0 && (
+                      <div className="text-center text-muted-foreground text-sm py-12">
+                        {myTeamOnly ? 'No one on your roster at this position' : 'No rest-of-season projections for this position'}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            ) : (<>
             <div className="flex gap-4 text-xs text-muted-foreground">
               <span>
                 <span className="text-primary font-medium">
@@ -1359,6 +1470,7 @@ export default function StartSit() {
                 )}
               </div>
             )}
+            </>)}
           </>
         )}
 
@@ -1426,6 +1538,8 @@ export default function StartSit() {
           settings={settings}
         />
       )}
+
+      <ScheduleChartModal entry={scheduleEntry} onClose={() => setScheduleEntry(null)} />
 
       {showLeague && (
         <LeagueConnectModal

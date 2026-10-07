@@ -1684,6 +1684,11 @@ ESPN_STAT_IDS = {
 }
 ESPN_SLOT_TE         = "6"
 ESPN_SLOT_SUPERFLEX  = "7"
+# ESPN lineup slot ids → Sleeper-style slot names (what the frontend lineup solver uses)
+ESPN_SLOT_NAMES = {
+    0: "QB", 2: "RB", 3: "WRRB_FLEX", 4: "WR", 5: "REC_FLEX", 6: "TE",
+    7: "SUPER_FLEX", 16: "DEF", 17: "K", 20: "BN", 21: "IR", 23: "FLEX",
+}
 
 
 @app.post("/api/espn/league")
@@ -1705,7 +1710,7 @@ async def espn_league(request: Request):
         async with httpx.AsyncClient(timeout=12, cookies=cookies) as client:
             r = await client.get(
                 ESPN_LEAGUE_URL.format(season=season, league_id=league_id),
-                params=[("view", "mTeam"), ("view", "mRoster"), ("view", "mSettings")],
+                params=[("view", "mTeam"), ("view", "mRoster"), ("view", "mSettings"), ("view", "mMatchupScore")],
             )
     except Exception:
         return {"ok": False, "error": "Couldn't reach ESPN. Try again in a minute."}
@@ -1749,6 +1754,7 @@ async def espn_league(request: Request):
                 "name":     p.get("fullName", ""),
                 "position": pos,
                 "team":     ESPN_PRO_TEAMS.get(p.get("proTeamId"), ""),
+                "slot":     ESPN_SLOT_NAMES.get(e.get("lineupSlotId"), "BN"),
             })
         teams.append({
             "id":      str(t.get("id")),
@@ -1765,5 +1771,196 @@ async def espn_league(request: Request):
         "scoring":    scoring,
         "tePremium":  te_premium,
         "superflex":  int(slot_counts.get(ESPN_SLOT_SUPERFLEX, 0)) > 0,
+        # Starting slots only, expanded by count, e.g. ["QB","RB","RB","WR","WR","TE","FLEX","DEF","K"]
+        "slots": [
+            ESPN_SLOT_NAMES[int(sid)]
+            for sid, n in sorted(slot_counts.items(), key=lambda kv: int(kv[0]))
+            if int(sid) in ESPN_SLOT_NAMES and ESPN_SLOT_NAMES[int(sid)] not in ("BN", "IR")
+            for _ in range(int(n))
+        ],
+        "current_week": (data.get("status") or {}).get("currentMatchupPeriod") or data.get("scoringPeriodId"),
+        "schedule": [
+            {"week": m.get("matchupPeriodId"),
+             "home": str((m.get("home") or {}).get("teamId")),
+             "away": str((m.get("away") or {}).get("teamId")) if m.get("away") else None}
+            for m in data.get("schedule", []) if m.get("matchupPeriodId")
+        ],
         "teams":      teams,
     }
+
+
+# ── Fantasy season outlook (D/ST, rest-of-season, strength of schedule) ──────
+# One cached bundle the Start/Sit page needs but that's too heavy to build on a
+# phone (14+ weeks of league-wide projections). Built from Sleeper's stats and
+# projections endpoints, which — unlike /v1/stats — carry team + opponent per row:
+#   schedule   team → week → opponent (past weeks from results, future from projections)
+#   fpa        fantasy points each defense allows per game to each position, this season
+#              ("DEF" = points the opposing *offense* gives up to fantasy defenses)
+#   dst        per-game defense/offense profile for D/ST: sacks, takeaways, points
+#   ros        per-player projections for every remaining week (ppr / half / std)
+#   returning  players who missed recent games and are projected to play again
+
+OUTLOOK_TTL        = 6 * 3600
+OUTLOOK_POSITIONS  = ["QB", "RB", "WR", "TE", "K", "DEF"]
+OUTLOOK_LAST_WEEK  = 18
+
+_outlook: dict | None = None
+_outlook_loading      = False
+_outlook_loaded_at    = 0.0
+
+
+def _sleeper_json(url: str, timeout: int = 40):
+    import urllib.request
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode())
+
+
+def _sleeper_week(kind: str, season: int, week: int):
+    pos = "&".join(f"position%5B%5D={p}" for p in OUTLOOK_POSITIONS)
+    url = f"https://api.sleeper.com/{kind}/nfl/{season}/{week}?season_type=regular&{pos}"
+    try:
+        return _sleeper_json(url) or []
+    except Exception as exc:
+        print(f"[outlook] {kind} week {week} failed: {exc}")
+        return []
+
+
+def _fp(stats: dict) -> tuple[float, float, float]:
+    ppr = float(stats.get("pts_ppr") or 0)
+    return (ppr,
+            float(stats.get("pts_half_ppr") if stats.get("pts_half_ppr") is not None else ppr),
+            float(stats.get("pts_std") if stats.get("pts_std") is not None else ppr))
+
+
+def _build_outlook():
+    global _outlook, _outlook_loading, _outlook_loaded_at
+    _outlook_loading = True
+    try:
+        state  = _sleeper_json("https://api.sleeper.app/v1/state/nfl", timeout=15)
+        season = int(state.get("season") or time.gmtime().tm_year)
+        week   = max(1, int(state.get("week") or 1))
+        last_done = week - 1  # weeks whose games are complete
+
+        schedule: dict[str, dict[int, str]] = {}
+        # (defending team, position) → {week: [ppr, half, std]} summed across that week's players
+        allowed: dict[tuple, dict[int, list]] = {}
+        dst_games: dict[str, list] = {}       # defense team → per-game dicts
+        off_games: dict[str, list] = {}       # offense team → per-game dicts (what DEFs did vs them)
+        played_weeks: dict[str, set] = {}
+        team_weeks: dict[str, set] = {}
+
+        for w in range(1, last_done + 1):
+            for row in _sleeper_week("stats", season, w):
+                team, opp, stats = row.get("team"), row.get("opponent"), row.get("stats") or {}
+                pos = (row.get("player") or {}).get("position")
+                if not team or not opp or pos not in OUTLOOK_POSITIONS:
+                    continue
+                schedule.setdefault(team, {})[w] = opp
+                schedule.setdefault(opp, {})[w] = team
+                team_weeks.setdefault(team, set()).add(w)
+                if pos == "DEF":
+                    g = {
+                        "sacks":     float(stats.get("sack") or 0),
+                        "takeaways": float(stats.get("int") or 0) + float(stats.get("fum_rec") or 0),
+                        "pts":       float(stats.get("pts_allow") or 0),
+                        "fp":        _fp(stats),
+                    }
+                    dst_games.setdefault(team, []).append(g)
+                    off_games.setdefault(opp, []).append(g)
+                    continue
+                if not stats.get("gp"):
+                    continue
+                played_weeks.setdefault(row.get("player_id"), set()).add(w)
+                bucket = allowed.setdefault((opp, pos), {}).setdefault(w, [0.0, 0.0, 0.0])
+                for i, v in enumerate(_fp(stats)):
+                    bucket[i] += v
+
+        ros: dict[str, list] = {}
+        this_week_proj: dict[str, float] = {}
+        for w in range(week, OUTLOOK_LAST_WEEK + 1):
+            for row in _sleeper_week("projections", season, w):
+                team, opp, pid = row.get("team"), row.get("opponent"), row.get("player_id")
+                if team and opp:
+                    schedule.setdefault(team, {})[w] = opp
+                    schedule.setdefault(opp, {})[w] = team
+                ppr, half, std = _fp(row.get("stats") or {})
+                if not pid or (ppr <= 0 and half <= 0 and std <= 0):
+                    continue
+                ros.setdefault(pid, []).append([w, round(ppr, 2), round(half, 2), round(std, 2)])
+                if w == week:
+                    this_week_proj[pid] = ppr
+
+        def per_game(weekly: dict[int, list]) -> dict:
+            n = len(weekly)
+            if not n:
+                return {"ppr": 0, "half": 0, "std": 0, "games": 0}
+            tot = [sum(v[i] for v in weekly.values()) for i in range(3)]
+            return {"ppr": round(tot[0] / n, 2), "half": round(tot[1] / n, 2), "std": round(tot[2] / n, 2), "games": n}
+
+        fpa: dict[str, dict] = {p: {} for p in OUTLOOK_POSITIONS}
+        for (team, pos), weekly in allowed.items():
+            fpa[pos][team] = per_game(weekly)
+        for team, games in off_games.items():
+            fpa["DEF"][team] = per_game({i: list(g["fp"]) for i, g in enumerate(games)})
+
+        def avg(games: list, key: str) -> float:
+            return round(sum(g[key] for g in games) / len(games), 2) if games else 0.0
+
+        dst = {}
+        for team in set(dst_games) | set(off_games):
+            d, o = dst_games.get(team, []), off_games.get(team, [])
+            dst[team] = {
+                "def": {"sacks": avg(d, "sacks"), "takeaways": avg(d, "takeaways"), "pts_allowed": avg(d, "pts"), "games": len(d)},
+                "off": {"sacks_allowed": avg(o, "sacks"), "giveaways": avg(o, "takeaways"), "pts_scored": avg(o, "pts"), "games": len(o)},
+            }
+
+        league_avg = {}
+        for pos, teams in fpa.items():
+            vals = [t for t in teams.values() if t["games"]]
+            league_avg[pos] = {k: round(sum(t[k] for t in vals) / len(vals), 2) if vals else 0 for k in ("ppr", "half", "std")}
+
+        # Returning: played earlier, sat out the last completed week while their team
+        # played, and Sleeper projects them for real points this week.
+        returning = {}
+        if last_done >= 2:
+            for pid, weeks in played_weeks.items():
+                if this_week_proj.get(pid, 0) < 3 or last_done in weeks:
+                    continue
+                missed = 0
+                for w in range(last_done, 0, -1):
+                    if w in weeks:
+                        break
+                    missed += 1
+                if 0 < missed < last_done:
+                    returning[pid] = missed
+
+        _outlook = {
+            "loaded": True,
+            "season": season,
+            "week": week,
+            "last_completed_week": last_done,
+            "data_as_of": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "schedule": {t: {str(w): o for w, o in sorted(ws.items())} for t, ws in schedule.items()},
+            "fpa": fpa,
+            "league_avg": league_avg,
+            "dst": dst,
+            "ros": ros,
+            "returning": returning,
+        }
+        _outlook_loaded_at = time.time()
+        print(f"[outlook] season {season} wk {week}: {len(ros)} ROS players, {len(schedule)} teams, {len(returning)} returning")
+    except Exception as exc:
+        print(f"[outlook] build failed: {exc}")
+    finally:
+        _outlook_loading = False
+
+
+@app.get("/api/fantasy/outlook")
+async def fantasy_outlook():
+    stale = time.time() - _outlook_loaded_at > OUTLOOK_TTL
+    if (_outlook is None or stale) and not _outlook_loading:
+        threading.Thread(target=_build_outlook, daemon=True).start()
+    if _outlook is None:
+        return {"loaded": False, "loading": True}
+    return _outlook

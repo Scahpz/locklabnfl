@@ -20,6 +20,8 @@ import { useSeasonStats } from '@/lib/nflSeasonStats';
 import { savePredictionSnapshot, getSnapshot } from '@/lib/predictionLog';
 import PropDetailModal from '@/components/props/PropDetailModal';
 import PageTabs, { useTabParam } from '@/components/common/PageTabs';
+import { loadInjuryIndexByName, injuryForName, isOutType } from '@/lib/injuries';
+import { fetchLivePlayers } from '@/lib/nflLiveData';
 import AIPicksPanel from '@/pages/AIPicks';
 import { useParlay } from '@/lib/ParlayContext';
 
@@ -105,6 +107,16 @@ export default function Props() {
     }
   }, [liveSeasonStats]);
   const [rawProps, setRawProps] = useState([]);
+  // Sleeper injury statuses by player name (Underdog props don't include them).
+  // Comes from the Start/Sit live cache; warmed in the background if missing.
+  const [injuryIndex, setInjuryIndex] = useState(() => loadInjuryIndexByName());
+  useEffect(() => {
+    if (Object.keys(injuryIndex).length || isDemoMode()) return;
+    const t = setTimeout(() => {
+      fetchLivePlayers().then(() => setInjuryIndex(loadInjuryIndexByName())).catch(() => {});
+    }, 4000);
+    return () => clearTimeout(t);
+  }, []);
   const [gameDate, setGameDate] = useState(null);
   const [gamesSummary, setGamesSummary] = useState([]);
   const [loading, setLoading] = useState(() => !getCachedProps()); // skip spinner if stale cache exists
@@ -400,6 +412,7 @@ export default function Props() {
     // TD UNDERs are dropped here (after enrichment, so the grade is the real one)
     // unless the UNDER is the underdog side — see isHiddenTdUnder.
     return dropHiddenTdUnders(rawProps.map(prop => {
+      const inj = injuryForName(injuryIndex, prop.player_name);
       // 1. Game log analytics
       // playerAnalytics[name] === undefined  → not yet fetched (show loading)
       // playerAnalytics[name] === null       → fetched, player not found (show "not available")
@@ -521,9 +534,13 @@ export default function Props() {
         epa_per_game:  analytics?.epa_per_game  ?? prop.epa_per_game  ?? null,
         // Weather for this game (keyed by home team)
         weather:      weatherData[prop.home || ''] ?? null,
+        // Own injury status (feeds gradeProp's injury criterion) + why it matters
+        injury_status:  prop.injury_status || inj?.injury_status || null,
+        injury_key:     inj?.injury_key ?? null,
+        injury_reasons: inj?.injury_reasons ?? [],
       };
-    }));
-  }, [rawProps, playerAnalytics, teamContext, weatherData]);
+    }).filter(p => !isOutType(p.injury_key))); // OUT / IR / suspended → prop will be voided
+  }, [rawProps, playerAnalytics, teamContext, weatherData, injuryIndex]);
 
   // Auto-save prediction snapshot for dev accuracy tracking — fires once per (season, week),
   // checked against localStorage rather than an in-session ref. A ref-only guard latches
